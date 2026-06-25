@@ -39,6 +39,16 @@ DEFAULTS = {
 }
 
 
+# 리뷰 길이 선택지 (라벨 → 초). 기본 1분.
+TARGETS = {"1분": 60, "2분": 120, "5분": 300, "10분": 600}
+
+
+def sec2label(sec):
+    for k, v in TARGETS.items():
+        if v == sec: return k
+    return "1분"
+
+
 def load_cfg():
     c = dict(DEFAULTS)
     if CONFIG.exists():
@@ -263,8 +273,9 @@ class App:
         self.wm = ttk.Entry(cfgf, width=11); self.wm.insert(0, self.cfg["whisper_model"]); self.wm.pack(side="left", padx=4)
         ttk.Label(cfgf, text="출력:").pack(side="left")
         self.outd = ttk.Entry(cfgf, width=18); self.outd.insert(0, self.cfg["out_dir"]); self.outd.pack(side="left", padx=4)
-        ttk.Label(cfgf, text="목표길이(초):").pack(side="left")
-        self.tgt = ttk.Entry(cfgf, width=5); self.tgt.insert(0, str(self.cfg.get("target_sec", 60))); self.tgt.pack(side="left", padx=4)
+        ttk.Label(cfgf, text="리뷰 길이:").pack(side="left")
+        self.tgt = ttk.Combobox(cfgf, width=6, state="readonly", values=list(TARGETS.keys()))
+        self.tgt.set(sec2label(self.cfg.get("target_sec", 60))); self.tgt.pack(side="left", padx=4)
 
         nb = ttk.Notebook(root); nb.pack(fill="both", expand=True, padx=8, pady=6)
         # ── 수동 탭 ──
@@ -387,8 +398,7 @@ class App:
             self.player.set_media(self.vlc.media_new(f))
 
     def save_settings(self):
-        try: tsec = int(float(self.tgt.get().strip()))
-        except Exception: tsec = 60
+        tsec = TARGETS.get(self.tgt.get(), 60)
         self.cfg.update({"meta_api": self.api.get().strip(), "llm": self.llm.get(),
                          "whisper_model": self.wm.get().strip(), "out_dir": self.outd.get().strip(),
                          "target_sec": tsec})
