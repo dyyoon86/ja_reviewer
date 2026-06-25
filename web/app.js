@@ -282,6 +282,53 @@ function runTts(){
 }
 $("#btnTts").onclick = runTts;
 
+// ── 자막 입히기(하드섭) + 템플릿 ────────────────────────────────────────────
+function collectStyle(p){
+  return { font:$("#"+p+"Font").value||"Malgun Gothic", size:+$("#"+p+"Size").value||40,
+    bold:$("#"+p+"Bold").checked, color:$("#"+p+"Color").value, outline_color:$("#"+p+"OutColor").value,
+    outline:parseFloat($("#"+p+"Outline").value)||0, v:$("#"+p+"V").value, h:$("#"+p+"H").value,
+    margin:+$("#"+p+"Margin").value||0 };
+}
+function applyStyle(p, st){
+  if(!st) return;
+  $("#"+p+"Font").value=st.font||"Malgun Gothic";
+  $("#"+p+"Size").value=st.size!=null?st.size:40;
+  $("#"+p+"Bold").checked=!!st.bold;
+  $("#"+p+"Color").value=(st.color||"#FFFFFF").toLowerCase();
+  $("#"+p+"OutColor").value=(st.outline_color||"#000000").toLowerCase();
+  $("#"+p+"Outline").value=st.outline!=null?st.outline:2.2;
+  $("#"+p+"V").value=st.v||"bottom";
+  $("#"+p+"H").value=st.h||"center";
+  $("#"+p+"Margin").value=st.margin!=null?st.margin:40;
+}
+let SUBTPL={};
+function loadSubTemplates(pick){
+  fetch("/sub/templates").then(r=>r.json()).then(d=>{
+    SUBTPL=d||{}; const s=$("#subTpl"); s.innerHTML="";
+    Object.keys(SUBTPL).forEach(n=>{const o=document.createElement("option");o.value=n;o.textContent=n;s.appendChild(o);});
+    const first=pick||Object.keys(SUBTPL)[0];
+    if(first){ s.value=first; const t=SUBTPL[first]; applyStyle("dlg",t.dialogue); applyStyle("nar",t.narration); }
+  }).catch(()=>{});
+}
+$("#subTpl").onchange=()=>{ const t=SUBTPL[$("#subTpl").value]; if(t){applyStyle("dlg",t.dialogue);applyStyle("nar",t.narration);} };
+$("#btnTplSave").onclick=()=>{
+  const name=$("#subTplName").value.trim(); if(!name){ log("템플릿 이름을 입력하세요","warn"); return; }
+  fetch("/sub/templates",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    name, styles:{dialogue:collectStyle("dlg"), narration:collectStyle("nar")}
+  })}).then(r=>r.json()).then(()=>{ $("#subTplName").value=""; loadSubTemplates(name); log("✔ 템플릿 저장: "+name,"ok"); });
+};
+$("#btnBurn").onclick=()=>{
+  const code=curCode(); if(!code){ log("품번을 입력하세요","warn"); return; }
+  log("── 자막 입히기 시작 ──");
+  fetch("/burn",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    code, styles:{dialogue:collectStyle("dlg"), narration:collectStyle("nar")}
+  })}).then(r=>r.json()).then(j=>runJob(j.job,(r)=>{
+    $("#resultCard").style.display="block";
+    $("#result").innerHTML=`<div class="ok">✔ 자막 입힌 영상</div><div>${r.subbed}</div>`;
+    log("✔ 자막 영상 완료","ok");
+  }));
+};
+
 // 초기 설정 로드 (양 탭 동기화)
 fetch("/config").then(r=>r.json()).then(c=>{
   if(c.llm){ $("#llm").value=c.llm; $("#llmA").value=c.llm; }
@@ -289,3 +336,4 @@ fetch("/config").then(r=>r.json()).then(c=>{
   if(c.whisper_model){ $("#whisper").value=c.whisper_model; $("#whisperA").value=c.whisper_model; }
   if(c.tts_base){ $("#ttsBase").value=c.tts_base; }
 }).catch(()=>{});
+loadSubTemplates();

@@ -29,10 +29,23 @@ from . import pipeline as P
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 CFG_PATH = ROOT / "studio_config.json"
+SUB_TEMPLATES = {
+    "기본 · 대사 하단 / 내레이션 상단(노랑)": P.STYLE_DEFAULT,
+    "심플 · 대사·내레이션 모두 하단 흰색": {
+        "dialogue": {**P.STYLE_DEFAULT["dialogue"]},
+        "narration": {**P.STYLE_DEFAULT["narration"], "color": "#FFFFFF", "v": "bottom", "margin": 110},
+    },
+    "예능 · 큰 노랑 내레이션": {
+        "dialogue": {**P.STYLE_DEFAULT["dialogue"], "size": 40},
+        "narration": {**P.STYLE_DEFAULT["narration"], "size": 48, "color": "#FFE600"},
+    },
+}
+
 DEFAULTS = {"meta_api": "http://172.30.1.40:8770", "llm": "claude",
             "whisper_model": "large-v3", "out_dir": str(Path.home() / "ja_reviewer_out"),
             "target_sec": 60,
-            "tts_base": "http://127.0.0.1:17493", "tts_profile": "", "tts_language": "ko"}
+            "tts_base": "http://127.0.0.1:17493", "tts_profile": "", "tts_language": "ko",
+            "sub_styles": P.STYLE_DEFAULT, "sub_templates": SUB_TEMPLATES}
 
 app = FastAPI(title="ja_reviewer")
 JOBS = {}  # job_id -> {"q": Queue, "result": ..., "error": ...}
@@ -393,6 +406,59 @@ async def tts(req: Request):
                 else:
                     jlog(jid, f"※ {final} 없음 → 믹스 생략(내레이션 WAV만 생성)")
             jdone(jid, out)
+        except Exception as e:
+            jerr(jid, e)
+    run_bg(work)
+    return {"job": jid}
+
+
+# ─── ⑥ 자막 굽기 (하드섭) + 템플릿 ──────────────────────────────────────────
+@app.get("/sub/templates")
+def sub_templates():
+    c = load_cfg()
+    return c.get("sub_templates") or SUB_TEMPLATES
+
+
+@app.post("/sub/templates")
+async def sub_templates_save(req: Request):
+    body = await req.json(); c = load_cfg()
+    name = (body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "템플릿 이름이 필요합니다.")
+    tpls = c.get("sub_templates") or dict(SUB_TEMPLATES)
+    tpls[name] = body.get("styles") or {}
+    c["sub_templates"] = tpls; save_cfg(c)
+    return {"ok": True, "templates": tpls}
+
+
+@app.post("/burn")
+async def burn(req: Request):
+    body = await req.json(); c = load_cfg()
+    code = body["code"]
+    styles = body.get("styles") or c.get("sub_styles") or P.STYLE_DEFAULT
+    jid = new_job()
+
+    def work():
+        try:
+            outdir = Path(c["out_dir"])
+            voiced = outdir / f"{code}_final_voiced.mp4"
+            final = outdir / f"{code}_final.mp4"
+            if body.get("source"):
+                src = Path(body["source"])
+            elif voiced.is_file():
+                src = voiced            # 음성 입힌 영상 우선
+            elif final.is_file():
+                src = final
+            else:
+                raise RuntimeError(f"원본 영상이 없습니다: {final} (먼저 리뷰 생성)")
+            dsrt = outdir / f"{code}_대사.srt"
+            nsrt = outdir / f"{code}_내레이션.srt"
+            out = str(outdir / f"{code}_final_subbed.mp4")
+            jstep(jid, 1, 1, "자막 굽기(ffmpeg)")
+            P.burn_subs(str(src), str(dsrt), str(nsrt), out, styles, lambda m: jlog(jid, m))
+            jfile(jid, "자막 입힌 영상", out)
+            c["sub_styles"] = styles; save_cfg(c)   # 마지막 사용 스타일 기억
+            jdone(jid, {"mode": "burn", "subbed": out, "source": str(src)})
         except Exception as e:
             jerr(jid, e)
     run_bg(work)

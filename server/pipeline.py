@@ -413,3 +413,89 @@ def mux_narration(video, narration_wav, out_video, narration_gain=1.0, orig_gain
                     "-c:v", "copy", "-c:a", "aac", str(out_video)], check=True)
     log(f"내레이션 입힌 영상: {out_video}")
     return out_video
+
+
+# ─── ⑥ 자막 굽기 (하드섭, ASS — 폰트/크기/위치/색상 설정 + 템플릿) ───────────
+def video_wh(path):
+    try:
+        out = subprocess.check_output(["ffprobe", "-v", "error", "-select_streams", "v:0",
+                                       "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", str(path)])
+        w, h = out.decode().strip().split("x")
+        return int(w), int(h)
+    except Exception:
+        return 1920, 1080
+
+
+def _ass_color(hexstr, alpha="00"):
+    h = str(hexstr or "").lstrip("#")
+    if len(h) != 6:
+        return f"&H{alpha}FFFFFF"
+    r, g, b = h[0:2], h[2:4], h[4:6]
+    return f"&H{alpha}{b}{g}{r}".upper()
+
+
+def _ass_time(t):
+    t = max(0.0, t); h = int(t // 3600); m = int(t % 3600 // 60); s = int(t % 60); cs = int(round((t - int(t)) * 100))
+    if cs >= 100:
+        s += 1; cs = 0
+    return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
+
+
+_ALIGN = {("bottom", "left"): 1, ("bottom", "center"): 2, ("bottom", "right"): 3,
+          ("middle", "left"): 4, ("middle", "center"): 5, ("middle", "right"): 6,
+          ("top", "left"): 7, ("top", "center"): 8, ("top", "right"): 9}
+
+# 기본 스타일 (대사=하단 흰색, 내레이션=상단 노랑)
+STYLE_DEFAULT = {
+    "dialogue":  {"font": "Malgun Gothic", "size": 42, "color": "#FFFFFF", "outline_color": "#000000",
+                  "outline": 2.2, "shadow": 0.4, "bold": True, "v": "bottom", "h": "center", "margin": 46},
+    "narration": {"font": "Malgun Gothic", "size": 38, "color": "#FFD400", "outline_color": "#000000",
+                  "outline": 2.2, "shadow": 0.4, "bold": True, "v": "top", "h": "center", "margin": 40},
+}
+
+
+def _style_line(name, st):
+    st = {**STYLE_DEFAULT["dialogue"], **(st or {})}
+    align = _ALIGN.get((st.get("v", "bottom"), st.get("h", "center")), 2)
+    return (f"Style: {name},{st.get('font','Malgun Gothic')},{int(st.get('size',40))},"
+            f"{_ass_color(st.get('color','#FFFFFF'))},&H000000FF,"
+            f"{_ass_color(st.get('outline_color','#000000'))},&H64000000,"
+            f"{-1 if st.get('bold') else 0},0,0,0,100,100,0,0,1,"
+            f"{st.get('outline',2)},{st.get('shadow',0)},{align},40,40,{int(st.get('margin',40))},1")
+
+
+def build_ass(dialogue, narration, out_ass, width, height, styles=None):
+    styles = styles or STYLE_DEFAULT
+    L = ["[Script Info]", "ScriptType: v4.00+", f"PlayResX: {width}", f"PlayResY: {height}",
+         "WrapStyle: 2", "ScaledBorderAndShadow: yes", "",
+         "[V4+ Styles]",
+         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
+         "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
+         "Alignment, MarginL, MarginR, MarginV, Encoding",
+         _style_line("Dialogue", styles.get("dialogue")),
+         _style_line("Narration", styles.get("narration")),
+         "", "[Events]",
+         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"]
+    evs = [(s, e, "Dialogue", t) for s, e, t in dialogue] + [(s, e, "Narration", t) for s, e, t in narration]
+    evs.sort(key=lambda x: x[0])
+    for s, e, style, t in evs:
+        txt = str(t).replace("\n", "\\N")
+        L.append(f"Dialogue: 0,{_ass_time(s)},{_ass_time(e)},{style},,0,0,0,,{txt}")
+    Path(out_ass).write_text("\n".join(L) + "\n", encoding="utf-8")
+    return out_ass
+
+
+def burn_subs(video, dialogue_srt, narration_srt, out_video, styles=None, log=print):
+    w, h = video_wh(video)
+    dlg = srt_parse(dialogue_srt) if dialogue_srt and Path(dialogue_srt).is_file() else []
+    nar = srt_parse(narration_srt) if narration_srt and Path(narration_srt).is_file() else []
+    if not dlg and not nar:
+        raise RuntimeError("입힐 자막(SRT)이 없습니다.")
+    ass_path = Path(out_video).with_suffix(".ass")
+    build_ass(dlg, nar, str(ass_path), w, h, styles)
+    log(f"자막 굽기 (ffmpeg ass, {w}x{h}, 대사 {len(dlg)} · 내레이션 {len(nar)})...")
+    # libass 필터는 파일명만(작업폴더 cwd로) → 윈도우 드라이브 콜론 이스케이프 회피
+    subprocess.run(["ffmpeg", "-y", "-i", str(video), "-vf", f"ass={ass_path.name}",
+                    "-c:a", "copy", str(out_video)], cwd=str(ass_path.parent), check=True)
+    log(f"자막 영상: {out_video}")
+    return out_video
