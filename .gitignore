@@ -3,7 +3,6 @@ __pycache__/
 .venv/
 venv/
 studio_config.json
-ddalddalgi_out/
 ja_reviewer_out/
 *.srt
 *.mp4

@@ -1,7 +1,6 @@
 # ja_reviewer — 딸딸기튜브 신작 해설영상 자동화
 
-> **방향 전환 중**: GUI를 Tkinter → 웹 프론트로 이전. Phase 1 = FastAPI + 로컬 웹 UI, Phase 2 = Tauri 래핑.
-> 상세: [docs/architecture.md](docs/architecture.md). 기존 Tkinter 버전(`ddalddalgi_studio.py`)은 백업으로 유지.
+> **GUI = 웹 프론트**(FastAPI + 로컬 웹 UI). Phase 2에서 Tauri 래핑 예정. 상세: [docs/architecture.md](docs/architecture.md).
 
 일본 신작 AV를 받아 **스토리 구간만 잘라내고, 한국어 대사 자막 + 해설 내레이션**을 자동 생성하는 툴킷.
 (3분휴지 스타일 리뷰 + 자막 인터리브 영상용)
@@ -10,9 +9,10 @@
 
 | 파일 | 실행 위치 | 역할 |
 |------|-----------|------|
-| `ddalddalgi_studio.py` | **윈도우 PC** (영상 있는 곳) | GUI. 영상→Whisper(일SRT)→메타조회→LLM 스토리분석→ffmpeg 컷 + 대사/내레이션 SRT |
+| `server/app.py` + `web/` | **윈도우 PC** (영상 있는 곳) | 웹 GUI/백엔드. 영상→Whisper→메타조회→LLM→ffmpeg 컷 + 대사/내레이션 SRT |
+| `server/pipeline.py` | 윈도우 PC | UI 무관 파이프라인 로직(전사·메타·LLM 프롬프트·컷·재타이밍) |
 | `meta_api.py` | **우분투** (DB 있는 곳) | LAN 메타 API. `GET /work/<품번>` → 작품 정보 JSON. `python meta_api.py --port 8770` |
-| `gen_narration.py` | 우분투 | (CLI) 품번→DB 메타 조회 + 내레이션 생성. studio가 참조하는 메타 로직 |
+| `gen_narration.py` | 우분투 | 품번→DB 메타 조회 로직(`meta_api`가 사용) |
 
 ## 두 가지 모드
 
@@ -63,16 +63,6 @@ python -m server.app                               # → http://127.0.0.1:8000 �
 - **자동 (AI 분석)**: 자동 분석 → 결과 확인/수정 → 확정 렌더
 - 진행상황은 로그창에 실시간(SSE). 출력: `<품번>_final.mp4` + `_대사.srt` + `_내레이션.srt`
 - mkv/avi는 브라우저 미리보기 제약 → mp4 권장. 메타는 LAN `meta_api`로 조회.
-
-## (백업) Tkinter 버전 실행
-
-```
-pip install faster-whisper
-# ffmpeg 설치 후 PATH 등록
-# LLM: codex 또는 claude CLI 로그인
-python ddalddalgi_studio.py
-```
-- 메타API 주소 기본값 `http://172.30.1.40:8770` (같은 LAN의 우분투)
 
 ## 메모
 

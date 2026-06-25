@@ -233,13 +233,14 @@ async def review(req: Request):
     body = await req.json(); c = load_cfg()
     path = body["path"]; code = body["code"]
     target = int(body.get("target_sec", c["target_sec"])); llm = body.get("llm", c["llm"])
+    model = body.get("model", c["whisper_model"])
     jid = new_job()
 
     def work():
         try:
             outdir = Path(c["out_dir"]); outdir.mkdir(parents=True, exist_ok=True)
-            jlog(jid, "① 전사…")
-            segs = P.transcribe(path, c["whisper_model"], lambda m: jlog(jid, m))
+            jlog(jid, f"① 전사(faster-whisper {model})…")
+            segs = P.transcribe(path, model, lambda m: jlog(jid, m))
             jlog(jid, "② 메타…")
             m = P.fetch_meta(c["meta_api"], code, lambda x: jlog(jid, x))
             jlog(jid, "③ LLM 압축/번역/내레이션…")

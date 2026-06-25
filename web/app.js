@@ -155,7 +155,7 @@ $("#btnReview").onclick = () => {
   log("── ② 리뷰 생성 시작 ──");
   fetch("/review",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
     path:videoPath, code:$("#code").value.trim(),
-    target_sec:+$("#target").value, llm:$("#llm").value
+    target_sec:+$("#target").value, llm:$("#llm").value, model:$("#whisper").value
   })}).then(r=>r.json()).then(j=>runJob(j.job, showResult));
 };
 
@@ -166,7 +166,7 @@ $("#btnAnalyze").onclick = () => {
   log("── 자동 분석 시작 ──");
   fetch("/analyze",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
     path:videoPath, code:$("#codeA").value.trim(),
-    target_sec:+$("#targetA").value, llm:$("#llmA").value
+    target_sec:+$("#targetA").value, llm:$("#llmA").value, model:$("#whisperA").value
   })}).then(r=>r.json()).then(j=>runJob(j.job, (res)=>{
     $("#autoJson").value = JSON.stringify(res.result, null, 2);
     $("#btnRender").disabled = false;
@@ -198,4 +198,5 @@ function showResult(r){
 fetch("/config").then(r=>r.json()).then(c=>{
   if(c.llm){ $("#llm").value=c.llm; $("#llmA").value=c.llm; }
   if(c.target_sec){ $("#target").value=c.target_sec; $("#targetA").value=c.target_sec; }
+  if(c.whisper_model){ $("#whisper").value=c.whisper_model; $("#whisperA").value=c.whisper_model; }
 }).catch(()=>{});
