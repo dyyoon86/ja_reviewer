@@ -194,6 +194,20 @@ function showResult(r){
   log("✔ 출력 완료","ok");
 }
 
+// ── 품번 DB(메타 API) 연결/조회 확인 ────────────────────────────────────────
+function checkMeta(code){
+  code=(code||"").trim();
+  if(!code){ log("품번을 입력하세요","warn"); return; }
+  log(`품번 ${code} DB 조회 중…`);
+  fetch("/meta/"+encodeURIComponent(code)).then(async r=>{
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok){ log("✖ 메타 조회 실패: "+(j.detail||("HTTP "+r.status))+" — meta_api 연결/품번 확인","warn"); return; }
+    log(`✅ DB 연결 OK — ${j.actress||'?'} / ${j.label||'?'} / ${j.meas||''}${j.title?(' / '+j.title):''}`,"ok");
+  }).catch(e=>log("✖ 연결 오류: "+e+" (meta_api 주소/네트워크 확인)","warn"));
+}
+$("#btnMeta").onclick=()=>checkMeta($("#code").value);
+$("#btnMetaA").onclick=()=>checkMeta($("#codeA").value);
+
 // ── TTS (voicebox) ──────────────────────────────────────────────────────────
 function curCode(){ return ($("#code").value || $("#codeA").value || "").trim(); }
 
