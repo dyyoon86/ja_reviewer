@@ -255,7 +255,8 @@ $("#btnTtsTest").onclick = () => {
   log("── 테스트 음성 생성 ──");
   fetch("/tts/test",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
     text:$("#ttsTestText").value, profile:$("#ttsProfile").value,
-    tts_base:$("#ttsBase").value.trim()||undefined
+    tts_base:$("#ttsBase").value.trim()||undefined,
+    seed:$("#ttsSeed").value!==""?+$("#ttsSeed").value:undefined
   })}).then(r=>r.json()).then(j=>runJob(j.job, (r)=>{
     const a=$("#ttsAudio");
     a.src="/video/stream?path="+encodeURIComponent(r.wav)+"&t="+Date.now();
@@ -271,7 +272,7 @@ function runTts(){
   log("── 내레이션 음성 생성 시작 ──");
   fetch("/tts",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
     code, profile:$("#ttsProfile").value, tts_base:$("#ttsBase").value.trim()||undefined,
-    mux:$("#ttsMux").checked
+    seed:$("#ttsSeed").value!==""?+$("#ttsSeed").value:undefined, mux:$("#ttsMux").checked
   })}).then(r=>r.json()).then(j=>runJob(j.job, (r)=>{
     $("#resultCard").style.display="block";
     $("#result").innerHTML = `<div class="ok">✔ 내레이션 음성 ${r.count}개 합성</div>`+

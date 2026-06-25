@@ -344,6 +344,7 @@ async def tts_test(req: Request):
     profile = body.get("profile") or c["tts_profile"]
     language = body.get("language", c["tts_language"])
     text = (body.get("text") or "").strip() or "안녕하세요, 딸딸기튜브입니다. 음성 테스트입니다."
+    seed = body.get("seed")
     if not profile:
         raise HTTPException(400, "voicebox 보이스(profile)를 선택하세요.")
     jid = new_job()
@@ -352,8 +353,8 @@ async def tts_test(req: Request):
         try:
             outdir = Path(c["out_dir"]); outdir.mkdir(parents=True, exist_ok=True)
             wav = str(outdir / "_tts_test.wav")
-            jlog(jid, f"테스트 음성 생성(voicebox {base}): {text[:30]}…")
-            P.tts_generate(base, text, profile, language, wav, lambda m: jlog(jid, m))
+            jlog(jid, f"테스트 음성 생성(voicebox {base}{', seed '+str(seed) if seed not in (None,'') else ''}): {text[:30]}…")
+            P.tts_generate(base, text, profile, language, wav, seed, lambda m: jlog(jid, m))
             jdone(jid, {"mode": "tts_test", "wav": wav})
         except Exception as e:
             jerr(jid, e)
@@ -368,6 +369,7 @@ async def tts(req: Request):
     base = body.get("tts_base", c["tts_base"])
     profile = body.get("profile") or c["tts_profile"]
     language = body.get("language", c["tts_language"])
+    seed = body.get("seed")
     mux = bool(body.get("mux", False))
     if not profile:
         raise HTTPException(400, "voicebox 보이스(profile)를 선택하세요.")
@@ -388,7 +390,7 @@ async def tts(req: Request):
             for i, (st, en, text) in enumerate(entries, 1):
                 jstep(jid, i, total, f"음성 {i}/{len(entries)}: {text[:18]}")
                 w = str(clipdir / f"n{i:03d}.wav")
-                P.tts_generate(base, text, profile, language, w, lambda m: jlog(jid, m))
+                P.tts_generate(base, text, profile, language, w, seed, lambda m: jlog(jid, m))
                 clips.append((st, w))
             wav = str(outdir / f"{code}_내레이션.wav")
             jstep(jid, len(entries) + 1, total, "내레이션 트랙 합성")

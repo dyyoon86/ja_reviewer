@@ -353,10 +353,17 @@ def tts_profiles(base):
         return json.loads(r.read().decode("utf-8"))
 
 
-def tts_generate(base, text, profile_id, language, out_wav, log=print):
-    """voicebox /generate 호출 → out_wav(WAV) 저장. 응답이 오디오바이트/JSON(path|url|base64) 모두 대응."""
+def tts_generate(base, text, profile_id, language, out_wav, seed=None, log=print):
+    """voicebox /generate 호출 → out_wav(WAV) 저장. 응답이 오디오바이트/JSON(path|url|base64) 모두 대응.
+    seed 지정 시 재현 가능(같은 seed=같은 음색/억양). voicebox가 seed 필드를 받으면 적용됨."""
     url = base.rstrip("/") + "/generate"
-    body = json.dumps({"text": text, "profile_id": profile_id, "language": language}).encode("utf-8")
+    payload = {"text": text, "profile_id": profile_id, "language": language}
+    if seed is not None and str(seed) != "":
+        try:
+            payload["seed"] = int(seed)
+        except Exception:
+            pass
+    body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=180) as r:
         ctype = (r.headers.get_content_type() or "").lower()
