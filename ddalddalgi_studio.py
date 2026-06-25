@@ -19,10 +19,12 @@
 import os
 import re
 import json
+import sys
 import queue
 import threading
 import subprocess
 import tempfile
+import webbrowser
 import urllib.request
 from pathlib import Path
 
@@ -289,6 +291,7 @@ class App:
         ttk.Button(pc, text="▶/⏸ (Space)", command=self.toggle_play).pack(side="left")
         self.seek = ttk.Scale(pc, from_=0, to=1000, command=self.on_seek); self.seek.pack(side="left", fill="x", expand=True, padx=6)
         self.tpos = ttk.Label(pc, text="00:00:00 / 00:00:00"); self.tpos.pack(side="left")
+        ttk.Button(pc, text="플레이어 설치", command=self.install_player).pack(side="left", padx=4)
         mk = ttk.Frame(manual); mk.pack(fill="x", pady=2)
         ttk.Button(mk, text="구간 시작 [ (I)", command=self.mark_start).pack(side="left")
         ttk.Button(mk, text="구간 끝 ] (O)", command=self.mark_end).pack(side="left", padx=4)
@@ -326,9 +329,39 @@ class App:
             self.logln("플레이어(VLC) 준비됨.  단축키: Space=재생/정지, [ 또는 I=제외시작, ] 또는 O=제외끝, ←/→=5초")
         except Exception as e:
             self.player = None
-            self.vlc_warn.config(text="⚠ VLC 미인식 → 영상 재생/마킹 불가. 아래 '텍스트'로 구간 입력하세요.  "
-                                      "해결: ① VLC(64bit) 설치  ② pip install python-vlc  ③ 파이썬/VLC 비트수 일치(둘 다 64bit)")
+            self.vlc_warn.config(text="⚠ 영상 플레이어(VLC) 미설치 → 아래 [플레이어 설치] 버튼을 누르세요. "
+                                      "(설치 후 앱 재시작)  설치 전까진 텍스트로 구간 입력 가능.")
             self.logln(f"※ VLC 로드 실패: {e}")
+
+    def install_player(self):
+        if self.player:
+            return messagebox.showinfo("", "플레이어가 이미 정상 동작합니다.")
+        if os.name != "nt":
+            return messagebox.showinfo("", "자동 설치는 윈도우 전용입니다. (Linux: sudo apt install vlc)")
+        if not messagebox.askyesno("플레이어 설치",
+                                    "python-vlc + VLC(64bit)를 자동 설치합니다.\n1~3분 걸리고 중간에 권한(UAC) 창이 뜨면 '예'를 누르세요.\n진행할까요?"):
+            return
+        threading.Thread(target=self._install_player, daemon=True).start()
+
+    def _install_player(self):
+        try:
+            self.logln("① python-vlc 설치 중...")
+            subprocess.run([sys.executable, "-m", "pip", "install", "-U", "python-vlc"],
+                           capture_output=True, text=True)
+            self.logln("② VLC(64bit) 설치 중 — winget... UAC 뜨면 '예'.")
+            r = subprocess.run(["winget", "install", "-e", "--id", "VideoLAN.VLC",
+                                "--accept-source-agreements", "--accept-package-agreements"],
+                               capture_output=True, text=True)
+            self.logln((r.stdout or r.stderr or "")[-400:])
+            if r.returncode not in (0, -1978335189):  # 0=설치, 그 외 이미설치 등
+                self.logln("winget 미작동 → VLC 다운로드 페이지를 엽니다.")
+                webbrowser.open("https://www.videolan.org/vlc/")
+            self.q.put(("done", "설치 완료(또는 진행됨). 앱을 껐다 켜면 영상 재생/마킹이 됩니다."))
+        except FileNotFoundError:
+            webbrowser.open("https://www.videolan.org/vlc/")
+            self.q.put(("err", "winget이 없어 VLC 다운로드 페이지를 열었습니다. 설치 후 앱을 재시작하세요."))
+        except Exception as e:
+            self.q.put(("err", f"설치 실패: {e}\n수동: pip install python-vlc + videolan.org에서 VLC 설치"))
 
     def _attach_video(self):
         if not self.player: return
