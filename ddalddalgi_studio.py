@@ -155,22 +155,40 @@ def build_prompt(meta, segs):
 
 
 # ─── ④ 컷 + 재타이밍 ─────────────────────────────────────────────────────────
-def retime(entries, keep):
-    """원본 시간 entries[(s,e,text)] → 컷(keep 구간 이어붙임) 새 타임라인."""
+def retime(entries, keep, snap=False, default_dur=4.0):
+    """원본 시간 entries[(s,e,text)] → 컷(keep 구간 이어붙임) 새 타임라인.
+    keep 밖 항목: snap=False(대사)면 버림, snap=True(내레이션)면 컷 경계로 당김
+    (영상 맨앞 인트로 → 0초, 스킵된 섹스장면 자리 브릿지 내레이션 → 그 컷 이음새)."""
     keep = sorted(keep)
-    # 각 keep 구간의 새 시작오프셋
     offs, acc = [], 0.0
     for a, b in keep:
         offs.append(acc); acc += (b - a)
+    total = acc
     out = []
     for s, e, t in entries:
+        placed = False
         for (a, b), off in zip(keep, offs):
             if s >= a - 0.05 and s < b + 0.05:
                 ns = off + max(0.0, s - a)
                 ne = off + min(b - a, e - a)
-                if ne > ns:
-                    out.append((ns, ne, t))
+                if ne <= ns:
+                    ne = ns + 0.5
+                out.append((ns, ne, t)); placed = True
                 break
+        if placed or not snap:
+            continue
+        # keep 밖 + snap → 컷 경계로 스냅
+        if s < keep[0][0]:
+            ns = 0.0
+        else:
+            ns = total
+            for (a, b), off in zip(keep, offs):
+                if s < a:
+                    ns = off; break
+        ne = min(total, ns + (e - s if e > s else default_dur))
+        if ne <= ns:
+            ne = min(total, ns + default_dur)
+        out.append((ns, ne, t))
     out.sort(key=lambda x: x[0])
     return out
 
@@ -302,8 +320,8 @@ class App:
             cut_video(self.video, keep, cut_path, self.logln)
             dlg = [(float(d["start"]), float(d["end"]), d["ko"]) for d in res.get("dialogue", [])]
             nar = [(float(d["start"]), float(d["end"]), d["text"]) for d in res.get("narration", [])]
-            write_srt(retime(dlg, keep), outdir / f"{code}_대사.srt")
-            write_srt(retime(nar, keep), outdir / f"{code}_내레이션.srt")
+            write_srt(retime(dlg, keep, snap=False), outdir / f"{code}_대사.srt")
+            write_srt(retime(nar, keep, snap=True), outdir / f"{code}_내레이션.srt")
             self.logln(f"④ 완료 → {outdir}")
             self.q.put(("done", f"출력 완료\n{cut_path}\n{code}_대사.srt\n{code}_내레이션.srt"))
         except Exception as e:
