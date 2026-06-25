@@ -119,8 +119,8 @@ document.querySelectorAll(".tabs .t").forEach(tab=>{
 });
 
 // ── 잡 실행 + SSE ─────────────────────────────────────────────────────────
-function need(){ if(!videoPath){ log("영상을 먼저 여세요","warn"); return false; }
-  if(!$("#code").value.trim()){ log("품번을 입력하세요","warn"); return false; } return true; }
+function needVideo(){ if(!videoPath){ log("영상을 먼저 여세요","warn"); return false; } return true; }
+function needCode(){ if(!$("#code").value.trim()){ log("품번을 입력하세요","warn"); return false; } return true; }
 
 function runJob(job, onDone){
   const es = new EventSource(`/events/${job}`);
@@ -132,18 +132,33 @@ function runJob(job, onDone){
   };
 }
 
-$("#btnCut").onclick = () => {
-  if(!need()) return;
+// ① 잘라내기 — 품번 불필요
+$("#btnTrim").onclick = () => {
+  if(!needVideo()) return;
   if(!excludes.length){ log("삭제할 구간을 하나 이상 추가하세요","warn"); return; }
-  log("── 수동 컷 시작 ──");
-  fetch("/cut",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    path:videoPath, code:$("#code").value.trim(), excludes,
+  log("── ① 잘라내기 시작 ──");
+  fetch("/trim",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    path:videoPath, excludes
+  })}).then(r=>r.json()).then(j=>runJob(j.job, (res)=>{
+    videoPath = res.video; duration = res.duration || 0;
+    vid.src = `/video/stream?path=${encodeURIComponent(res.video)}`;
+    excludes = []; pendingIn = null; renderEx();
+    log(`✔ 잘라낸 영상 로드: ${res.video} (${hhmmss(duration)}). 품번 넣고 ②를 누르세요.`,"ok");
+  }));
+};
+
+// ② 리뷰 생성 — 품번 필요
+$("#btnReview").onclick = () => {
+  if(!needVideo() || !needCode()) return;
+  log("── ② 리뷰 생성 시작 ──");
+  fetch("/review",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    path:videoPath, code:$("#code").value.trim(),
     target_sec:+$("#target").value, llm:$("#llm").value
   })}).then(r=>r.json()).then(j=>runJob(j.job, showResult));
 };
 
 $("#btnAnalyze").onclick = () => {
-  if(!need()) return;
+  if(!needVideo() || !needCode()) return;
   log("── 자동 분석 시작 ──");
   fetch("/analyze",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
     path:videoPath, code:$("#code").value.trim(),
@@ -156,7 +171,7 @@ $("#btnAnalyze").onclick = () => {
 };
 
 $("#btnRender").onclick = () => {
-  if(!need()) return;
+  if(!needVideo() || !needCode()) return;
   let res; try{ res=JSON.parse($("#autoJson").value); }catch(e){ log("JSON 오류: "+e,"warn"); return; }
   log("── 확정 렌더 ──");
   fetch("/render",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({

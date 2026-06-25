@@ -57,9 +57,14 @@
         <ul class="ex" id="exList"></ul>
         <div class="row">
           <button id="btnClear">전체삭제</button>
-          <button class="primary" id="btnCut" style="margin-left:auto">● 편집 실행 (선택 구간 삭제)</button>
+          <button class="primary" id="btnTrim" style="margin-left:auto">① 선택 구간 잘라내기</button>
         </div>
-        <div class="muted" style="margin-top:6px">선택 구간 삭제 → 남은 영상 전사 → AI가 핵심만 골라 길이만큼 압축 → 자막·내레이션.</div>
+        <div class="muted" style="margin-top:6px">마킹 구간을 빼고 영상을 만들어 플레이어에 다시 로드합니다. <b>품번 불필요.</b></div>
+        <hr style="border-color:var(--line);margin:12px 0">
+        <div class="row">
+          <button class="go" id="btnReview" style="margin-left:auto">② 리뷰 생성 (전사 + AI 압축 + 자막)</button>
+        </div>
+        <div class="muted" style="margin-top:6px">현재 영상으로 품번 메타 조회 → AI가 핵심만 골라 길이만큼 압축 → 자막·내레이션. <b>품번 필요.</b></div>
       </div>
 
       <!-- 자동 -->

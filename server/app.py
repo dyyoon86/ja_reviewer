@@ -200,41 +200,60 @@ async def analyze(req: Request):
     return {"job": jid}
 
 
-# ─── 수동 컷 (정사 제거→전사→LLM 압축→2단 컷+SRT) ──────────────────────────
-@app.post("/cut")
-async def cut(req: Request):
+# ─── ① 잘라내기 (품번 불필요) — 선택 구간 삭제 후 트림 영상 생성 ─────────────
+@app.post("/trim")
+async def trim(req: Request):
     body = await req.json(); c = load_cfg()
-    path = body["path"]; code = body["code"]
+    path = body["path"]
     excludes = [(float(a), float(b)) for a, b in body.get("excludes", [])]
-    target = int(body.get("target_sec", c["target_sec"])); llm = body.get("llm", c["llm"])
+    if not excludes:
+        raise HTTPException(400, "삭제할 구간이 없습니다.")
     jid = new_job()
 
     def work():
         try:
             outdir = Path(c["out_dir"]); outdir.mkdir(parents=True, exist_ok=True)
             total = P.video_duration(path)
-            keep1 = P.keep_from_exclude(total, excludes)
-            if not keep1:
+            keep = P.keep_from_exclude(total, excludes)
+            if not keep:
                 raise RuntimeError("남는 구간이 없습니다.")
-            story = str(outdir / f"{code}_story.mp4")
-            jlog(jid, "① 선택 구간 삭제 컷…")
-            P.cut_video(path, keep1, story, lambda m: jlog(jid, m))
-            jlog(jid, "② 전사…")
-            segs = P.transcribe(story, c["whisper_model"], lambda m: jlog(jid, m))
-            jlog(jid, "③ 메타…")
+            out = str(outdir / (Path(path).stem + "_trim.mp4"))
+            jlog(jid, "선택 구간 삭제 컷…")
+            P.cut_video(path, keep, out, lambda m: jlog(jid, m))
+            jdone(jid, {"mode": "trim", "video": out, "duration": P.video_duration(out)})
+        except Exception as e:
+            jerr(jid, e)
+    run_bg(work)
+    return {"job": jid}
+
+
+# ─── ② 리뷰 생성 (품번 필요) — 현재 영상 전사→메타→LLM 압축→컷+SRT ──────────
+@app.post("/review")
+async def review(req: Request):
+    body = await req.json(); c = load_cfg()
+    path = body["path"]; code = body["code"]
+    target = int(body.get("target_sec", c["target_sec"])); llm = body.get("llm", c["llm"])
+    jid = new_job()
+
+    def work():
+        try:
+            outdir = Path(c["out_dir"]); outdir.mkdir(parents=True, exist_ok=True)
+            jlog(jid, "① 전사…")
+            segs = P.transcribe(path, c["whisper_model"], lambda m: jlog(jid, m))
+            jlog(jid, "② 메타…")
             m = P.fetch_meta(c["meta_api"], code, lambda x: jlog(jid, x))
-            jlog(jid, "④ LLM 압축/번역/내레이션…")
+            jlog(jid, "③ LLM 압축/번역/내레이션…")
             res = P.call_llm(P.prompt_manual(m, segs, target), llm, lambda x: jlog(jid, x))
-            keep2 = [(float(a), float(b)) for a, b in res.get("keep", [])]
-            if not keep2:
+            keep = [(float(a), float(b)) for a, b in res.get("keep", [])]
+            if not keep:
                 raise RuntimeError("LLM이 keep 구간을 못 골랐습니다.")
             final = str(outdir / f"{code}_final.mp4")
-            jlog(jid, "⑤ 핵심 구간 재컷…")
-            P.cut_video(story, keep2, final, lambda m: jlog(jid, m))
+            jlog(jid, "④ 핵심 구간 컷…")
+            P.cut_video(path, keep, final, lambda m: jlog(jid, m))
             dlg = [(float(d["start"]), float(d["end"]), d["ko"]) for d in res.get("dialogue", [])]
             nar = [(float(d["start"]), float(d["end"]), d["text"]) for d in res.get("narration", [])]
-            P.write_srt(P.retime(dlg, keep2, snap=False), outdir / f"{code}_대사.srt")
-            P.write_srt(P.retime(nar, keep2, snap=True), outdir / f"{code}_내레이션.srt")
+            P.write_srt(P.retime(dlg, keep, snap=False), outdir / f"{code}_대사.srt")
+            P.write_srt(P.retime(nar, keep, snap=True), outdir / f"{code}_내레이션.srt")
             jdone(jid, {"mode": "manual", "final": final,
                         "srt_dialogue": str(outdir / f"{code}_대사.srt"),
                         "srt_narration": str(outdir / f"{code}_내레이션.srt"),
