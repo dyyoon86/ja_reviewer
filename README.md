@@ -1,5 +1,8 @@
 # ja_reviewer — 딸딸기튜브 신작 해설영상 자동화
 
+> **방향 전환 중**: GUI를 Tkinter → 웹 프론트로 이전. Phase 1 = FastAPI + 로컬 웹 UI, Phase 2 = Tauri 래핑.
+> 상세: [docs/architecture.md](docs/architecture.md). 기존 Tkinter 버전(`ddalddalgi_studio.py`)은 백업으로 유지.
+
 일본 신작 AV를 받아 **스토리 구간만 잘라내고, 한국어 대사 자막 + 해설 내레이션**을 자동 생성하는 툴킷.
 (3분휴지 스타일 리뷰 + 자막 인터리브 영상용)
 
