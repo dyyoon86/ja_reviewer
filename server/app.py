@@ -31,7 +31,8 @@ WEB = ROOT / "web"
 CFG_PATH = ROOT / "studio_config.json"
 DEFAULTS = {"meta_api": "http://172.30.1.40:8770", "llm": "claude",
             "whisper_model": "large-v3", "out_dir": str(Path.home() / "ja_reviewer_out"),
-            "target_sec": 60}
+            "target_sec": 60,
+            "tts_base": "http://127.0.0.1:17493", "tts_profile": "", "tts_language": "ko"}
 
 app = FastAPI(title="ja_reviewer")
 JOBS = {}  # job_id -> {"q": Queue, "result": ..., "error": ...}
@@ -290,6 +291,64 @@ async def render(req: Request):
                         "srt_dialogue": str(outdir / f"{code}_대사.srt"),
                         "srt_narration": str(outdir / f"{code}_내레이션.srt"),
                         "final_sec": P.video_duration(final)})
+        except Exception as e:
+            jerr(jid, e)
+    run_bg(work)
+    return {"job": jid}
+
+
+# ─── ⑤ TTS (voicebox) — 한국어 내레이션 음성 ────────────────────────────────
+@app.get("/tts/profiles")
+def tts_profiles():
+    c = load_cfg()
+    try:
+        return {"base": c["tts_base"], "profiles": P.tts_profiles(c["tts_base"])}
+    except Exception as e:
+        raise HTTPException(502, f"voicebox 연결 실패({c['tts_base']}): {e}")
+
+
+@app.post("/tts")
+async def tts(req: Request):
+    body = await req.json(); c = load_cfg()
+    code = body["code"]
+    base = body.get("tts_base", c["tts_base"])
+    profile = body.get("profile") or c["tts_profile"]
+    language = body.get("language", c["tts_language"])
+    mux = bool(body.get("mux", False))
+    if not profile:
+        raise HTTPException(400, "voicebox 보이스(profile)를 선택하세요.")
+    jid = new_job()
+
+    def work():
+        try:
+            outdir = Path(c["out_dir"])
+            srt = outdir / f"{code}_내레이션.srt"
+            if not srt.is_file():
+                raise RuntimeError(f"내레이션 SRT 없음: {srt} (먼저 리뷰 생성)")
+            entries = P.srt_parse(srt)
+            if not entries:
+                raise RuntimeError("내레이션 항목이 없습니다.")
+            clipdir = outdir / f"{code}_tts"; clipdir.mkdir(parents=True, exist_ok=True)
+            clips = []
+            for i, (st, en, text) in enumerate(entries, 1):
+                jlog(jid, f"  TTS {i}/{len(entries)}: {text[:24]}…")
+                w = str(clipdir / f"n{i:03d}.wav")
+                P.tts_generate(base, text, profile, language, w, lambda m: jlog(jid, m))
+                clips.append((st, w))
+            wav = str(outdir / f"{code}_내레이션.wav")
+            jlog(jid, "내레이션 트랙 합성…")
+            P.build_narration_wav(clips, wav, lambda m: jlog(jid, m))
+            out = {"mode": "tts", "narration_wav": wav, "count": len(clips)}
+            if mux:
+                final = outdir / f"{code}_final.mp4"
+                if final.is_file():
+                    voiced = str(outdir / f"{code}_final_voiced.mp4")
+                    jlog(jid, "영상에 내레이션 입히기(원음 음소거)…")
+                    P.mux_narration(str(final), wav, voiced, log=lambda m: jlog(jid, m))
+                    out["voiced"] = voiced
+                else:
+                    jlog(jid, f"※ {final} 없음 → 믹스 생략(내레이션 WAV만 생성)")
+            jdone(jid, out)
         except Exception as e:
             jerr(jid, e)
     run_bg(work)

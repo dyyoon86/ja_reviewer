@@ -104,6 +104,24 @@
       </div>
     </div>
 
+    <div class="card">
+      <b>③ 내레이션 음성 (voicebox TTS)</b>
+      <div class="muted" style="margin:4px 0 8px">리뷰 생성 후, <code>품번_내레이션.srt</code>를 한국어 음성으로 합성 → <code>품번_내레이션.wav</code>. (Qwen3-TTS 한국어 보이스 권장)</div>
+      <div class="row" style="margin-bottom:6px">
+        <span style="width:46px">주소</span>
+        <input id="ttsBase" style="flex:1" placeholder="http://127.0.0.1:17493">
+        <button id="btnProfiles">보이스 목록</button>
+      </div>
+      <div class="row" style="margin-bottom:6px">
+        <span style="width:46px">보이스</span>
+        <select id="ttsProfile" style="flex:1"><option value="">(목록 불러오기)</option></select>
+      </div>
+      <div class="row">
+        <label class="muted"><input type="checkbox" id="ttsMux"> 영상에 입히기(원음 음소거 → _final_voiced.mp4)</label>
+        <button class="go" id="btnTts" style="margin-left:auto">● 내레이션 음성 생성</button>
+      </div>
+    </div>
+
     <div class="card" id="resultCard" style="display:none">
       <b>결과</b>
       <div id="result" class="muted" style="margin-top:6px"></div>

@@ -194,9 +194,47 @@ function showResult(r){
   log("✔ 출력 완료","ok");
 }
 
+// ── TTS (voicebox) ──────────────────────────────────────────────────────────
+function curCode(){ return ($("#code").value || $("#codeA").value || "").trim(); }
+
+$("#btnProfiles").onclick = () => {
+  log("voicebox 보이스 목록 불러오는 중…");
+  fetch("/tts/profiles").then(r=>r.json()).then(d=>{
+    if(d.detail){ log("✖ "+d.detail,"warn"); return; }
+    const sel=$("#ttsProfile"); sel.innerHTML="";
+    const list = Array.isArray(d.profiles) ? d.profiles : (d.profiles.profiles||d.profiles.items||[]);
+    if(!list || !list.length){ log("보이스가 없습니다. voicebox에서 한국어(Qwen3-TTS) 보이스를 먼저 만드세요.","warn"); return; }
+    list.forEach(p=>{
+      const id = p.id || p.profile_id || p.name || p;
+      const nm = p.name || p.title || id;
+      const lang = p.language || p.lang || "";
+      const o=document.createElement("option"); o.value=id; o.textContent=nm+(lang?` [${lang}]`:""); sel.appendChild(o);
+    });
+    log(`보이스 ${list.length}개 로드 ✅ (한국어 보이스 선택)`,"ok");
+  }).catch(e=>log("✖ voicebox 연결 실패: "+e+" — voicebox 실행/주소 확인","warn"));
+};
+
+$("#btnTts").onclick = () => {
+  const code=curCode();
+  if(!code){ log("품번을 입력하세요(내레이션 SRT 찾기용)","warn"); return; }
+  if(!$("#ttsProfile").value){ log("보이스를 선택하세요(보이스 목록 → 한국어)","warn"); return; }
+  log("── 내레이션 음성 생성 시작 ──");
+  fetch("/tts",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    code, profile:$("#ttsProfile").value, tts_base:$("#ttsBase").value.trim()||undefined,
+    mux:$("#ttsMux").checked
+  })}).then(r=>r.json()).then(j=>runJob(j.job, (r)=>{
+    $("#resultCard").style.display="block";
+    $("#result").innerHTML = `<div class="ok">✔ 내레이션 음성 ${r.count}개 합성</div>`+
+      (r.narration_wav?`<div>WAV: ${r.narration_wav}</div>`:'')+
+      (r.voiced?`<div>입힌 영상: ${r.voiced}</div>`:'');
+    log("✔ 내레이션 음성 완료","ok");
+  }));
+};
+
 // 초기 설정 로드 (양 탭 동기화)
 fetch("/config").then(r=>r.json()).then(c=>{
   if(c.llm){ $("#llm").value=c.llm; $("#llmA").value=c.llm; }
   if(c.target_sec){ $("#target").value=c.target_sec; $("#targetA").value=c.target_sec; }
   if(c.whisper_model){ $("#whisper").value=c.whisper_model; $("#whisperA").value=c.whisper_model; }
+  if(c.tts_base){ $("#ttsBase").value=c.tts_base; }
 }).catch(()=>{});

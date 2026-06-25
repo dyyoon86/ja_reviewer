@@ -239,3 +239,99 @@ def cut_video(video, keep, out_path, log=print):
     subprocess.run(["ffmpeg", "-y", "-i", str(video), "-filter_complex", fc, "-map", "[v]", "-map", "[a]",
                     "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac", str(out_path)], check=True)
     log(f"컷 완료: {out_path}")
+
+
+# ─── ⑤ TTS (voicebox REST) — 한국어 내레이션 음성 ───────────────────────────
+# voicebox(jamiepine/voicebox) 로컬 REST API(기본 127.0.0.1:17493)
+#   POST /generate {text, profile_id, language}  GET /profiles
+# 한국어는 Qwen3-TTS 엔진 + 한국어 보이스 profile 사용.
+import base64 as _b64
+
+def srt_parse(path):
+    """SRT → [(start_sec, end_sec, text)]"""
+    out = []
+    blocks = re.split(r"\n\s*\n", Path(path).read_text(encoding="utf-8").strip())
+    for b in blocks:
+        lines = [x for x in b.splitlines() if x.strip()]
+        if len(lines) < 2:
+            continue
+        ti = next((i for i, l in enumerate(lines) if "-->" in l), None)
+        if ti is None:
+            continue
+        a, _, c = lines[ti].partition("-->")
+
+        def _s(t):
+            t = t.strip().replace(",", ".")
+            h, m, s = t.split(":")
+            return int(h) * 3600 + int(m) * 60 + float(s)
+        text = " ".join(lines[ti + 1:]).strip()
+        if text:
+            out.append((_s(a), _s(c), text))
+    return out
+
+
+def tts_profiles(base):
+    with urllib.request.urlopen(base.rstrip("/") + "/profiles", timeout=15) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def tts_generate(base, text, profile_id, language, out_wav, log=print):
+    """voicebox /generate 호출 → out_wav(WAV) 저장. 응답이 오디오바이트/JSON(path|url|base64) 모두 대응."""
+    url = base.rstrip("/") + "/generate"
+    body = json.dumps({"text": text, "profile_id": profile_id, "language": language}).encode("utf-8")
+    req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=180) as r:
+        ctype = (r.headers.get_content_type() or "").lower()
+        data = r.read()
+    tmp = out_wav + ".src"
+    is_temp = True  # tmp이 우리가 만든 임시파일이면 True (voicebox가 준 기존 파일이면 False → 삭제 금지)
+    if ctype.startswith("audio/") or ctype == "application/octet-stream":
+        Path(tmp).write_bytes(data)
+    else:
+        j = json.loads(data.decode("utf-8"))
+        b64 = j.get("audio_base64") or j.get("audio") or j.get("data")
+        path = j.get("path") or j.get("file") or j.get("output")
+        url2 = j.get("url")
+        if b64:
+            Path(tmp).write_bytes(_b64.b64decode(b64))
+        elif path and Path(path).is_file():
+            tmp = path; is_temp = False
+        elif url2:
+            with urllib.request.urlopen(url2, timeout=120) as r2:
+                Path(tmp).write_bytes(r2.read())
+        else:
+            raise RuntimeError(f"voicebox 응답에서 오디오를 못 찾음: keys={list(j.keys())}")
+    # 표준 WAV(48k stereo)로 정규화
+    subprocess.run(["ffmpeg", "-y", "-i", tmp, "-ar", "48000", "-ac", "2", out_wav],
+                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if is_temp:
+        try: Path(tmp).unlink()
+        except Exception: pass
+    return out_wav
+
+
+def build_narration_wav(clips, out_wav, log=print):
+    """clips=[(start_sec, wav_path)] → 각 클립을 시작시간에 배치(A안: 자연길이, 겹치면 믹스)한 단일 WAV."""
+    if not clips:
+        raise RuntimeError("내레이션 클립이 없습니다.")
+    inputs, filt = [], []
+    for i, (st, p) in enumerate(clips):
+        inputs += ["-i", str(p)]
+        ms = int(max(0.0, st) * 1000)
+        filt.append(f"[{i}:a]adelay={ms}|{ms}[a{i}];")
+    mix = "".join(f"[a{i}]" for i in range(len(clips))) + f"amix=inputs={len(clips)}:normalize=0[a]"
+    subprocess.run(["ffmpeg", "-y", *inputs, "-filter_complex", "".join(filt) + mix,
+                    "-map", "[a]", str(out_wav)], check=True)
+    log(f"내레이션 WAV 합성 완료: {out_wav}")
+    return out_wav
+
+
+def mux_narration(video, narration_wav, out_video, narration_gain=1.0, orig_gain=0.0, log=print):
+    """영상에 내레이션 WAV를 입힌다. orig_gain=0 이면 원음 음소거(내레이션만)."""
+    fc = (f"[0:a]volume={orig_gain}[oa];[1:a]volume={narration_gain}[na];"
+          f"[oa][na]amix=inputs=2:duration=first:normalize=0[a]")
+    subprocess.run(["ffmpeg", "-y", "-i", str(video), "-i", str(narration_wav),
+                    "-filter_complex", fc, "-map", "0:v", "-map", "[a]",
+                    "-c:v", "copy", "-c:a", "aac", str(out_video)], check=True)
+    log(f"내레이션 입힌 영상: {out_video}")
+    return out_video
