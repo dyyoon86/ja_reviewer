@@ -65,28 +65,60 @@ def ranges_from_text(text):
     return sorted(out)
 
 
+# 끊기 좋은 한국어 어말(절/구/문장 경계) — 이 패턴으로 끝나는 단어 '뒤'에서 우선 분할
+_BREAK_SUFFIX = (
+    # 연결어미(절 경계)
+    "는데", "은데", "지만", "다만", "으며", "면서", "으면", "니까", "으니까",
+    "거나", "든지", "어서", "아서", "여서", "해서", "고서", "다가", "도록", "려고", "으려고",
+    "면", "고", "며", "서", "자", "듯",
+    # 종결어미(문장 경계)
+    "습니다", "입니다", "니다", "어요", "에요", "예요", "아요", "이죠", "죠", "요",
+    "다", "까", "네", "군", "라", "지", "랍니다", "거든요",
+    # 조사(구 경계)
+    "에서", "에게", "한테", "으로", "라고", "라는", "처럼", "만큼", "까지", "부터", "보다",
+    "은", "는", "이", "가", "을", "를", "에", "의", "와", "과", "로", "도", "만",
+)
+_BREAK_PUNCT = set("，,。.!?…)]」』”’~·:;")
+
+
+def _good_break(word):
+    """이 단어 뒤에서 끊으면 문법적으로 자연스러운가."""
+    if not word:
+        return False
+    if word[-1] in _BREAK_PUNCT:
+        return True
+    return any(word.endswith(s) for s in _BREAK_SUFFIX)
+
+
 def _wrap_chunks(text, maxlen=24):
-    """텍스트를 maxlen 이하 덩어리로 (단어/공백 기준 그리디, 긴 단어는 강제 분할)."""
+    """텍스트를 maxlen 이하로 — 절/구 경계(연결어미·조사·문장부호)에서 우선 끊는다."""
     text = " ".join(str(text).split())
     if len(text) <= maxlen:
         return [text] if text else [""]
-    norm = []
+    words = []
     for w in text.split(" "):
         while len(w) > maxlen:
-            norm.append(w[:maxlen]); w = w[maxlen:]
+            words.append(w[:maxlen]); w = w[maxlen:]
         if w:
-            norm.append(w)
-    chunks, cur = [], ""
-    for w in norm:
-        cand = w if not cur else cur + " " + w
-        if len(cand) <= maxlen:
+            words.append(w)
+    chunks = []
+    i, n = 0, len(words)
+    while i < n:
+        cur = ""; j = i; lastgood = -1; lastgood_len = 0
+        while j < n:
+            cand = words[j] if not cur else cur + " " + words[j]
+            if len(cand) > maxlen:
+                break
             cur = cand
-        else:
-            if cur:
-                chunks.append(cur)
-            cur = w
-    if cur:
-        chunks.append(cur)
+            if _good_break(words[j]):
+                lastgood = j; lastgood_len = len(cur)
+            j += 1
+        if j >= n:                         # 마지막 청크
+            chunks.append(cur); break
+        # 절/구 경계가 있고 너무 짧지 않으면 거기서, 아니면 들어간 데까지
+        end = lastgood if (lastgood >= i and lastgood_len >= maxlen * 0.5) else j - 1
+        chunks.append(" ".join(words[i:end + 1]))
+        i = end + 1
     return chunks or [text[:maxlen]]
 
 
