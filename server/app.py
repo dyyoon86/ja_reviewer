@@ -307,6 +307,31 @@ def tts_profiles():
         raise HTTPException(502, f"voicebox 연결 실패({c['tts_base']}): {e}")
 
 
+@app.post("/tts/test")
+async def tts_test(req: Request):
+    """연결+보이스 확인용 단발 합성 → 재생 가능한 wav 경로 반환."""
+    body = await req.json(); c = load_cfg()
+    base = body.get("tts_base") or c["tts_base"]
+    profile = body.get("profile") or c["tts_profile"]
+    language = body.get("language", c["tts_language"])
+    text = (body.get("text") or "").strip() or "안녕하세요, 딸딸기튜브입니다. 음성 테스트입니다."
+    if not profile:
+        raise HTTPException(400, "voicebox 보이스(profile)를 선택하세요.")
+    jid = new_job()
+
+    def work():
+        try:
+            outdir = Path(c["out_dir"]); outdir.mkdir(parents=True, exist_ok=True)
+            wav = str(outdir / "_tts_test.wav")
+            jlog(jid, f"테스트 음성 생성(voicebox {base}): {text[:30]}…")
+            P.tts_generate(base, text, profile, language, wav, lambda m: jlog(jid, m))
+            jdone(jid, {"mode": "tts_test", "wav": wav})
+        except Exception as e:
+            jerr(jid, e)
+    run_bg(work)
+    return {"job": jid}
+
+
 @app.post("/tts")
 async def tts(req: Request):
     body = await req.json(); c = load_cfg()

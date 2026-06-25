@@ -214,6 +214,20 @@ $("#btnProfiles").onclick = () => {
   }).catch(e=>log("✖ voicebox 연결 실패: "+e+" — voicebox 실행/주소 확인","warn"));
 };
 
+$("#btnTtsTest").onclick = () => {
+  if(!$("#ttsProfile").value){ log("보이스를 선택하세요(보이스 목록 → 한국어)","warn"); return; }
+  log("── 테스트 음성 생성 ──");
+  fetch("/tts/test",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    text:$("#ttsTestText").value, profile:$("#ttsProfile").value,
+    tts_base:$("#ttsBase").value.trim()||undefined
+  })}).then(r=>r.json()).then(j=>runJob(j.job, (r)=>{
+    const a=$("#ttsAudio");
+    a.src="/video/stream?path="+encodeURIComponent(r.wav)+"&t="+Date.now();
+    a.style.display="block"; a.play().catch(()=>{});
+    log("✔ 테스트 음성 재생 ▶ (연결·보이스 정상)","ok");
+  }));
+};
+
 $("#btnTts").onclick = () => {
   const code=curCode();
   if(!code){ log("품번을 입력하세요(내레이션 SRT 찾기용)","warn"); return; }

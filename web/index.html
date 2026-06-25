@@ -116,6 +116,12 @@
         <span style="width:46px">보이스</span>
         <select id="ttsProfile" style="flex:1"><option value="">(목록 불러오기)</option></select>
       </div>
+      <div class="row" style="margin-bottom:6px">
+        <span style="width:46px">테스트</span>
+        <input id="ttsTestText" style="flex:1" value="안녕하세요, 딸딸기튜브입니다. 음성 테스트입니다.">
+        <button id="btnTtsTest">테스트 음성 ▶</button>
+      </div>
+      <audio id="ttsAudio" controls style="width:100%;display:none;margin-bottom:6px"></audio>
       <div class="row">
         <label class="muted"><input type="checkbox" id="ttsMux"> 영상에 입히기(원음 음소거 → _final_voiced.mp4)</label>
         <button class="go" id="btnTts" style="margin-left:auto">● 내레이션 음성 생성</button>
