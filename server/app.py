@@ -62,6 +62,14 @@ def jlog(jid, msg):
     JOBS[jid]["q"].put({"type": "log", "msg": str(msg)})
 
 
+def jstep(jid, n, total, label):
+    JOBS[jid]["q"].put({"type": "step", "n": n, "total": total, "label": label})
+
+
+def jfile(jid, tag, path):
+    JOBS[jid]["q"].put({"type": "file", "label": tag, "path": str(path)})
+
+
 def jdone(jid, result):
     JOBS[jid]["result"] = result
     JOBS[jid]["q"].put({"type": "done", "result": result})
@@ -188,11 +196,11 @@ async def analyze(req: Request):
 
     def work():
         try:
-            jlog(jid, "① 전사 시작…")
+            jstep(jid, 1, 3, "전사(faster-whisper)")
             segs = P.transcribe(path, body.get("model", c["whisper_model"]), lambda m: jlog(jid, m))
-            jlog(jid, "② 메타 조회…")
+            jstep(jid, 2, 3, "메타 조회")
             m = P.fetch_meta(c["meta_api"], code, lambda x: jlog(jid, x))
-            jlog(jid, "③ LLM 분석…")
+            jstep(jid, 3, 3, "AI 분석(구간·번역·내레이션)")
             res = P.call_llm(P.prompt_auto(m, segs, target), llm, lambda x: jlog(jid, x))
             jdone(jid, {"mode": "auto", "result": res})
         except Exception as e:
@@ -219,8 +227,9 @@ async def trim(req: Request):
             if not keep:
                 raise RuntimeError("남는 구간이 없습니다.")
             out = str(outdir / (Path(path).stem + "_trim.mp4"))
-            jlog(jid, "선택 구간 삭제 컷…")
+            jstep(jid, 1, 1, "선택 구간 삭제 컷")
             P.cut_video(path, keep, out, lambda m: jlog(jid, m))
+            jfile(jid, "잘라낸 영상", out)
             jdone(jid, {"mode": "trim", "video": out, "duration": P.video_duration(out)})
         except Exception as e:
             jerr(jid, e)
@@ -240,22 +249,25 @@ async def review(req: Request):
     def work():
         try:
             outdir = Path(c["out_dir"]); outdir.mkdir(parents=True, exist_ok=True)
-            jlog(jid, f"① 전사(faster-whisper {model})…")
+            jstep(jid, 1, 4, f"전사(faster-whisper {model})")
             segs = P.transcribe(path, model, lambda m: jlog(jid, m))
-            jlog(jid, "② 메타…")
+            jstep(jid, 2, 4, "메타 조회")
             m = P.fetch_meta(c["meta_api"], code, lambda x: jlog(jid, x))
-            jlog(jid, "③ LLM 압축/번역/내레이션…")
+            jstep(jid, 3, 4, "AI 압축·번역·내레이션")
             res = P.call_llm(P.prompt_manual(m, segs, target), llm, lambda x: jlog(jid, x))
             keep = [(float(a), float(b)) for a, b in res.get("keep", [])]
             if not keep:
                 raise RuntimeError("LLM이 keep 구간을 못 골랐습니다.")
             final = str(outdir / f"{code}_final.mp4")
-            jlog(jid, "④ 핵심 구간 컷…")
+            jstep(jid, 4, 4, "핵심 구간 컷 + 자막")
             P.cut_video(path, keep, final, lambda m: jlog(jid, m))
+            jfile(jid, "최종 영상", final)
             dlg = [(float(d["start"]), float(d["end"]), d["ko"]) for d in res.get("dialogue", [])]
             nar = [(float(d["start"]), float(d["end"]), d["text"]) for d in res.get("narration", [])]
             P.write_srt(P.retime(dlg, keep, snap=False), outdir / f"{code}_대사.srt")
+            jfile(jid, "대사 자막", outdir / f"{code}_대사.srt")
             P.write_srt(P.retime(nar, keep, snap=True), outdir / f"{code}_내레이션.srt")
+            jfile(jid, "내레이션 자막", outdir / f"{code}_내레이션.srt")
             jdone(jid, {"mode": "manual", "final": final,
                         "srt_dialogue": str(outdir / f"{code}_대사.srt"),
                         "srt_narration": str(outdir / f"{code}_내레이션.srt"),
@@ -281,12 +293,16 @@ async def render(req: Request):
             if not keep:
                 raise RuntimeError("keep 구간 없음")
             final = str(outdir / f"{code}_final.mp4")
-            jlog(jid, "컷…")
+            jstep(jid, 1, 2, "핵심 구간 컷")
             P.cut_video(path, keep, final, lambda m: jlog(jid, m))
+            jfile(jid, "최종 영상", final)
+            jstep(jid, 2, 2, "자막 생성")
             dlg = [(float(d["start"]), float(d["end"]), d["ko"]) for d in res.get("dialogue", [])]
             nar = [(float(d["start"]), float(d["end"]), d["text"]) for d in res.get("narration", [])]
             P.write_srt(P.retime(dlg, keep, snap=False), outdir / f"{code}_대사.srt")
+            jfile(jid, "대사 자막", outdir / f"{code}_대사.srt")
             P.write_srt(P.retime(nar, keep, snap=True), outdir / f"{code}_내레이션.srt")
+            jfile(jid, "내레이션 자막", outdir / f"{code}_내레이션.srt")
             jdone(jid, {"mode": "auto", "final": final,
                         "srt_dialogue": str(outdir / f"{code}_대사.srt"),
                         "srt_narration": str(outdir / f"{code}_내레이션.srt"),
@@ -355,21 +371,24 @@ async def tts(req: Request):
                 raise RuntimeError("내레이션 항목이 없습니다.")
             clipdir = outdir / f"{code}_tts"; clipdir.mkdir(parents=True, exist_ok=True)
             clips = []
+            total = len(entries) + 1 + (1 if mux else 0)
             for i, (st, en, text) in enumerate(entries, 1):
-                jlog(jid, f"  TTS {i}/{len(entries)}: {text[:24]}…")
+                jstep(jid, i, total, f"음성 {i}/{len(entries)}: {text[:18]}")
                 w = str(clipdir / f"n{i:03d}.wav")
                 P.tts_generate(base, text, profile, language, w, lambda m: jlog(jid, m))
                 clips.append((st, w))
             wav = str(outdir / f"{code}_내레이션.wav")
-            jlog(jid, "내레이션 트랙 합성…")
+            jstep(jid, len(entries) + 1, total, "내레이션 트랙 합성")
             P.build_narration_wav(clips, wav, lambda m: jlog(jid, m))
+            jfile(jid, "내레이션 음성", wav)
             out = {"mode": "tts", "narration_wav": wav, "count": len(clips)}
             if mux:
                 final = outdir / f"{code}_final.mp4"
                 if final.is_file():
                     voiced = str(outdir / f"{code}_final_voiced.mp4")
-                    jlog(jid, "영상에 내레이션 입히기(원음 음소거)…")
+                    jstep(jid, total, total, "영상에 음성 입히기")
                     P.mux_narration(str(final), wav, voiced, log=lambda m: jlog(jid, m))
+                    jfile(jid, "음성 입힌 영상", voiced)
                     out["voiced"] = voiced
                 else:
                     jlog(jid, f"※ {final} 없음 → 믹스 생략(내레이션 WAV만 생성)")

@@ -124,13 +124,29 @@ document.querySelectorAll(".tabs .t").forEach(tab=>{
 function needVideo(){ if(!videoPath){ log("영상을 먼저 여세요","warn"); return false; } return true; }
 function needCode(){ if(!$("#code").value.trim()){ log("품번을 입력하세요","warn"); return false; } return true; }
 
+// ── 진행 바 / 파일 목록 ──
+function setProg(frac, label, cls){
+  const f=$("#progFill"); f.style.width=Math.round((frac||0)*100)+"%";
+  f.className="prog-fill"+(cls?" "+cls:"");
+  if(label!==undefined) $("#progStep").textContent=label;
+}
+function clearFiles(){ $("#files").innerHTML=""; }
+function addFile(tag, path){
+  const li=document.createElement("li");
+  li.innerHTML=`<span class="tag">✔ ${tag}</span><span class="pth">${path}</span>`;
+  $("#files").appendChild(li);
+}
+
 function runJob(job, onDone){
+  clearFiles(); setProg(0.04, "시작…");
   const es = new EventSource(`/events/${job}`);
   es.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
     if(m.type==="log") log("  "+m.msg);
-    else if(m.type==="error"){ log("✖ 오류: "+m.msg,"warn"); es.close(); }
-    else if(m.type==="done"){ es.close(); onDone(m.result); }
+    else if(m.type==="step"){ const fr=m.total?m.n/m.total:0; setProg(fr, `${m.n}/${m.total} · ${m.label}`); }
+    else if(m.type==="file"){ addFile(m.label, m.path); }
+    else if(m.type==="error"){ log("✖ 오류: "+m.msg,"warn"); setProg(1,"오류","err"); es.close(); }
+    else if(m.type==="done"){ setProg(1,"완료","done"); es.close(); onDone(m.result); }
   };
 }
 

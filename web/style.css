@@ -80,6 +80,16 @@ textarea{width:100%;background:#0b0b0e;color:#d2d2da;border:1px solid var(--line
   border-radius:8px;font-family:Consolas,monospace;font-size:12px;padding:8px;resize:vertical}
 textarea#autoJson{min-height:150px;margin-top:10px}
 textarea.exText{min-height:60px;max-height:130px}
-#log{height:170px;overflow:auto;background:#0b0b0e;border:1px solid var(--line);border-radius:8px;
+/* ── 진행 바 / 파일 목록 ── */
+.prog{height:8px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.prog-fill{height:100%;width:0;background:var(--blue);transition:width .25s ease}
+.prog-fill.done{background:var(--ok)} .prog-fill.err{background:var(--accent)}
+ul.files{list-style:none;margin:10px 0;padding:0;display:flex;flex-direction:column;gap:5px}
+ul.files:empty{display:none}
+ul.files li{display:flex;gap:8px;align-items:center;padding:6px 9px;border:1px solid var(--line);
+  border-radius:7px;background:var(--panel2);font-size:12px}
+ul.files li .tag{color:var(--ok);font-weight:600;white-space:nowrap}
+ul.files li .pth{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left}
+#log{height:150px;overflow:auto;background:#0b0b0e;border:1px solid var(--line);border-radius:8px;
   padding:10px;font-family:Consolas,monospace;font-size:12px;color:#cfcfd8;white-space:pre-wrap;line-height:1.6}
 audio{width:100%;margin:8px 0}
