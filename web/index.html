@@ -10,7 +10,7 @@
 <header>
   <span class="title">🎬 리뷰 편집 스튜디오</span>
   <button id="btnBrowse">영상 선택</button>
-  <input id="path" class="path" placeholder="또는 영상 경로 붙여넣기 (C:\…\video.mp4)">
+  <input id="path" placeholder="또는 영상 경로 붙여넣기 (C:\…\video.mp4)" style="flex:1;min-width:200px">
   <button id="btnOpen">열기</button>
 </header>
 
@@ -22,15 +22,16 @@
       <div class="tl" id="tl"><div class="cur" id="cur"></div></div>
       <div class="ctrls">
         <button id="btnPlay">▶/⏸ <span class="kbd">Space</span></button>
-        <button id="btnIn">구간 시작 <span class="kbd">[</span>/<span class="kbd">I</span></button>
-        <button id="btnOut">구간 끝 <span class="kbd">]</span>/<span class="kbd">O</span></button>
-        <span class="muted"><span class="kbd">←</span>/<span class="kbd">→</span> 5초</span>
+        <button id="btnIn">구간 시작 <span class="kbd">[</span> <span class="kbd">I</span></button>
+        <button id="btnOut">구간 끝 <span class="kbd">]</span> <span class="kbd">O</span></button>
+        <span class="muted"><span class="kbd">←</span> <span class="kbd">→</span> 5초</span>
         <span class="time" id="time">00:00:00 / 00:00:00</span>
       </div>
-      <div class="muted" style="margin-top:6px">마킹한 구간(빨강)을 잘라냅니다. mkv/avi는 브라우저 미리보기가 안 될 수 있어요(mp4 권장).</div>
+      <div class="hint">마킹한 구간(빨강)을 잘라냅니다. mkv/avi는 브라우저 미리보기가 안 될 수 있어요(mp4 권장).</div>
     </div>
 
     <div class="card">
+      <div class="sec" style="margin-bottom:8px">진행 로그</div>
       <div id="log">준비됨. 영상을 선택하세요.</div>
     </div>
   </div>
@@ -43,96 +44,87 @@
         <div class="t" data-pane="auto">자동 (AI 분석)</div>
       </div>
 
-      <!-- 수동 -->
+      <!-- ── 수동 ── -->
       <div class="pane active" id="pane-manual">
-        <div class="row" style="align-items:flex-start">
+        <div class="sec"><span class="num">1</span> 구간 잘라내기 <span class="muted">· 품번 불필요</span></div>
+        <div class="formrow" style="align-items:flex-start;margin-top:10px">
           <textarea id="exText" class="exText" rows="3"
             placeholder="텍스트로 구간 입력 (여러 줄 가능)&#10;12:30-18:00&#10;45:00-52:00" style="flex:1"></textarea>
           <button id="btnAddText">추가</button>
         </div>
         <ul class="ex" id="exList"></ul>
-        <div class="row">
+        <div class="actions">
           <button id="btnClear">전체삭제</button>
-          <button class="primary" id="btnTrim" style="margin-left:auto">① 선택 구간 잘라내기</button>
+          <button class="primary spacer" id="btnTrim">① 선택 구간 잘라내기</button>
         </div>
-        <div class="muted" style="margin-top:6px">마킹 구간을 빼고 영상을 만들어 플레이어에 다시 로드합니다. <b>품번 불필요.</b></div>
-        <hr style="border-color:var(--line);margin:12px 0">
-        <div class="row" style="margin-bottom:8px">
-          <b style="margin-right:4px">리뷰 설정</b>
-          품번 <input id="code" style="width:110px" placeholder="SNOS-183">
+        <div class="hint">마킹 구간을 빼고 영상을 만들어 플레이어에 다시 로드합니다.</div>
+
+        <hr>
+        <div class="sec"><span class="num">2</span> 리뷰 생성 <span class="muted">· 품번 필요</span></div>
+        <div class="formrow" style="margin-top:10px">
+          <span class="fld"><span class="lbl">품번</span><input id="code" placeholder="SNOS-183" style="width:120px"></span>
           <button id="btnMeta">조회</button>
-          LLM <select id="llm"><option>claude</option><option>codex</option></select>
-          길이 <select id="target"><option value="60">1분</option><option value="120">2분</option>
-            <option value="300">5분</option><option value="600">10분</option></select>
+          <span class="fld"><span class="lbl">LLM</span><select id="llm"><option>claude</option><option>codex</option></select></span>
+          <span class="fld"><span class="lbl">길이</span><select id="target"><option value="60">1분</option><option value="120">2분</option><option value="300">5분</option><option value="600">10분</option></select></span>
         </div>
-        <div class="row" style="margin-bottom:8px">
-          전사(Whisper) <select id="whisper">
-            <option value="large-v3">large-v3 (정확·GPU권장)</option>
-            <option value="distil-large-v3">distil-large-v3 (빠름)</option>
-            <option value="medium">medium</option>
-            <option value="small">small</option></select>
+        <div class="formrow">
+          <span class="fld"><span class="lbl">전사</span><select id="whisper"><option value="large-v3">large-v3 (정확)</option><option value="distil-large-v3">distil-large-v3 (빠름)</option><option value="medium">medium</option><option value="small">small</option></select></span>
           <span class="muted">faster-whisper · 일본어</span>
         </div>
-        <div class="row">
-          <button class="go" id="btnReview" style="margin-left:auto">② 리뷰 생성 (전사 + AI 압축 + 자막)</button>
+        <div class="actions">
+          <button class="go spacer" id="btnReview">② 리뷰 생성 (전사 + AI 압축 + 자막)</button>
         </div>
-        <div class="muted" style="margin-top:6px">현재 영상으로 품번 메타 조회 → AI가 핵심만 골라 길이만큼 압축 → 자막·내레이션. <b>품번 필요.</b></div>
+        <div class="hint">품번 메타 조회 → AI가 핵심만 골라 길이만큼 압축 → 자막·내레이션.</div>
       </div>
 
-      <!-- 자동 -->
+      <!-- ── 자동 ── -->
       <div class="pane" id="pane-auto">
-        <div class="row" style="margin-bottom:8px">
-          <b style="margin-right:4px">리뷰 설정</b>
-          품번 <input id="codeA" style="width:110px" placeholder="SNOS-183">
+        <div class="formrow">
+          <span class="fld"><span class="lbl">품번</span><input id="codeA" placeholder="SNOS-183" style="width:120px"></span>
           <button id="btnMetaA">조회</button>
-          LLM <select id="llmA"><option>claude</option><option>codex</option></select>
-          길이 <select id="targetA"><option value="60">1분</option><option value="120">2분</option>
-            <option value="300">5분</option><option value="600">10분</option></select>
+          <span class="fld"><span class="lbl">LLM</span><select id="llmA"><option>claude</option><option>codex</option></select></span>
+          <span class="fld"><span class="lbl">길이</span><select id="targetA"><option value="60">1분</option><option value="120">2분</option><option value="300">5분</option><option value="600">10분</option></select></span>
         </div>
-        <div class="row" style="margin-bottom:8px">
-          전사(Whisper) <select id="whisperA">
-            <option value="large-v3">large-v3 (정확·GPU권장)</option>
-            <option value="distil-large-v3">distil-large-v3 (빠름)</option>
-            <option value="medium">medium</option>
-            <option value="small">small</option></select>
+        <div class="formrow">
+          <span class="fld"><span class="lbl">전사</span><select id="whisperA"><option value="large-v3">large-v3 (정확)</option><option value="distil-large-v3">distil-large-v3 (빠름)</option><option value="medium">medium</option><option value="small">small</option></select></span>
           <span class="muted">faster-whisper · 일본어</span>
         </div>
-        <button class="go" id="btnAnalyze">● 자동 분석</button>
-        <div class="muted" style="margin:6px 0">AI가 영상 전체를 분석해 핵심 구간을 자동 선정. 아래 결과 확인/수정 후 확정.</div>
+        <div class="actions">
+          <button class="go spacer" id="btnAnalyze">● 자동 분석</button>
+        </div>
+        <div class="hint">AI가 영상 전체를 분석해 핵심 구간을 자동 선정. 아래 결과 확인/수정 후 확정.</div>
         <textarea id="autoJson" placeholder="분석 결과(JSON)가 여기 표시됩니다."></textarea>
-        <div class="row" style="margin-top:6px">
-          <button class="primary" id="btnRender" style="margin-left:auto" disabled>확정 → 컷 & 자막 생성</button>
+        <div class="actions">
+          <button class="primary spacer" id="btnRender" disabled>확정 → 컷 &amp; 자막 생성</button>
         </div>
       </div>
     </div>
 
+    <!-- ── TTS ── -->
     <div class="card">
-      <b>③ 내레이션 음성 (voicebox TTS)</b>
-      <div class="muted" style="margin:4px 0 8px">리뷰 생성 후, <code>품번_내레이션.srt</code>를 한국어 음성으로 합성 → <code>품번_내레이션.wav</code>. (Qwen3-TTS 한국어 보이스 권장)</div>
-      <div class="row" style="margin-bottom:6px">
-        <span style="width:46px">주소</span>
-        <input id="ttsBase" style="flex:1" placeholder="http://127.0.0.1:17493">
+      <div class="sec"><span class="num">3</span> 내레이션 음성 <span class="muted">· voicebox TTS</span></div>
+      <div class="hint" style="margin:6px 0 12px">리뷰 후 <code>품번_내레이션.srt</code>를 한국어 음성으로 → <code>품번_내레이션.wav</code> (Qwen3-TTS 한국어 보이스 권장).</div>
+      <div class="formrow">
+        <span class="fld grow"><span class="lbl">주소</span><input id="ttsBase" placeholder="http://127.0.0.1:17493"></span>
         <button id="btnProfiles">보이스 목록</button>
       </div>
-      <div class="row" style="margin-bottom:6px">
-        <span style="width:46px">보이스</span>
-        <select id="ttsProfile" style="flex:1"><option value="">(목록 불러오기)</option></select>
+      <div class="formrow">
+        <span class="fld grow"><span class="lbl">보이스</span><select id="ttsProfile"><option value="">(목록 불러오기)</option></select></span>
       </div>
-      <div class="row" style="margin-bottom:6px">
-        <span style="width:46px">테스트</span>
-        <input id="ttsTestText" style="flex:1" value="안녕하세요, 딸딸기튜브입니다. 음성 테스트입니다.">
+      <div class="formrow">
+        <span class="fld grow"><span class="lbl">테스트</span><input id="ttsTestText" value="안녕하세요, 딸딸기튜브입니다. 음성 테스트입니다."></span>
         <button id="btnTtsTest">테스트 음성 ▶</button>
       </div>
-      <audio id="ttsAudio" controls style="width:100%;display:none;margin-bottom:6px"></audio>
-      <div class="row">
-        <label class="muted"><input type="checkbox" id="ttsMux"> 영상에 입히기(원음 음소거 → _final_voiced.mp4)</label>
-        <button class="go" id="btnTts" style="margin-left:auto">● 내레이션 음성 생성</button>
+      <audio id="ttsAudio" controls style="display:none"></audio>
+      <div class="actions">
+        <label class="muted"><input type="checkbox" id="ttsMux" style="height:auto;vertical-align:middle"> 영상에 입히기 (원음 음소거 → _final_voiced.mp4)</label>
+        <button class="go spacer" id="btnTts">● 내레이션 음성 생성</button>
       </div>
     </div>
 
     <div class="card" id="resultCard" style="display:none">
-      <b>결과</b>
-      <div id="result" class="muted" style="margin-top:6px"></div>
+      <div class="sec" style="margin-bottom:8px">결과</div>
+      <div id="result" class="muted"></div>
     </div>
   </div>
 </div>
