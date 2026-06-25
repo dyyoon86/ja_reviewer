@@ -192,6 +192,12 @@ function showResult(r){
     (r.srt_narration?`<div>내레이션: ${r.srt_narration}</div>`:'')+
     (r.summary?`<div class="muted" style="margin-top:6px">요약: ${r.summary}</div>`:'');
   log("✔ 출력 완료","ok");
+  // 리뷰 생성 후 자동 음성 생성 (옵션)
+  if(r.srt_narration && $("#ttsAuto").checked){
+    if(!$("#ttsProfile").value){ log("⚠ 자동 음성: 보이스를 먼저 선택하세요(보이스 목록 → 한국어).","warn"); return; }
+    log("→ 자동으로 내레이션 음성 생성 이어갑니다…");
+    runTts();
+  }
 }
 
 // ── 품번 DB(메타 API) 연결/조회 확인 ────────────────────────────────────────
@@ -242,7 +248,7 @@ $("#btnTtsTest").onclick = () => {
   }));
 };
 
-$("#btnTts").onclick = () => {
+function runTts(){
   const code=curCode();
   if(!code){ log("품번을 입력하세요(내레이션 SRT 찾기용)","warn"); return; }
   if(!$("#ttsProfile").value){ log("보이스를 선택하세요(보이스 목록 → 한국어)","warn"); return; }
@@ -257,7 +263,8 @@ $("#btnTts").onclick = () => {
       (r.voiced?`<div>입힌 영상: ${r.voiced}</div>`:'');
     log("✔ 내레이션 음성 완료","ok");
   }));
-};
+}
+$("#btnTts").onclick = runTts;
 
 // 초기 설정 로드 (양 탭 동기화)
 fetch("/config").then(r=>r.json()).then(c=>{
