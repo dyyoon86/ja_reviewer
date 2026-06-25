@@ -43,7 +43,21 @@ GUI 탭으로 선택.
 - 내레이션: `skills/jav-narration` (3분휴지 4단: 전환→시놉→평가→총평). 평가는 영상 못보니 창작.
 - 내레이션 음성(TTS)은 사용자가 별도 처리. 본 툴은 자막까지.
 
-## 윈도우 실행 준비
+## 웹 버전 (Phase 1, 권장) 실행
+
+```
+pip install -r server/requirements.txt    # fastapi uvicorn faster-whisper
+# ffmpeg 설치 후 PATH 등록 / LLM: codex 또는 claude CLI 로그인
+python -m server.app                       # → http://127.0.0.1:8000 자동 오픈
+```
+- `영상 선택`(네이티브 다이얼로그) 또는 경로 붙여넣기 → `<video>`로 재생(소리 O)
+- 단축키: `Space` 재생/정지, `[`/`I` 구간시작, `]`/`O` 구간끝, `←`/`→` 5초
+- **직접 컷 편집**: 구간 마킹 → 편집 실행(선택 구간 삭제→전사→AI 압축→자막/내레이션)
+- **자동 (AI 분석)**: 자동 분석 → 결과 확인/수정 → 확정 렌더
+- 진행상황은 로그창에 실시간(SSE). 출력: `<품번>_final.mp4` + `_대사.srt` + `_내레이션.srt`
+- mkv/avi는 브라우저 미리보기 제약 → mp4 권장. 메타는 LAN `meta_api`로 조회.
+
+## (백업) Tkinter 버전 실행
 
 ```
 pip install faster-whisper

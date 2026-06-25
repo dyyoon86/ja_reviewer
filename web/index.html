@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>리뷰 편집 스튜디오</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <span class="title">🎬 리뷰 편집 스튜디오</span>
+  <button id="btnBrowse">영상 선택</button>
+  <input id="path" class="path" placeholder="또는 영상 경로 붙여넣기 (C:\…\video.mp4)">
+  <button id="btnOpen">열기</button>
+  <span style="width:10px"></span>
+  품번 <input id="code" style="width:120px" placeholder="SNOS-183">
+  LLM <select id="llm"><option>claude</option><option>codex</option></select>
+  길이 <select id="target"><option value="60">1분</option><option value="120">2분</option>
+    <option value="300">5분</option><option value="600">10분</option></select>
+</header>
+
+<div class="layout">
+  <!-- 좌: 플레이어 -->
+  <div class="col">
+    <div class="card">
+      <video id="vid" controls preload="metadata"></video>
+      <div class="tl" id="tl"><div class="cur" id="cur"></div></div>
+      <div class="ctrls">
+        <button id="btnPlay">▶/⏸ <span class="kbd">Space</span></button>
+        <button id="btnIn">구간 시작 <span class="kbd">[</span>/<span class="kbd">I</span></button>
+        <button id="btnOut">구간 끝 <span class="kbd">]</span>/<span class="kbd">O</span></button>
+        <span class="muted"><span class="kbd">←</span>/<span class="kbd">→</span> 5초</span>
+        <span class="time" id="time">00:00:00 / 00:00:00</span>
+      </div>
+      <div class="muted" style="margin-top:6px">마킹한 구간(빨강)을 잘라냅니다. mkv/avi는 브라우저 미리보기가 안 될 수 있어요(mp4 권장).</div>
+    </div>
+
+    <div class="card">
+      <div id="log">준비됨. 영상을 선택하세요.</div>
+    </div>
+  </div>
+
+  <!-- 우: 작업 -->
+  <div class="col">
+    <div class="card">
+      <div class="tabs">
+        <div class="t active" data-pane="manual">직접 컷 편집</div>
+        <div class="t" data-pane="auto">자동 (AI 분석)</div>
+      </div>
+
+      <!-- 수동 -->
+      <div class="pane active" id="pane-manual">
+        <div class="row">
+          <input id="exText" placeholder="텍스트로 구간 입력 12:30-18:00, 45:00-52:00" style="flex:1">
+          <button id="btnAddText">추가</button>
+        </div>
+        <ul class="ex" id="exList"></ul>
+        <div class="row">
+          <button id="btnClear">전체삭제</button>
+          <button class="primary" id="btnCut" style="margin-left:auto">● 편집 실행 (선택 구간 삭제)</button>
+        </div>
+        <div class="muted" style="margin-top:6px">선택 구간 삭제 → 남은 영상 전사 → AI가 핵심만 골라 길이만큼 압축 → 자막·내레이션.</div>
+      </div>
+
+      <!-- 자동 -->
+      <div class="pane" id="pane-auto">
+        <button class="go" id="btnAnalyze">● 자동 분석</button>
+        <div class="muted" style="margin:6px 0">AI가 영상 전체를 분석해 핵심 구간을 자동 선정. 아래 결과 확인/수정 후 확정.</div>
+        <textarea id="autoJson" placeholder="분석 결과(JSON)가 여기 표시됩니다."></textarea>
+        <div class="row" style="margin-top:6px">
+          <button class="primary" id="btnRender" style="margin-left:auto" disabled>확정 → 컷 & 자막 생성</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" id="resultCard" style="display:none">
+      <b>결과</b>
+      <div id="result" class="muted" style="margin-top:6px"></div>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
