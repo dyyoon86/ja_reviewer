@@ -1,5 +1,7 @@
 __pycache__/
 *.pyc
+.venv/
+venv/
 studio_config.json
 ddalddalgi_out/
 ja_reviewer_out/
