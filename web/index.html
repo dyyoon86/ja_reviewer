@@ -38,13 +38,6 @@
   <!-- 우: 작업 -->
   <div class="col">
     <div class="card">
-      <div class="row" style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--line)">
-        <b style="margin-right:4px">리뷰 설정</b>
-        품번 <input id="code" style="width:110px" placeholder="SNOS-183">
-        LLM <select id="llm"><option>claude</option><option>codex</option></select>
-        길이 <select id="target"><option value="60">1분</option><option value="120">2분</option>
-          <option value="300">5분</option><option value="600">10분</option></select>
-      </div>
       <div class="tabs">
         <div class="t active" data-pane="manual">직접 컷 편집</div>
         <div class="t" data-pane="auto">자동 (AI 분석)</div>
@@ -52,8 +45,9 @@
 
       <!-- 수동 -->
       <div class="pane active" id="pane-manual">
-        <div class="row">
-          <input id="exText" placeholder="텍스트로 구간 입력 12:30-18:00, 45:00-52:00" style="flex:1">
+        <div class="row" style="align-items:flex-start">
+          <textarea id="exText" class="exText" rows="3"
+            placeholder="텍스트로 구간 입력 (여러 줄 가능)&#10;12:30-18:00&#10;45:00-52:00" style="flex:1"></textarea>
           <button id="btnAddText">추가</button>
         </div>
         <ul class="ex" id="exList"></ul>
@@ -63,6 +57,13 @@
         </div>
         <div class="muted" style="margin-top:6px">마킹 구간을 빼고 영상을 만들어 플레이어에 다시 로드합니다. <b>품번 불필요.</b></div>
         <hr style="border-color:var(--line);margin:12px 0">
+        <div class="row" style="margin-bottom:8px">
+          <b style="margin-right:4px">리뷰 설정</b>
+          품번 <input id="code" style="width:110px" placeholder="SNOS-183">
+          LLM <select id="llm"><option>claude</option><option>codex</option></select>
+          길이 <select id="target"><option value="60">1분</option><option value="120">2분</option>
+            <option value="300">5분</option><option value="600">10분</option></select>
+        </div>
         <div class="row">
           <button class="go" id="btnReview" style="margin-left:auto">② 리뷰 생성 (전사 + AI 압축 + 자막)</button>
         </div>
@@ -71,6 +72,13 @@
 
       <!-- 자동 -->
       <div class="pane" id="pane-auto">
+        <div class="row" style="margin-bottom:8px">
+          <b style="margin-right:4px">리뷰 설정</b>
+          품번 <input id="codeA" style="width:110px" placeholder="SNOS-183">
+          LLM <select id="llmA"><option>claude</option><option>codex</option></select>
+          길이 <select id="targetA"><option value="60">1분</option><option value="120">2분</option>
+            <option value="300">5분</option><option value="600">10분</option></select>
+        </div>
         <button class="go" id="btnAnalyze">● 자동 분석</button>
         <div class="muted" style="margin:6px 0">AI가 영상 전체를 분석해 핵심 구간을 자동 선정. 아래 결과 확인/수정 후 확정.</div>
         <textarea id="autoJson" placeholder="분석 결과(JSON)가 여기 표시됩니다."></textarea>

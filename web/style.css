@@ -40,6 +40,7 @@ ul.ex li button{padding:2px 8px}
   padding:8px;font-family:Consolas,monospace;font-size:12px;color:#cfcfd8;white-space:pre-wrap}
 textarea{width:100%;background:#0a0a0d;color:#cfcfd8;border:1px solid var(--line);border-radius:8px;
   font-family:Consolas,monospace;font-size:12px;min-height:150px}
+textarea.exText{min-height:58px;height:58px;max-height:120px;overflow:auto;resize:vertical;padding:6px 8px}
 .kbd{display:inline-block;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;
   padding:1px 6px;background:var(--panel2);font-size:12px;color:var(--dim)}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}

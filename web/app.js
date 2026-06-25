@@ -32,9 +32,11 @@ async function openVideo(path){
     vid.src = `/video/stream?path=${encodeURIComponent(j.path)}`;
     excludes = []; pendingIn = null; renderEx();
     log(`영상 로드: ${j.name} (${hhmmss(duration)})`, "ok");
-    // 품번 자동 추정 (파일명에서 XXX-000 패턴)
+    // 품번 자동 추정 (파일명에서 XXX-000 패턴) → 양 탭에 채움
     const mm = j.name.match(/([A-Za-z]{2,6})-?(\d{2,5})/);
-    if(mm && !$("#code").value) $("#code").value = (mm[1]+"-"+mm[2]).toUpperCase();
+    if(mm){ const guess=(mm[1]+"-"+mm[2]).toUpperCase();
+      if(!$("#code").value) $("#code").value=guess;
+      if(!$("#codeA").value) $("#codeA").value=guess; }
   }catch(e){ log("열기 오류: "+e,"warn"); }
 }
 
@@ -157,12 +159,14 @@ $("#btnReview").onclick = () => {
   })}).then(r=>r.json()).then(j=>runJob(j.job, showResult));
 };
 
+function needCodeA(){ if(!$("#codeA").value.trim()){ log("품번을 입력하세요","warn"); return false; } return true; }
+
 $("#btnAnalyze").onclick = () => {
-  if(!needVideo() || !needCode()) return;
+  if(!needVideo() || !needCodeA()) return;
   log("── 자동 분석 시작 ──");
   fetch("/analyze",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    path:videoPath, code:$("#code").value.trim(),
-    target_sec:+$("#target").value, llm:$("#llm").value
+    path:videoPath, code:$("#codeA").value.trim(),
+    target_sec:+$("#targetA").value, llm:$("#llmA").value
   })}).then(r=>r.json()).then(j=>runJob(j.job, (res)=>{
     $("#autoJson").value = JSON.stringify(res.result, null, 2);
     $("#btnRender").disabled = false;
@@ -171,11 +175,11 @@ $("#btnAnalyze").onclick = () => {
 };
 
 $("#btnRender").onclick = () => {
-  if(!needVideo() || !needCode()) return;
+  if(!needVideo() || !needCodeA()) return;
   let res; try{ res=JSON.parse($("#autoJson").value); }catch(e){ log("JSON 오류: "+e,"warn"); return; }
   log("── 확정 렌더 ──");
   fetch("/render",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    path:videoPath, code:$("#code").value.trim(), result:res
+    path:videoPath, code:$("#codeA").value.trim(), result:res
   })}).then(r=>r.json()).then(j=>runJob(j.job, showResult));
 };
 
@@ -190,8 +194,8 @@ function showResult(r){
   log("✔ 출력 완료","ok");
 }
 
-// 초기 설정 로드
+// 초기 설정 로드 (양 탭 동기화)
 fetch("/config").then(r=>r.json()).then(c=>{
-  if(c.llm) $("#llm").value=c.llm;
-  if(c.target_sec) $("#target").value=c.target_sec;
+  if(c.llm){ $("#llm").value=c.llm; $("#llmA").value=c.llm; }
+  if(c.target_sec){ $("#target").value=c.target_sec; $("#targetA").value=c.target_sec; }
 }).catch(()=>{});
