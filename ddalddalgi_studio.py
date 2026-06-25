@@ -255,7 +255,7 @@ class App:
         self.root = root; self.cfg = load_cfg(); self.q = queue.Queue()
         self.video = None; self.result = None; self.excludes = []
         self.vlc = None; self.player = None
-        root.title("딸딸기 스튜디오"); root.geometry("900x720")
+        root.title("리뷰 편집 스튜디오"); root.geometry("900x720")
 
         top = ttk.Frame(root, padding=8); top.pack(fill="x")
         ttk.Button(top, text="영상 선택", command=self.pick).pack(side="left")
@@ -279,18 +279,19 @@ class App:
 
         nb = ttk.Notebook(root); nb.pack(fill="both", expand=True, padx=8, pady=6)
         # ── 수동 탭 ──
-        manual = ttk.Frame(nb, padding=6); nb.add(manual, text="수동 (정사장면 직접 제외)")
+        manual = ttk.Frame(nb, padding=6); nb.add(manual, text="직접 컷 편집")
         self.video_frame = tk.Frame(manual, bg="black", height=240)
         self.video_frame.pack(fill="x"); self.video_frame.pack_propagate(False)
         self.vlc_warn = ttk.Label(manual, foreground="red", text="")
+        ttk.Label(manual, text="구간을 마킹하면 그 부분을 잘라내고 나머지로 영상을 만듭니다.").pack(anchor="w")
         self.vlc_warn.pack(fill="x")
         pc = ttk.Frame(manual); pc.pack(fill="x", pady=4)
         ttk.Button(pc, text="▶/⏸ (Space)", command=self.toggle_play).pack(side="left")
         self.seek = ttk.Scale(pc, from_=0, to=1000, command=self.on_seek); self.seek.pack(side="left", fill="x", expand=True, padx=6)
         self.tpos = ttk.Label(pc, text="00:00:00 / 00:00:00"); self.tpos.pack(side="left")
         mk = ttk.Frame(manual); mk.pack(fill="x", pady=2)
-        ttk.Button(mk, text="제외 시작 [ (또는 I)", command=self.mark_start).pack(side="left")
-        ttk.Button(mk, text="제외 끝 ] (또는 O)", command=self.mark_end).pack(side="left", padx=4)
+        ttk.Button(mk, text="구간 시작 [ (I)", command=self.mark_start).pack(side="left")
+        ttk.Button(mk, text="구간 끝 ] (O)", command=self.mark_end).pack(side="left", padx=4)
         ttk.Label(mk, text="  ←/→ 5초이동 ·  또는 텍스트(12:30-18:00, 45:00-52:00):").pack(side="left")
         self.exq = ttk.Entry(mk); self.exq.pack(side="left", fill="x", expand=True, padx=4)
         ttk.Button(mk, text="추가", command=self.add_text_ranges).pack(side="left")
@@ -298,13 +299,13 @@ class App:
         exb = ttk.Frame(manual); exb.pack(fill="x")
         ttk.Button(exb, text="선택삭제", command=self.del_range).pack(side="left")
         ttk.Button(exb, text="전체삭제", command=self.clear_ranges).pack(side="left", padx=4)
-        ttk.Button(exb, text="● 수동 제작 (이 구간들 빼고)", command=self.run_manual).pack(side="right")
+        ttk.Button(exb, text="● 편집 실행 (선택 구간 삭제)", command=self.run_manual).pack(side="right")
         self._mark_start = None
 
         # ── 자동 탭 ──
-        auto = ttk.Frame(nb, padding=6); nb.add(auto, text="자동 (LLM이 알아서)")
-        ttk.Label(auto, text="LLM이 풀 자막을 보고 스토리/정사 구간을 자동 선정합니다. (토큰 많이 씀)").pack(anchor="w")
-        ttk.Button(auto, text="● 자동! (LLM 분석)", command=self.run_auto).pack(anchor="w", pady=6)
+        auto = ttk.Frame(nb, padding=6); nb.add(auto, text="자동 (AI 분석)")
+        ttk.Label(auto, text="AI가 영상 전체를 분석해 핵심 구간을 자동으로 골라냅니다.").pack(anchor="w")
+        ttk.Button(auto, text="● 자동 분석", command=self.run_auto).pack(anchor="w", pady=6)
         ttk.Label(auto, text="분석 후 아래 미리보기에서 확인/수정 → 확정").pack(anchor="w")
         self.preview = scrolledtext.ScrolledText(auto, height=12); self.preview.pack(fill="both", expand=True, pady=4)
         self.confirm_btn = ttk.Button(auto, text="확정 → 컷 & SRT 생성", command=self.confirm_auto, state="disabled")
@@ -325,7 +326,7 @@ class App:
             self.logln("플레이어(VLC) 준비됨.  단축키: Space=재생/정지, [ 또는 I=제외시작, ] 또는 O=제외끝, ←/→=5초")
         except Exception as e:
             self.player = None
-            self.vlc_warn.config(text="⚠ VLC 미인식 → 영상 재생/마킹 불가. 아래 '텍스트'로 제외구간 입력하세요.  "
+            self.vlc_warn.config(text="⚠ VLC 미인식 → 영상 재생/마킹 불가. 아래 '텍스트'로 구간 입력하세요.  "
                                       "해결: ① VLC(64bit) 설치  ② pip install python-vlc  ③ 파이썬/VLC 비트수 일치(둘 다 64bit)")
             self.logln(f"※ VLC 로드 실패: {e}")
 
@@ -387,16 +388,16 @@ class App:
     def mark_start(self):
         s = self.cur_sec()
         if s is None: return messagebox.showinfo("", "영상을 재생해야 마킹됩니다. (VLC 없으면 텍스트 입력)")
-        self._mark_start = s; self.logln(f"● 제외 시작: {hhmmss(s)}")
+        self._mark_start = s; self.logln(f"● 구간 시작: {hhmmss(s)}")
 
     def mark_end(self):
         e = self.cur_sec()
         if e is None: return messagebox.showinfo("", "영상을 재생해야 마킹됩니다. (VLC 없으면 텍스트 입력)")
-        if self._mark_start is None: return messagebox.showinfo("", "먼저 '제외 시작'([ 또는 I)을 누르세요.")
+        if self._mark_start is None: return messagebox.showinfo("", "먼저 '구간 시작'([ 또는 I)을 누르세요.")
         a, b = self._mark_start, e
         if b <= a: return messagebox.showinfo("", "끝이 시작보다 뒤여야 합니다.")
         self.excludes.append((a, b)); self._mark_start = None; self._refresh_ex()
-        self.logln(f"● 제외 구간 추가: {hhmmss(a)} ~ {hhmmss(b)}")
+        self.logln(f"● 삭제 구간 추가: {hhmmss(a)} ~ {hhmmss(b)}")
 
     def add_text_ranges(self):
         rs = ranges_from_text(self.exq.get())
@@ -405,7 +406,7 @@ class App:
 
     def _refresh_ex(self):
         self.excludes = sorted(self.excludes); self.exlist.delete(0, "end")
-        for a, b in self.excludes: self.exlist.insert("end", f"{hhmmss(a)} ~ {hhmmss(b)}  (제외)")
+        for a, b in self.excludes: self.exlist.insert("end", f"{hhmmss(a)} ~ {hhmmss(b)}  (삭제)")
 
     def del_range(self):
         sel = list(self.exlist.curselection())
@@ -457,7 +458,7 @@ class App:
     # ── 수동 ──
     def run_manual(self):
         if not self._ready(): return
-        if not self.excludes: return messagebox.showwarning("", "제외할 정사장면 구간을 하나 이상 추가하세요.")
+        if not self.excludes: return messagebox.showwarning("", "삭제할 구간을 하나 이상 추가하세요.")
         threading.Thread(target=self._manual, daemon=True).start()
 
     def _manual(self):
