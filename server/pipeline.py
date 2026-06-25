@@ -65,7 +65,52 @@ def ranges_from_text(text):
     return sorted(out)
 
 
-def write_srt(entries, path):
+def _wrap_chunks(text, maxlen=24):
+    """텍스트를 maxlen 이하 덩어리로 (단어/공백 기준 그리디, 긴 단어는 강제 분할)."""
+    text = " ".join(str(text).split())
+    if len(text) <= maxlen:
+        return [text] if text else [""]
+    norm = []
+    for w in text.split(" "):
+        while len(w) > maxlen:
+            norm.append(w[:maxlen]); w = w[maxlen:]
+        if w:
+            norm.append(w)
+    chunks, cur = [], ""
+    for w in norm:
+        cand = w if not cur else cur + " " + w
+        if len(cand) <= maxlen:
+            cur = cand
+        else:
+            if cur:
+                chunks.append(cur)
+            cur = w
+    if cur:
+        chunks.append(cur)
+    return chunks or [text[:maxlen]]
+
+
+def split_entries(entries, maxlen=24):
+    """긴 자막을 maxlen 이하 여러 항목으로 분할 — 시간은 글자수 비례로 배분(싱크 유지)."""
+    out = []
+    for a, b, t in entries:
+        chunks = _wrap_chunks(t, maxlen)
+        if len(chunks) <= 1:
+            out.append((a, b, chunks[0] if chunks else "")); continue
+        total = sum(len(c) for c in chunks) or 1
+        span = max(0.0, b - a); cur = a
+        for k, c in enumerate(chunks):
+            e = b if k == len(chunks) - 1 else cur + span * (len(c) / total)
+            if e <= cur:
+                e = cur + 0.3
+            out.append((cur, e, c)); cur = e
+    return out
+
+
+def write_srt(entries, path, maxlen=24):
+    """SRT 출력. maxlen 글자 이하로 자동 분할(시간 비례 배분). maxlen=0이면 분할 안 함."""
+    if maxlen:
+        entries = split_entries(entries, maxlen)
     out = [f"{i}\n{s2srt(a)} --> {s2srt(b)}\n{t}" for i, (a, b, t) in enumerate(entries, 1)]
     Path(path).write_text("\n\n".join(out) + "\n", encoding="utf-8")
 
@@ -167,7 +212,8 @@ def _translate():
 def _style():
     return ("[톤] 3분휴지 스타일 — 정중체(~습니다)+솔직 호불호+마니아 은어(미드/포텐/피지컬/육덕/하메리/1인칭/펠라/시추에이션)"
             "+레이블 맥락. [내레이션 구성] 인트로→상황설명→평가→총평, 섹스 스킵 구간은 브릿지('이후 호텔로…'). "
-            "평가/감상은 그럴듯하게 창작하되 메타·시놉과 모순 금지. [대사] 자연스러운 한국어 구어체(번역투 금지), 신음류 제외/(신음).\n"
+            "평가/감상은 그럴듯하게 창작하되 메타·시놉과 모순 금지. [대사] 자연스러운 한국어 구어체(번역투 금지), 신음류 제외/(신음). "
+            "[자막 길이] 대사·내레이션의 각 항목 텍스트는 25자 이내로, 길면 의미 단위(절·구)로 끊어 여러 항목으로 나눠라.\n"
             + _translate())
 
 
