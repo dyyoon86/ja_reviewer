@@ -1,23 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-딸딸기 스튜디오 — 윈도우 GUI (영상 1개 → 자동 파이프라인).
+딸딸기 스튜디오 — 윈도우 GUI. 일본 신작 → 스토리만 컷 + 한글 대사자막 + 해설 내레이션.
 
-흐름:
-  [영상 선택 + 품번]
-    → ① Whisper 일본어 SRT 추출 (faster-whisper, 로컬)
-    → ② LAN 메타 API로 품번 정보 조회 (우분투 DB)
-    → ③ LLM(codex/claude CLI)으로 스토리 분석 → 스토리 구간 선정 + 한글 대사 + 내레이션
-    → [미리보기: 요약·구간·내레이션 — 수정 가능] → 사용자 [확정]
-    → ④ ffmpeg로 스토리 구간만 컷&이어붙이기 + SRT 새 타임라인 재계산
-  출력: 잘린영상.mp4 + 대사.srt + 내레이션.srt   (내레이션 음성 TTS는 사용자가 별도)
+두 가지 모드:
+  ● 자동!  — LLM이 풀 SRT 보고 스토리/정사 구간을 알아서 선정 (편하지만 토큰 많이 씀)
+  ● 수동   — 내가 정사장면 구간을 직접 체크해서 제외 → 그것만 빼고 컷
+            (LLM은 번역·내레이션만 → 토큰 절약 + 정확. 컷영상으로 전사하니 재타이밍 불필요)
+            마킹: 내장 플레이어(python-vlc)로 시각 체크 OR 텍스트로 구간 입력 둘 다 지원.
 
-요구사항(윈도우):
-  - Python 3.10+, ffmpeg(PATH), pip install faster-whisper
-  - LLM CLI 중 하나 로그인:  codex  또는  claude
-  - 같은 네트워크의 우분투 meta-api 가동 (http://172.30.1.40:8770)
+흐름(수동):  [영상]→제외구간 체크→컷→Whisper(짧은영상)→메타→LLM(번역+내레이션)→출력
+흐름(자동):  [영상]→Whisper(풀)→메타→LLM(선정+번역+내레이션)→[미리보기]→확정→컷+재타이밍
 
-사용: python ddalddalgi_studio.py
+요구사항(윈도우): Python3.10+, ffmpeg(PATH), pip install faster-whisper,
+  GPU면 pip install nvidia-cublas-cu12 nvidia-cudnn-cu12, (수동 플레이어용) VLC + pip install python-vlc,
+  LLM: codex 또는 claude CLI 로그인.
 """
 import os
 import re
@@ -35,7 +32,7 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext
 CONFIG = Path(__file__).with_name("studio_config.json")
 DEFAULTS = {
     "meta_api": "http://172.30.1.40:8770",
-    "llm": "claude",            # "codex" | "claude"
+    "llm": "claude",
     "whisper_model": "large-v3",
     "out_dir": str(Path.home() / "ddalddalgi_out"),
 }
@@ -56,279 +53,406 @@ def save_cfg(c):
 
 # ─── 시간 유틸 ────────────────────────────────────────────────────────────────
 def s2srt(x):
+    x = max(0.0, x)
     h = int(x // 3600); m = int(x % 3600 // 60); s = int(x % 60); ms = int(round((x - int(x)) * 1000))
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
-def write_srt(entries, path):
-    """entries: [(start_sec, end_sec, text)]"""
+def hhmmss(x):
+    x = int(max(0, x)); return f"{x//3600:02d}:{x%3600//60:02d}:{x%60:02d}"
+
+
+def parse_time(s):
+    s = s.strip()
+    if not s: return None
+    if ":" in s:
+        parts = [float(p) for p in s.split(":")]
+        while len(parts) < 3: parts.insert(0, 0)
+        return parts[0]*3600 + parts[1]*60 + parts[2]
+    return float(s)
+
+
+def ranges_from_text(text):
+    """'12:30-18:00, 45:00-52:00' → [(750,1080),(2700,3120)]"""
     out = []
-    for i, (a, b, t) in enumerate(entries, 1):
-        out.append(f"{i}\n{s2srt(a)} --> {s2srt(b)}\n{t}")
+    for chunk in re.split(r"[,\n]", text):
+        chunk = chunk.strip()
+        if not chunk: continue
+        m = re.split(r"[-~]", chunk)
+        if len(m) != 2: continue
+        a, b = parse_time(m[0]), parse_time(m[1])
+        if a is not None and b is not None and b > a:
+            out.append((a, b))
+    return sorted(out)
+
+
+def write_srt(entries, path):
+    out = [f"{i}\n{s2srt(a)} --> {s2srt(b)}\n{t}" for i, (a, b, t) in enumerate(entries, 1)]
     Path(path).write_text("\n\n".join(out) + "\n", encoding="utf-8")
 
 
-# ─── ① Whisper 전사 ──────────────────────────────────────────────────────────
+def video_duration(path):
+    try:
+        out = subprocess.check_output(["ffprobe", "-v", "error", "-show_entries",
+                                       "format=duration", "-of", "csv=p=0", path])
+        return float(out.decode().strip())
+    except Exception:
+        return 0.0
+
+
+def keep_from_exclude(total, excludes, min_gap=0.3):
+    """제외 구간 → 남길(keep) 구간(여집합)."""
+    ex = sorted(excludes); keep = []; cur = 0.0
+    for a, b in ex:
+        a = max(0.0, a); b = min(total, b)
+        if a - cur > min_gap:
+            keep.append((cur, a))
+        cur = max(cur, b)
+    if total - cur > min_gap:
+        keep.append((cur, total))
+    return keep
+
+
+# ─── ① Whisper ───────────────────────────────────────────────────────────────
 def transcribe(video, model_name, log):
-    log(f"① Whisper 전사 시작 (모델 {model_name}) — 시간이 걸립니다...")
+    log(f"Whisper 전사 (모델 {model_name})...")
     from faster_whisper import WhisperModel
     model = WhisperModel(model_name, device="auto", compute_type="auto")
-    segs, _ = model.transcribe(video, language="ja", vad_filter=True)
+    segs, info = model.transcribe(video, language="ja", vad_filter=True)
+    log(f"   device 추정: {getattr(info,'language','ja')} / 전사 중...")
     out = []
     for s in segs:
-        txt = (s.text or "").strip()
-        if txt:
-            out.append((float(s.start), float(s.end), txt))
-        if len(out) % 50 == 0 and out:
-            log(f"   …{len(out)}개 세그먼트")
-    log(f"① 완료: {len(out)} 세그먼트")
+        t = (s.text or "").strip()
+        if t: out.append((float(s.start), float(s.end), t))
+        if len(out) % 50 == 0 and out: log(f"   …{len(out)}")
+    log(f"전사 완료: {len(out)} 세그먼트")
     return out
 
 
-# ─── ② 메타 조회 (LAN) ───────────────────────────────────────────────────────
+# ─── ② 메타 ──────────────────────────────────────────────────────────────────
 def fetch_meta(api, code, log):
     url = f"{api.rstrip('/')}/work/{urllib.request.quote(code)}"
-    log(f"② 메타 조회: {url}")
+    log(f"메타 조회: {url}")
     with urllib.request.urlopen(url, timeout=15) as r:
         m = json.loads(r.read().decode("utf-8"))
-    if m.get("error"):
-        raise RuntimeError(f"메타 조회 실패: {m['error']}")
-    log(f"② 메타 OK: {m.get('actress')} / {m.get('label')} / {m.get('meas')}")
+    if m.get("error"): raise RuntimeError(m["error"])
+    log(f"메타 OK: {m.get('actress')} / {m.get('label')} / {m.get('meas')}")
     return m
 
 
-# ─── ③ LLM 호출 (codex / claude CLI) ─────────────────────────────────────────
+# ─── ③ LLM ───────────────────────────────────────────────────────────────────
 def call_llm(prompt, which, log):
-    log(f"③ LLM({which}) 호출 — 스토리 분석/번역/내레이션 생성...")
-    txt = ""
+    log(f"LLM({which}) 호출...")
     if which == "codex":
         with tempfile.TemporaryDirectory() as td:
             outf = Path(td) / "o.json"
-            cmd = ["codex", "exec", "--ephemeral", "--skip-git-repo-check", "-o", str(outf), prompt]
-            subprocess.run(cmd, timeout=600, stdin=subprocess.DEVNULL,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["codex", "exec", "--ephemeral", "--skip-git-repo-check", "-o", str(outf), prompt],
+                           timeout=600, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             txt = outf.read_text(encoding="utf-8") if outf.exists() else ""
-    else:  # claude
+    else:
         p = subprocess.run(["claude", "-p", prompt], timeout=600, stdin=subprocess.DEVNULL,
                            capture_output=True, text=True)
         txt = p.stdout or ""
-    s = txt.strip()
-    i, j = s.find("{"), s.rfind("}")
-    if i < 0 or j <= i:
-        raise RuntimeError("LLM 응답에서 JSON을 못 찾음. CLI 로그인 상태 확인.")
+    s = txt.strip(); i, j = s.find("{"), s.rfind("}")
+    if i < 0 or j <= i: raise RuntimeError("LLM JSON 응답 없음 (CLI 로그인 확인)")
     return json.loads(s[i:j+1])
 
 
-def build_prompt(meta, segs):
-    lines = []
-    for k, (a, b, t) in enumerate(segs, 1):
-        lines.append(f"{k}\t{a:.2f}\t{b:.2f}\t{t}")
-    srt_block = "\n".join(lines)
+def _meta_block(meta):
     g = ", ".join(meta.get("genres") or []) or (meta.get("genre") or "")
-    return f"""너는 딸딸기튜브의 일본 신작 AV 해설영상 작가다. 아래 작품의 일본어 자막(타임코드 포함)과 메타데이터를 보고,
-'스토리가 있는 구간만' 골라 영상을 자르고, 한글 대사 자막과 해설 내레이션을 만든다.
-
-[작품 메타]
-- 품번:{meta.get('code')}  배우:{meta.get('actress')}({meta.get('actress_ja')})  생일:{meta.get('birthday')} {meta.get('blood_type') or ''}
-- 신체:{meta.get('meas')}  레이블:{meta.get('label')}  메이커:{meta.get('maker')}  감독:{meta.get('director')}  시리즈:{meta.get('series_ja') or '-'}
-- 장르:{g}  발매:{(meta.get('release_date') or '')[:10]}  런타임:{meta.get('runtime_mins')}분  인기: 조회{meta.get('views')} 좋아요{meta.get('likes')} 싫어요{meta.get('dislikes')}
-- 일본어 원제:{meta.get('title_ja')}
-- 한국어 시놉시스:{meta.get('description')}
-
-[일본어 자막]  (형식: 번호\\t시작초\\t끝초\\t대사)
-{srt_block}
-
-[작업 규칙]
-1) 스토리 구간 선정: 설정·관계·상황전환·갈등·결말이 드러나는 '대화 구간'만 keep. 신음·짧은탄성·반복감탄·비스토리 섹스대사는 제외. 전체 타임라인에 걸쳐 고른다(초반만 X).
-2) 한글 대사: keep한 세그먼트의 일본어를 자연스러운 한국어 구어체로 번역(번역투 금지). 신음류는 빼거나 (신음) 처리.
-3) 내레이션: 3분휴지 스타일(정중체+솔직 호불호+마니아 은어). 인트로→상황설명→평가→총평. 섹스로 넘어가는 구간은 내레이션으로 브릿지("이후 호텔로 자리를 옮겨…"). 평가/감상은 그럴듯하게 창작하되 메타·시놉과 모순 금지.
-4) 모든 시간은 '원본 영상 기준 초'로 출력(컷 재계산은 프로그램이 함).
-
-[출력 — JSON만, 다른 텍스트 금지]
-{{
- "summary": "스토리 3~5줄 요약",
- "stars": 1~5 정수,
- "keep": [[시작초,끝초], ...],            // 남길 스토리 구간(섹스 제외)
- "dialogue": [{{"start":초,"end":초,"ko":"한글대사"}}, ...],   // keep 구간 내 대사
- "narration": [{{"start":초,"end":초,"text":"내레이션"}}, ...] // 타임라인 해설
-}}"""
+    return (f"품번:{meta.get('code')} 배우:{meta.get('actress')}({meta.get('actress_ja')}) "
+            f"신체:{meta.get('meas')} 레이블:{meta.get('label')} 메이커:{meta.get('maker')} "
+            f"감독:{meta.get('director')} 시리즈:{meta.get('series_ja') or '-'} 장르:{g} "
+            f"발매:{(meta.get('release_date') or '')[:10]} 런타임:{meta.get('runtime_mins')}분 "
+            f"인기:조회{meta.get('views')}/좋아요{meta.get('likes')}/싫어요{meta.get('dislikes')}\n"
+            f"일본원제:{meta.get('title_ja')}\n한국어시놉시스:{meta.get('description')}")
 
 
-# ─── ④ 컷 + 재타이밍 ─────────────────────────────────────────────────────────
+def _style():
+    return ("[톤] 3분휴지 스타일 — 정중체(~습니다)+솔직 호불호+마니아 은어(미드/포텐/피지컬/육덕/하메리/1인칭/펠라/시추에이션)"
+            "+레이블 맥락. [내레이션 구성] 인트로→상황설명→평가→총평, 섹스 스킵 구간은 브릿지('이후 호텔로…'). "
+            "평가/감상은 그럴듯하게 창작하되 메타·시놉과 모순 금지. [대사] 자연스러운 한국어 구어체(번역투 금지), 신음류 제외/(신음).")
+
+
+def prompt_auto(meta, segs):
+    body = "\n".join(f"{k}\t{a:.2f}\t{b:.2f}\t{t}" for k, (a, b, t) in enumerate(segs, 1))
+    return (f"너는 딸딸기튜브 AV 해설영상 작가다. 아래 작품의 일본어 자막을 보고 '스토리 구간만' 골라 "
+            f"한글 대사자막과 해설 내레이션을 만든다.\n[메타]\n{_meta_block(meta)}\n"
+            f"[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n{_style()}\n"
+            f"[규칙] 신음·짧은탄성·반복감탄·비스토리 섹스대사 제외, 스토리(설정·관계·전환·갈등·결말) 구간만 keep. "
+            f"전체 타임라인에 고루. 시간은 원본 영상 기준 초.\n"
+            f"[출력 JSON만] {{\"summary\":\"3~5줄\",\"stars\":1~5,\"keep\":[[시작,끝],...],"
+            f"\"dialogue\":[{{\"start\":초,\"end\":초,\"ko\":\"\"}}],\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\"}}]}}")
+
+
+def prompt_manual(meta, segs):
+    """수동: 이미 컷된(스토리만) 영상의 SRT → 번역 + 내레이션만 (선정 X)."""
+    body = "\n".join(f"{k}\t{a:.2f}\t{b:.2f}\t{t}" for k, (a, b, t) in enumerate(segs, 1))
+    return (f"너는 딸딸기튜브 AV 해설영상 작가다. 아래는 이미 '스토리 구간만 잘라 이어붙인 영상'의 일본어 자막이다. "
+            f"여기에 한글 대사자막과 해설 내레이션을 입힌다. (구간 선정은 하지 말 것 — 이미 끝남)\n"
+            f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n{_style()}\n"
+            f"시간은 이 자막 기준 초 그대로 사용.\n"
+            f"[출력 JSON만] {{\"summary\":\"3~5줄\",\"stars\":1~5,"
+            f"\"dialogue\":[{{\"start\":초,\"end\":초,\"ko\":\"\"}}],\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\"}}]}}")
+
+
+# ─── ④ 컷 / 재타이밍 ─────────────────────────────────────────────────────────
 def retime(entries, keep, snap=False, default_dur=4.0):
-    """원본 시간 entries[(s,e,text)] → 컷(keep 구간 이어붙임) 새 타임라인.
-    keep 밖 항목: snap=False(대사)면 버림, snap=True(내레이션)면 컷 경계로 당김
-    (영상 맨앞 인트로 → 0초, 스킵된 섹스장면 자리 브릿지 내레이션 → 그 컷 이음새)."""
-    keep = sorted(keep)
-    offs, acc = [], 0.0
-    for a, b in keep:
-        offs.append(acc); acc += (b - a)
-    total = acc
-    out = []
+    keep = sorted(keep); offs, acc = [], 0.0
+    for a, b in keep: offs.append(acc); acc += (b - a)
+    total = acc; out = []
     for s, e, t in entries:
         placed = False
         for (a, b), off in zip(keep, offs):
             if s >= a - 0.05 and s < b + 0.05:
-                ns = off + max(0.0, s - a)
-                ne = off + min(b - a, e - a)
-                if ne <= ns:
-                    ne = ns + 0.5
-                out.append((ns, ne, t)); placed = True
-                break
-        if placed or not snap:
-            continue
-        # keep 밖 + snap → 컷 경계로 스냅
-        if s < keep[0][0]:
-            ns = 0.0
+                ns = off + max(0.0, s - a); ne = off + min(b - a, e - a)
+                if ne <= ns: ne = ns + 0.5
+                out.append((ns, ne, t)); placed = True; break
+        if placed or not snap: continue
+        if s < keep[0][0]: ns = 0.0
         else:
             ns = total
             for (a, b), off in zip(keep, offs):
-                if s < a:
-                    ns = off; break
+                if s < a: ns = off; break
         ne = min(total, ns + (e - s if e > s else default_dur))
-        if ne <= ns:
-            ne = min(total, ns + default_dur)
+        if ne <= ns: ne = min(total, ns + default_dur)
         out.append((ns, ne, t))
-    out.sort(key=lambda x: x[0])
-    return out
+    out.sort(key=lambda x: x[0]); return out
 
 
 def cut_video(video, keep, out_path, log):
-    log(f"④ 영상 컷: {len(keep)}구간 이어붙이기 (ffmpeg, 재인코딩)...")
-    parts_v, parts_a, filt = [], [], []
-    for i, (a, b) in enumerate(sorted(keep)):
+    keep = sorted(keep)
+    log(f"ffmpeg 컷: {len(keep)}구간 이어붙이기 (재인코딩)...")
+    filt = []
+    for i, (a, b) in enumerate(keep):
         filt.append(f"[0:v]trim={a}:{b},setpts=PTS-STARTPTS[v{i}];")
         filt.append(f"[0:a]atrim={a}:{b},asetpts=PTS-STARTPTS[a{i}];")
-        parts_v.append(f"[v{i}]"); parts_a.append(f"[a{i}]")
     n = len(keep)
-    concat = "".join(f"{parts_v[i]}{parts_a[i]}" for i in range(n)) + f"concat=n={n}:v=1:a=1[v][a]"
-    fc = "".join(filt) + concat
-    cmd = ["ffmpeg", "-y", "-i", video, "-filter_complex", fc,
-           "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-preset", "veryfast",
-           "-c:a", "aac", out_path]
-    subprocess.run(cmd, check=True)
-    log(f"④ 컷 완료: {out_path}")
+    fc = "".join(filt) + "".join(f"[v{i}][a{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=1[v][a]"
+    subprocess.run(["ffmpeg", "-y", "-i", video, "-filter_complex", fc, "-map", "[v]", "-map", "[a]",
+                    "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac", out_path], check=True)
+    log(f"컷 완료: {out_path}")
 
 
 # ─── GUI ─────────────────────────────────────────────────────────────────────
 class App:
     def __init__(self, root):
-        self.root = root
-        self.cfg = load_cfg()
-        self.q = queue.Queue()
-        self.result = None
-        self.video = None
-        root.title("딸딸기 스튜디오")
-        root.geometry("820x640")
+        self.root = root; self.cfg = load_cfg(); self.q = queue.Queue()
+        self.video = None; self.result = None; self.excludes = []
+        self.vlc = None; self.player = None
+        root.title("딸딸기 스튜디오"); root.geometry("900x720")
 
         top = ttk.Frame(root, padding=8); top.pack(fill="x")
         ttk.Button(top, text="영상 선택", command=self.pick).pack(side="left")
         self.vlbl = ttk.Label(top, text="(영상 없음)"); self.vlbl.pack(side="left", padx=8)
         ttk.Label(top, text="품번:").pack(side="left")
-        self.code = ttk.Entry(top, width=14); self.code.pack(side="left", padx=4)
+        self.code = ttk.Entry(top, width=13); self.code.pack(side="left", padx=4)
         ttk.Label(top, text="LLM:").pack(side="left")
         self.llm = ttk.Combobox(top, width=8, values=["claude", "codex"], state="readonly")
         self.llm.set(self.cfg.get("llm", "claude")); self.llm.pack(side="left", padx=4)
-        self.start_btn = ttk.Button(top, text="시작", command=self.start); self.start_btn.pack(side="left", padx=8)
 
         cfgf = ttk.Frame(root, padding=(8, 0)); cfgf.pack(fill="x")
         ttk.Label(cfgf, text="메타API:").pack(side="left")
-        self.api = ttk.Entry(cfgf, width=28); self.api.insert(0, self.cfg["meta_api"]); self.api.pack(side="left", padx=4)
+        self.api = ttk.Entry(cfgf, width=26); self.api.insert(0, self.cfg["meta_api"]); self.api.pack(side="left", padx=4)
         ttk.Label(cfgf, text="Whisper:").pack(side="left")
-        self.wm = ttk.Entry(cfgf, width=12); self.wm.insert(0, self.cfg["whisper_model"]); self.wm.pack(side="left", padx=4)
+        self.wm = ttk.Entry(cfgf, width=11); self.wm.insert(0, self.cfg["whisper_model"]); self.wm.pack(side="left", padx=4)
         ttk.Label(cfgf, text="출력:").pack(side="left")
-        self.outd = ttk.Entry(cfgf, width=24); self.outd.insert(0, self.cfg["out_dir"]); self.outd.pack(side="left", padx=4)
+        self.outd = ttk.Entry(cfgf, width=22); self.outd.insert(0, self.cfg["out_dir"]); self.outd.pack(side="left", padx=4)
 
-        self.log = scrolledtext.ScrolledText(root, height=10); self.log.pack(fill="both", expand=False, padx=8, pady=6)
+        nb = ttk.Notebook(root); nb.pack(fill="both", expand=True, padx=8, pady=6)
+        # ── 수동 탭 ──
+        manual = ttk.Frame(nb, padding=6); nb.add(manual, text="수동 (정사장면 직접 제외)")
+        self.video_frame = tk.Frame(manual, bg="black", height=240); self.video_frame.pack(fill="x")
+        pc = ttk.Frame(manual); pc.pack(fill="x", pady=4)
+        ttk.Button(pc, text="▶/⏸", command=self.toggle_play).pack(side="left")
+        self.seek = ttk.Scale(pc, from_=0, to=1000, command=self.on_seek); self.seek.pack(side="left", fill="x", expand=True, padx=6)
+        self.tpos = ttk.Label(pc, text="00:00:00"); self.tpos.pack(side="left")
+        mk = ttk.Frame(manual); mk.pack(fill="x", pady=2)
+        ttk.Button(mk, text="제외 시작 ◀", command=self.mark_start).pack(side="left")
+        ttk.Button(mk, text="제외 끝 ▶", command=self.mark_end).pack(side="left", padx=4)
+        ttk.Label(mk, text="  또는 텍스트 입력(12:30-18:00, 45:00-52:00):").pack(side="left")
+        self.exq = ttk.Entry(mk); self.exq.pack(side="left", fill="x", expand=True, padx=4)
+        ttk.Button(mk, text="추가", command=self.add_text_ranges).pack(side="left")
+        self.exlist = tk.Listbox(manual, height=4); self.exlist.pack(fill="x", pady=2)
+        exb = ttk.Frame(manual); exb.pack(fill="x")
+        ttk.Button(exb, text="선택삭제", command=self.del_range).pack(side="left")
+        ttk.Button(exb, text="전체삭제", command=self.clear_ranges).pack(side="left", padx=4)
+        ttk.Button(exb, text="● 수동 제작 (이 구간들 빼고)", command=self.run_manual).pack(side="right")
+        self._mark_start = None
 
-        pv = ttk.LabelFrame(root, text="미리보기 (확정 전 수정 가능)", padding=6); pv.pack(fill="both", expand=True, padx=8, pady=4)
-        ttk.Label(pv, text="스토리 요약 / 내레이션 (JSON)").pack(anchor="w")
-        self.preview = scrolledtext.ScrolledText(pv, height=12); self.preview.pack(fill="both", expand=True)
+        # ── 자동 탭 ──
+        auto = ttk.Frame(nb, padding=6); nb.add(auto, text="자동 (LLM이 알아서)")
+        ttk.Label(auto, text="LLM이 풀 자막을 보고 스토리/정사 구간을 자동 선정합니다. (토큰 많이 씀)").pack(anchor="w")
+        ttk.Button(auto, text="● 자동! (LLM 분석)", command=self.run_auto).pack(anchor="w", pady=6)
+        ttk.Label(auto, text="분석 후 아래 미리보기에서 확인/수정 → 확정").pack(anchor="w")
+        self.preview = scrolledtext.ScrolledText(auto, height=12); self.preview.pack(fill="both", expand=True, pady=4)
+        self.confirm_btn = ttk.Button(auto, text="확정 → 컷 & SRT 생성", command=self.confirm_auto, state="disabled")
+        self.confirm_btn.pack(anchor="e")
 
-        bot = ttk.Frame(root, padding=8); bot.pack(fill="x")
-        self.confirm_btn = ttk.Button(bot, text="확정 → 컷 & SRT 생성", command=self.confirm, state="disabled")
-        self.confirm_btn.pack(side="right")
-
+        self.log = scrolledtext.ScrolledText(root, height=8); self.log.pack(fill="x", padx=8, pady=(0, 6))
         self.root.after(120, self.pump)
+        self._init_vlc()
+        self.root.after(300, self._tick)
 
+    # ── VLC ──
+    def _init_vlc(self):
+        try:
+            import vlc
+            self.vlc = vlc.Instance(); self.player = self.vlc.media_player_new()
+            self.logln("플레이어(VLC) 준비됨.")
+        except Exception:
+            self.logln("※ VLC/python-vlc 없음 → 수동은 '텍스트 입력'으로만. (pip install python-vlc + VLC 설치 시 영상 마킹 가능)")
+
+    def _attach_video(self):
+        if not self.player: return
+        try:
+            wid = self.video_frame.winfo_id()
+            if os.name == "nt": self.player.set_hwnd(wid)
+            else: self.player.set_xwindow(wid)
+        except Exception: pass
+
+    def toggle_play(self):
+        if not self.player: return
+        if self.player.is_playing(): self.player.pause()
+        else: self.player.play()
+
+    def on_seek(self, v):
+        if self.player and self.player.get_length() > 0 and getattr(self, "_user_seek", True):
+            self.player.set_time(int(float(v) / 1000 * self.player.get_length()))
+
+    def _tick(self):
+        if self.player and self.player.get_length() > 0:
+            cur = self.player.get_time(); ln = self.player.get_length()
+            self._user_seek = False
+            try: self.seek.set(cur / ln * 1000)
+            except Exception: pass
+            self._user_seek = True
+            self.tpos.config(text=hhmmss(cur / 1000))
+        self.root.after(300, self._tick)
+
+    def cur_sec(self):
+        return (self.player.get_time() / 1000) if (self.player and self.player.get_time() >= 0) else 0.0
+
+    def mark_start(self): self._mark_start = self.cur_sec(); self.logln(f"제외 시작: {hhmmss(self._mark_start)}")
+    def mark_end(self):
+        if self._mark_start is None: return messagebox.showinfo("", "먼저 '제외 시작'을 누르세요.")
+        a, b = self._mark_start, self.cur_sec()
+        if b <= a: return messagebox.showinfo("", "끝이 시작보다 뒤여야 합니다.")
+        self.excludes.append((a, b)); self._mark_start = None; self._refresh_ex()
+
+    def add_text_ranges(self):
+        rs = ranges_from_text(self.exq.get())
+        if not rs: return messagebox.showinfo("", "형식: 12:30-18:00, 45:00-52:00")
+        self.excludes += rs; self.exq.delete(0, "end"); self._refresh_ex()
+
+    def _refresh_ex(self):
+        self.excludes = sorted(self.excludes); self.exlist.delete(0, "end")
+        for a, b in self.excludes: self.exlist.insert("end", f"{hhmmss(a)} ~ {hhmmss(b)}  (제외)")
+
+    def del_range(self):
+        sel = list(self.exlist.curselection())
+        for i in reversed(sel): del self.excludes[i]
+        self._refresh_ex()
+
+    def clear_ranges(self): self.excludes = []; self._refresh_ex()
+
+    # ── 공통 ──
     def logln(self, s): self.q.put(("log", s))
     def pump(self):
         try:
             while True:
                 k, v = self.q.get_nowait()
-                if k == "log":
-                    self.log.insert("end", v + "\n"); self.log.see("end")
+                if k == "log": self.log.insert("end", v + "\n"); self.log.see("end")
                 elif k == "preview":
                     self.preview.delete("1.0", "end"); self.preview.insert("1.0", v)
                     self.confirm_btn.config(state="normal")
-                elif k == "done":
-                    self.start_btn.config(state="normal")
-                    messagebox.showinfo("완료", v)
-                elif k == "err":
-                    self.start_btn.config(state="normal"); self.confirm_btn.config(state="normal")
-                    messagebox.showerror("오류", v)
-        except queue.Empty:
-            pass
+                elif k == "done": messagebox.showinfo("완료", v)
+                elif k == "err": messagebox.showerror("오류", v)
+        except queue.Empty: pass
         self.root.after(120, self.pump)
 
     def pick(self):
         f = filedialog.askopenfilename(filetypes=[("영상", "*.mp4 *.mkv *.avi *.mov *.wmv"), ("모든", "*.*")])
-        if f:
-            self.video = f; self.vlbl.config(text=Path(f).name)
+        if not f: return
+        self.video = f; self.vlbl.config(text=Path(f).name)
+        if self.player:
+            self._attach_video()
+            self.player.set_media(self.vlc.media_new(f))
 
     def save_settings(self):
         self.cfg.update({"meta_api": self.api.get().strip(), "llm": self.llm.get(),
                          "whisper_model": self.wm.get().strip(), "out_dir": self.outd.get().strip()})
         save_cfg(self.cfg)
 
-    def start(self):
-        if not self.video: return messagebox.showwarning("", "영상을 선택하세요.")
-        if not self.code.get().strip(): return messagebox.showwarning("", "품번을 입력하세요.")
-        self.save_settings(); self.start_btn.config(state="disabled"); self.confirm_btn.config(state="disabled")
-        threading.Thread(target=self._run_analyze, daemon=True).start()
+    def _ready(self):
+        if not self.video: messagebox.showwarning("", "영상을 선택하세요."); return False
+        if not self.code.get().strip(): messagebox.showwarning("", "품번을 입력하세요."); return False
+        self.save_settings(); return True
 
-    def _run_analyze(self):
+    # ── 수동 ──
+    def run_manual(self):
+        if not self._ready(): return
+        if not self.excludes: return messagebox.showwarning("", "제외할 정사장면 구간을 하나 이상 추가하세요.")
+        threading.Thread(target=self._manual, daemon=True).start()
+
+    def _manual(self):
         try:
-            code = self.code.get().strip()
-            segs = transcribe(self.video, self.cfg["whisper_model"], self.logln)
-            self.segs = segs
-            meta = fetch_meta(self.cfg["meta_api"], code, self.logln)
-            res = call_llm(build_prompt(meta, segs), self.cfg["llm"], self.logln)
-            self.result = res; self.meta = meta
-            pretty = json.dumps(res, ensure_ascii=False, indent=2)
-            self.logln("③ 완료 — 미리보기에서 확인/수정 후 [확정] 누르세요.")
-            self.q.put(("preview", pretty))
+            code = self.code.get().strip(); outdir = Path(self.cfg["out_dir"]); outdir.mkdir(parents=True, exist_ok=True)
+            total = video_duration(self.video)
+            keep = keep_from_exclude(total, self.excludes)
+            if not keep: raise RuntimeError("남는 구간이 없습니다.")
+            cut_path = str(outdir / f"{code}_cut.mp4")
+            cut_video(self.video, keep, cut_path, self.logln)         # ① 먼저 컷
+            segs = transcribe(cut_path, self.cfg["whisper_model"], self.logln)  # ② 컷영상 전사
+            meta = fetch_meta(self.cfg["meta_api"], code, self.logln)          # ③
+            res = call_llm(prompt_manual(meta, segs), self.cfg["llm"], self.logln)  # ④ 번역+내레이션만
+            dlg = [(float(d["start"]), float(d["end"]), d["ko"]) for d in res.get("dialogue", [])]
+            nar = [(float(d["start"]), float(d["end"]), d["text"]) for d in res.get("narration", [])]
+            write_srt(sorted(dlg), outdir / f"{code}_대사.srt")        # 재타이밍 불필요(컷영상 기준)
+            write_srt(sorted(nar), outdir / f"{code}_내레이션.srt")
+            self.logln(f"완료 → {outdir}")
+            self.q.put(("done", f"[수동] 출력 완료\n{cut_path}\n{code}_대사.srt\n{code}_내레이션.srt\n\n요약: {res.get('summary','')[:100]}"))
         except Exception as e:
             self.q.put(("err", f"{type(e).__name__}: {e}"))
 
-    def confirm(self):
-        # 미리보기 JSON(수정본) 반영
-        try:
-            res = json.loads(self.preview.get("1.0", "end").strip())
-        except Exception as e:
-            return messagebox.showerror("JSON 오류", f"미리보기 JSON을 파싱 못함: {e}")
+    # ── 자동 ──
+    def run_auto(self):
+        if not self._ready(): return
         self.confirm_btn.config(state="disabled")
-        threading.Thread(target=self._run_render, args=(res,), daemon=True).start()
+        threading.Thread(target=self._auto, daemon=True).start()
 
-    def _run_render(self, res):
+    def _auto(self):
         try:
-            code = self.code.get().strip()
-            outdir = Path(self.cfg["out_dir"]); outdir.mkdir(parents=True, exist_ok=True)
+            segs = transcribe(self.video, self.cfg["whisper_model"], self.logln)
+            meta = fetch_meta(self.cfg["meta_api"], self.code.get().strip(), self.logln)
+            res = call_llm(prompt_auto(meta, segs), self.cfg["llm"], self.logln)
+            self.result = res
+            self.q.put(("preview", json.dumps(res, ensure_ascii=False, indent=2)))
+            self.logln("자동 분석 완료 — 미리보기 확인/수정 후 [확정].")
+        except Exception as e:
+            self.q.put(("err", f"{type(e).__name__}: {e}"))
+
+    def confirm_auto(self):
+        try: res = json.loads(self.preview.get("1.0", "end").strip())
+        except Exception as e: return messagebox.showerror("JSON 오류", str(e))
+        self.confirm_btn.config(state="disabled")
+        threading.Thread(target=self._auto_render, args=(res,), daemon=True).start()
+
+    def _auto_render(self, res):
+        try:
+            code = self.code.get().strip(); outdir = Path(self.cfg["out_dir"]); outdir.mkdir(parents=True, exist_ok=True)
             keep = [(float(a), float(b)) for a, b in res.get("keep", [])]
-            if not keep: raise RuntimeError("keep 구간이 없습니다.")
+            if not keep: raise RuntimeError("keep 구간 없음")
             cut_path = str(outdir / f"{code}_cut.mp4")
             cut_video(self.video, keep, cut_path, self.logln)
             dlg = [(float(d["start"]), float(d["end"]), d["ko"]) for d in res.get("dialogue", [])]
             nar = [(float(d["start"]), float(d["end"]), d["text"]) for d in res.get("narration", [])]
             write_srt(retime(dlg, keep, snap=False), outdir / f"{code}_대사.srt")
             write_srt(retime(nar, keep, snap=True), outdir / f"{code}_내레이션.srt")
-            self.logln(f"④ 완료 → {outdir}")
-            self.q.put(("done", f"출력 완료\n{cut_path}\n{code}_대사.srt\n{code}_내레이션.srt"))
+            self.q.put(("done", f"[자동] 출력 완료\n{cut_path}\n{code}_대사.srt\n{code}_내레이션.srt"))
         except Exception as e:
             self.q.put(("err", f"{type(e).__name__}: {e}"))
 
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    App(root)
-    root.mainloop()
+    root = tk.Tk(); App(root); root.mainloop()
