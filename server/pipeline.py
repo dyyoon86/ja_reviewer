@@ -245,6 +245,7 @@ def _style():
     return ("[톤] 3분휴지 스타일 — 정중체(~습니다)+솔직 호불호+마니아 은어(미드/포텐/피지컬/육덕/하메리/1인칭/펠라/시추에이션)"
             "+레이블 맥락. [내레이션 구성] 인트로→상황설명→평가→총평, 섹스 스킵 구간은 브릿지('이후 호텔로…'). "
             "평가/감상은 그럴듯하게 창작하되 메타·시놉과 모순 금지. [대사] 자연스러운 한국어 구어체(번역투 금지), 신음류 제외/(신음). "
+            "각 대사에 speaker 지정 — '여'(여배우)/'남'(남배우). 화자가 바뀌면 색으로 구분됨. "
             "[자막 길이] 대사·내레이션의 각 항목 텍스트는 25자 이내로, 길면 의미 단위(절·구)로 끊어 여러 항목으로 나눠라. "
             "[내레이션 유형] 각 내레이션 항목에 style을 지정 — '기본'(일반 해설), '강조'(핵심·펀치라인·반전·리액션), "
             "'정보'(배우 스펙·수치·레이블·메타 등 정보성 자막). 리뷰 채널처럼 유형을 적절히 섞어 리듬감 있게.\n"
@@ -260,7 +261,7 @@ def prompt_auto(meta, segs, target_sec=60):
             f"(2)스토리(설정·관계·전환·갈등·결말)를 드러내는 핵심 구간만 keep으로 골라 **합쳐서 {target_sec}초 ±20% 목표**. "
             f"(3)도입~결말 흐름이 보이게 고루 분포. 시간은 원본 영상 기준 초.\n"
             f"[출력 JSON만] {{\"summary\":\"3~5줄\",\"stars\":1~5,\"keep\":[[시작,끝],...],"
-            f"\"dialogue\":[{{\"start\":초,\"end\":초,\"ko\":\"\"}}],\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\",\"style\":\"기본|강조|정보\"}}]}}")
+            f"\"dialogue\":[{{\"start\":초,\"end\":초,\"ko\":\"\",\"speaker\":\"여|남\"}}],\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\",\"style\":\"기본|강조|정보\"}}]}}")
 
 
 def prompt_manual(meta, segs, target_sec=60):
@@ -272,7 +273,7 @@ def prompt_manual(meta, segs, target_sec=60):
             f"(2)스토리(설정·관계·전환·갈등·결말)를 드러내는 핵심 구간만 keep으로 골라 **합쳐서 {target_sec}초 ±20% 목표**. "
             f"(3)정사 선별은 하지 말 것(이미 제거됨). 시간은 이 자막 기준 초.\n"
             f"[출력 JSON만] {{\"summary\":\"3~5줄\",\"stars\":1~5,\"keep\":[[시작,끝],...],"
-            f"\"dialogue\":[{{\"start\":초,\"end\":초,\"ko\":\"\"}}],\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\",\"style\":\"기본|강조|정보\"}}]}}")
+            f"\"dialogue\":[{{\"start\":초,\"end\":초,\"ko\":\"\",\"speaker\":\"여|남\"}}],\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\",\"style\":\"기본|강조|정보\"}}]}}")
 
 
 # ─── ④ 컷 / 재타이밍 ─────────────────────────────────────────────────────────
@@ -458,6 +459,8 @@ _ALIGN = {("bottom", "left"): 1, ("bottom", "center"): 2, ("bottom", "right"): 3
 STYLE_DEFAULT = {
     "dialogue":  {"font": "Malgun Gothic", "size": 42, "color": "#FFFFFF", "outline_color": "#000000",
                   "outline": 2.2, "shadow": 0.4, "bold": True, "v": "bottom", "h": "center", "margin": 46},
+    "dialogue_m": {"font": "Malgun Gothic", "size": 42, "color": "#7FD0FF", "outline_color": "#000000",
+                   "outline": 2.2, "shadow": 0.4, "bold": True, "v": "bottom", "h": "center", "margin": 46},
     "narration": {"font": "Malgun Gothic", "size": 38, "color": "#FFD400", "outline_color": "#000000",
                   "outline": 2.2, "shadow": 0.4, "bold": True, "v": "top", "h": "center", "margin": 40},
     "emphasis":  {"font": "Malgun Gothic", "size": 52, "color": "#FF3B3B", "outline_color": "#000000",
@@ -469,6 +472,9 @@ STYLE_DEFAULT = {
 # LLM이 붙이는 내레이션 유형 → ASS 스타일명
 STYLE_TAGNAME = {"기본": "Narration", "일반": "Narration", "강조": "Emphasis", "정보": "Info",
                  "normal": "Narration", "emphasis": "Emphasis", "info": "Info"}
+# 대사 화자 → ASS 스타일명 (여=기본 Dialogue, 남=DialogueM)
+SPEAKER_TAGNAME = {"여": "Dialogue", "여자": "Dialogue", "f": "Dialogue", "female": "Dialogue",
+                   "남": "DialogueM", "남자": "DialogueM", "m": "DialogueM", "male": "DialogueM"}
 
 
 def _style_line(name, st):
@@ -483,7 +489,8 @@ def _style_line(name, st):
 
 def build_ass(dialogue, narration, out_ass, width, height, styles=None):
     styles = styles or {}
-    S = {k: {**STYLE_DEFAULT[k], **(styles.get(k) or {})} for k in ("dialogue", "narration", "emphasis", "info")}
+    S = {k: {**STYLE_DEFAULT[k], **(styles.get(k) or {})}
+         for k in ("dialogue", "dialogue_m", "narration", "emphasis", "info")}
     L = ["[Script Info]", "ScriptType: v4.00+", f"PlayResX: {width}", f"PlayResY: {height}",
          "WrapStyle: 2", "ScaledBorderAndShadow: yes", "",
          "[V4+ Styles]",
@@ -491,12 +498,16 @@ def build_ass(dialogue, narration, out_ass, width, height, styles=None):
          "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
          "Alignment, MarginL, MarginR, MarginV, Encoding",
          _style_line("Dialogue", S["dialogue"]),
+         _style_line("DialogueM", S["dialogue_m"]),
          _style_line("Narration", S["narration"]),
          _style_line("Emphasis", S["emphasis"]),
          _style_line("Info", S["info"]),
          "", "[Events]",
          "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"]
-    evs = [(it[0], it[1], "Dialogue", it[2]) for it in dialogue]
+    evs = []
+    for it in dialogue:                        # (s,e,text) 또는 (s,e,text,speaker)
+        spk = it[3] if len(it) > 3 else "여"
+        evs.append((it[0], it[1], SPEAKER_TAGNAME.get(spk, "Dialogue"), it[2]))
     for it in narration:                       # (s,e,text) 또는 (s,e,text,style)
         tag = it[3] if len(it) > 3 else "기본"
         evs.append((it[0], it[1], STYLE_TAGNAME.get(tag, "Narration"), it[2]))
@@ -508,9 +519,14 @@ def build_ass(dialogue, narration, out_ass, width, height, styles=None):
     return out_ass
 
 
-def burn_subs(video, dialogue_srt, narration_srt, out_video, styles=None, narration_json=None, log=print):
+def burn_subs(video, dialogue_srt, narration_srt, out_video, styles=None,
+              narration_json=None, dialogue_json=None, log=print):
     w, h = video_wh(video)
-    dlg = srt_parse(dialogue_srt) if dialogue_srt and Path(dialogue_srt).is_file() else []
+    if dialogue_json and Path(dialogue_json).is_file():        # 화자(speaker) 포함 대사
+        dd = json.loads(Path(dialogue_json).read_text(encoding="utf-8"))
+        dlg = [(float(d["start"]), float(d["end"]), d["text"], d.get("speaker", "여")) for d in dd]
+    else:
+        dlg = srt_parse(dialogue_srt) if dialogue_srt and Path(dialogue_srt).is_file() else []
     if narration_json and Path(narration_json).is_file():     # 유형(style) 포함 내레이션
         data = json.loads(Path(narration_json).read_text(encoding="utf-8"))
         nar = [(float(d["start"]), float(d["end"]), d["text"], d.get("style", "기본")) for d in data]

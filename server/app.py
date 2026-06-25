@@ -107,6 +107,15 @@ def write_narration(outdir, code, nar_rt):
     (outdir / f"{code}_내레이션.json").write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
+def write_dialogue(outdir, code, dlg_rt):
+    """대사 출력 — SRT(텍스트) + JSON(화자 speaker 포함, 굽기용). 둘 다 25자 분할."""
+    P.write_srt([(s, e, t) for s, e, t, *_ in dlg_rt], outdir / f"{code}_대사.srt")
+    dsplit = P.split_entries(dlg_rt, 24)
+    data = [{"start": round(s, 3), "end": round(e, 3), "text": t, "speaker": (x[0] if x else "여")}
+            for s, e, t, *x in dsplit]
+    (outdir / f"{code}_대사.json").write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
 @app.get("/events/{jid}")
 async def events(jid: str):
     async def gen():
@@ -285,9 +294,9 @@ async def review(req: Request):
             jstep(jid, 4, 4, "핵심 구간 컷 + 자막")
             P.cut_video(path, keep, final, lambda m: jlog(jid, m))
             jfile(jid, "최종 영상", final)
-            dlg = [(float(d["start"]), float(d["end"]), d["ko"]) for d in res.get("dialogue", [])]
+            dlg = [(float(d["start"]), float(d["end"]), d["ko"], d.get("speaker", "여")) for d in res.get("dialogue", [])]
             nar = [(float(d["start"]), float(d["end"]), d["text"], d.get("style", "기본")) for d in res.get("narration", [])]
-            P.write_srt(P.retime(dlg, keep, snap=False), outdir / f"{code}_대사.srt")
+            write_dialogue(outdir, code, P.retime(dlg, keep, snap=False))
             jfile(jid, "대사 자막", outdir / f"{code}_대사.srt")
             write_narration(outdir, code, P.retime(nar, keep, snap=True))
             jfile(jid, "내레이션 자막", outdir / f"{code}_내레이션.srt")
@@ -320,9 +329,9 @@ async def render(req: Request):
             P.cut_video(path, keep, final, lambda m: jlog(jid, m))
             jfile(jid, "최종 영상", final)
             jstep(jid, 2, 2, "자막 생성")
-            dlg = [(float(d["start"]), float(d["end"]), d["ko"]) for d in res.get("dialogue", [])]
+            dlg = [(float(d["start"]), float(d["end"]), d["ko"], d.get("speaker", "여")) for d in res.get("dialogue", [])]
             nar = [(float(d["start"]), float(d["end"]), d["text"], d.get("style", "기본")) for d in res.get("narration", [])]
-            P.write_srt(P.retime(dlg, keep, snap=False), outdir / f"{code}_대사.srt")
+            write_dialogue(outdir, code, P.retime(dlg, keep, snap=False))
             jfile(jid, "대사 자막", outdir / f"{code}_대사.srt")
             write_narration(outdir, code, P.retime(nar, keep, snap=True))
             jfile(jid, "내레이션 자막", outdir / f"{code}_내레이션.srt")
@@ -465,11 +474,13 @@ async def burn(req: Request):
                 raise RuntimeError(f"원본 영상이 없습니다: {final} (먼저 리뷰 생성)")
             dsrt = outdir / f"{code}_대사.srt"
             nsrt = outdir / f"{code}_내레이션.srt"
-            njson = outdir / f"{code}_내레이션.json"     # 유형(style) 포함 → 있으면 타입별 스타일
+            njson = outdir / f"{code}_내레이션.json"     # 유형(style) 포함 → 타입별 스타일
+            djson = outdir / f"{code}_대사.json"          # 화자(speaker) 포함 → 여/남 색 구분
             out = str(outdir / f"{code}_final_subbed.mp4")
             jstep(jid, 1, 1, "자막 굽기(ffmpeg)")
             P.burn_subs(str(src), str(dsrt), str(nsrt), out, styles,
-                        str(njson) if njson.is_file() else None, lambda m: jlog(jid, m))
+                        str(njson) if njson.is_file() else None,
+                        str(djson) if djson.is_file() else None, lambda m: jlog(jid, m))
             jfile(jid, "자막 입힌 영상", out)
             c["sub_styles"] = styles; save_cfg(c)   # 마지막 사용 스타일 기억
             jdone(jid, {"mode": "burn", "subbed": out, "source": str(src)})

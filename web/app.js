@@ -311,8 +311,8 @@ function loadSubTemplates(pick){
     if(first){ s.value=first; applyTpl(SUBTPL[first]); }
   }).catch(()=>{});
 }
-function applyTpl(t){ if(!t) return; applyStyle("dlg",t.dialogue); applyStyle("nar",t.narration); applyStyle("emp",t.emphasis); applyStyle("inf",t.info); }
-function allStyles(){ return {dialogue:collectStyle("dlg"), narration:collectStyle("nar"), emphasis:collectStyle("emp"), info:collectStyle("inf")}; }
+function applyTpl(t){ if(!t) return; applyStyle("dlg",t.dialogue); applyStyle("dlm",t.dialogue_m); applyStyle("nar",t.narration); applyStyle("emp",t.emphasis); applyStyle("inf",t.info); }
+function allStyles(){ return {dialogue:collectStyle("dlg"), dialogue_m:collectStyle("dlm"), narration:collectStyle("nar"), emphasis:collectStyle("emp"), info:collectStyle("inf")}; }
 $("#subTpl").onchange=()=>{ applyTpl(SUBTPL[$("#subTpl").value]); };
 $("#btnTplSave").onclick=()=>{
   const name=$("#subTplName").value.trim(); if(!name){ log("템플릿 이름을 입력하세요","warn"); return; }
