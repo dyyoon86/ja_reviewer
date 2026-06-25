@@ -35,6 +35,7 @@ DEFAULTS = {
     "llm": "claude",
     "whisper_model": "large-v3",
     "out_dir": str(Path.home() / "ddalddalgi_out"),
+    "target_sec": 60,
 }
 
 
@@ -174,25 +175,29 @@ def _style():
             "평가/감상은 그럴듯하게 창작하되 메타·시놉과 모순 금지. [대사] 자연스러운 한국어 구어체(번역투 금지), 신음류 제외/(신음).")
 
 
-def prompt_auto(meta, segs):
+def prompt_auto(meta, segs, target_sec=60):
     body = "\n".join(f"{k}\t{a:.2f}\t{b:.2f}\t{t}" for k, (a, b, t) in enumerate(segs, 1))
-    return (f"너는 딸딸기튜브 AV 해설영상 작가다. 아래 작품의 일본어 자막을 보고 '스토리 구간만' 골라 "
-            f"한글 대사자막과 해설 내레이션을 만든다.\n[메타]\n{_meta_block(meta)}\n"
-            f"[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n{_style()}\n"
-            f"[규칙] 신음·짧은탄성·반복감탄·비스토리 섹스대사 제외, 스토리(설정·관계·전환·갈등·결말) 구간만 keep. "
-            f"전체 타임라인에 고루. 시간은 원본 영상 기준 초.\n"
+    return (f"너는 딸딸기튜브 AV 해설영상 작가다. 아래 작품의 일본어 자막을 보고 '스토리 핵심만' 골라 "
+            f"**약 {target_sec}초 내외 하이라이트 영상**으로 압축하고, 한글 대사자막과 해설 내레이션을 만든다.\n"
+            f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n{_style()}\n"
+            f"[규칙] (1)신음·짧은탄성·반복감탄·비스토리 섹스대사·무음/잡담·중복은 버린다. "
+            f"(2)스토리(설정·관계·전환·갈등·결말)를 드러내는 핵심 구간만 keep으로 골라 **합쳐서 {target_sec}초 ±20% 목표**. "
+            f"(3)도입~결말 흐름이 보이게 고루 분포. 시간은 원본 영상 기준 초.\n"
             f"[출력 JSON만] {{\"summary\":\"3~5줄\",\"stars\":1~5,\"keep\":[[시작,끝],...],"
             f"\"dialogue\":[{{\"start\":초,\"end\":초,\"ko\":\"\"}}],\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\"}}]}}")
 
 
-def prompt_manual(meta, segs):
-    """수동: 이미 컷된(스토리만) 영상의 SRT → 번역 + 내레이션만 (선정 X)."""
+def prompt_manual(meta, segs, target_sec=60):
+    """수동: 정사장면은 이미 내가 제외함. LLM은 남은 영상에서 스토리 핵심만 골라
+    ~target_sec로 압축(무음·잡담 제거) + 번역 + 내레이션."""
     body = "\n".join(f"{k}\t{a:.2f}\t{b:.2f}\t{t}" for k, (a, b, t) in enumerate(segs, 1))
-    return (f"너는 딸딸기튜브 AV 해설영상 작가다. 아래는 이미 '스토리 구간만 잘라 이어붙인 영상'의 일본어 자막이다. "
-            f"여기에 한글 대사자막과 해설 내레이션을 입힌다. (구간 선정은 하지 말 것 — 이미 끝남)\n"
+    return (f"너는 딸딸기튜브 AV 해설영상 작가다. 아래는 '정사장면을 이미 제거한' 영상의 일본어 자막이다. "
+            f"여기서 **스토리 핵심만 골라 약 {target_sec}초 내외로 압축**하고, 한글 대사자막과 해설 내레이션을 만든다.\n"
             f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n{_style()}\n"
-            f"시간은 이 자막 기준 초 그대로 사용.\n"
-            f"[출력 JSON만] {{\"summary\":\"3~5줄\",\"stars\":1~5,"
+            f"[규칙] (1)무음·잡담·반복·의미없는 짧은 라인은 버린다. "
+            f"(2)스토리(설정·관계·전환·갈등·결말)를 드러내는 핵심 구간만 keep으로 골라 **합쳐서 {target_sec}초 ±20% 목표**. "
+            f"(3)정사 선별은 하지 말 것(이미 제거됨). 시간은 이 자막 기준 초.\n"
+            f"[출력 JSON만] {{\"summary\":\"3~5줄\",\"stars\":1~5,\"keep\":[[시작,끝],...],"
             f"\"dialogue\":[{{\"start\":초,\"end\":초,\"ko\":\"\"}}],\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\"}}]}}")
 
 
@@ -257,7 +262,9 @@ class App:
         ttk.Label(cfgf, text="Whisper:").pack(side="left")
         self.wm = ttk.Entry(cfgf, width=11); self.wm.insert(0, self.cfg["whisper_model"]); self.wm.pack(side="left", padx=4)
         ttk.Label(cfgf, text="출력:").pack(side="left")
-        self.outd = ttk.Entry(cfgf, width=22); self.outd.insert(0, self.cfg["out_dir"]); self.outd.pack(side="left", padx=4)
+        self.outd = ttk.Entry(cfgf, width=18); self.outd.insert(0, self.cfg["out_dir"]); self.outd.pack(side="left", padx=4)
+        ttk.Label(cfgf, text="목표길이(초):").pack(side="left")
+        self.tgt = ttk.Entry(cfgf, width=5); self.tgt.insert(0, str(self.cfg.get("target_sec", 60))); self.tgt.pack(side="left", padx=4)
 
         nb = ttk.Notebook(root); nb.pack(fill="both", expand=True, padx=8, pady=6)
         # ── 수동 탭 ──
@@ -380,8 +387,11 @@ class App:
             self.player.set_media(self.vlc.media_new(f))
 
     def save_settings(self):
+        try: tsec = int(float(self.tgt.get().strip()))
+        except Exception: tsec = 60
         self.cfg.update({"meta_api": self.api.get().strip(), "llm": self.llm.get(),
-                         "whisper_model": self.wm.get().strip(), "out_dir": self.outd.get().strip()})
+                         "whisper_model": self.wm.get().strip(), "out_dir": self.outd.get().strip(),
+                         "target_sec": tsec})
         save_cfg(self.cfg)
 
     def _ready(self):
@@ -398,20 +408,26 @@ class App:
     def _manual(self):
         try:
             code = self.code.get().strip(); outdir = Path(self.cfg["out_dir"]); outdir.mkdir(parents=True, exist_ok=True)
+            tsec = int(self.cfg.get("target_sec", 60))
             total = video_duration(self.video)
-            keep = keep_from_exclude(total, self.excludes)
-            if not keep: raise RuntimeError("남는 구간이 없습니다.")
-            cut_path = str(outdir / f"{code}_cut.mp4")
-            cut_video(self.video, keep, cut_path, self.logln)         # ① 먼저 컷
-            segs = transcribe(cut_path, self.cfg["whisper_model"], self.logln)  # ② 컷영상 전사
-            meta = fetch_meta(self.cfg["meta_api"], code, self.logln)          # ③
-            res = call_llm(prompt_manual(meta, segs), self.cfg["llm"], self.logln)  # ④ 번역+내레이션만
+            keep1 = keep_from_exclude(total, self.excludes)            # 정사 제외 = 1차 keep
+            if not keep1: raise RuntimeError("남는 구간이 없습니다.")
+            story_path = str(outdir / f"{code}_story.mp4")
+            cut_video(self.video, keep1, story_path, self.logln)       # ① 정사장면 제거 컷
+            segs = transcribe(story_path, self.cfg["whisper_model"], self.logln)   # ② 남은 영상 전사
+            meta = fetch_meta(self.cfg["meta_api"], code, self.logln)             # ③
+            res = call_llm(prompt_manual(meta, segs, tsec), self.cfg["llm"], self.logln)  # ④ 스토리 압축+번역+내레이션
+            keep2 = [(float(a), float(b)) for a, b in res.get("keep", [])]         # LLM이 고른 핵심 구간
+            if not keep2: raise RuntimeError("LLM이 keep 구간을 못 골랐습니다. 미리보기/재시도 필요.")
+            final_path = str(outdir / f"{code}_final.mp4")
+            cut_video(story_path, keep2, final_path, self.logln)                  # ⑤ 핵심만 재컷(~목표초)
             dlg = [(float(d["start"]), float(d["end"]), d["ko"]) for d in res.get("dialogue", [])]
             nar = [(float(d["start"]), float(d["end"]), d["text"]) for d in res.get("narration", [])]
-            write_srt(sorted(dlg), outdir / f"{code}_대사.srt")        # 재타이밍 불필요(컷영상 기준)
-            write_srt(sorted(nar), outdir / f"{code}_내레이션.srt")
-            self.logln(f"완료 → {outdir}")
-            self.q.put(("done", f"[수동] 출력 완료\n{cut_path}\n{code}_대사.srt\n{code}_내레이션.srt\n\n요약: {res.get('summary','')[:100]}"))
+            write_srt(retime(dlg, keep2, snap=False), outdir / f"{code}_대사.srt")
+            write_srt(retime(nar, keep2, snap=True), outdir / f"{code}_내레이션.srt")
+            fdur = video_duration(final_path)
+            self.logln(f"완료 → {outdir} (최종 {fdur:.0f}초)")
+            self.q.put(("done", f"[수동] 출력 완료 (최종 {fdur:.0f}초, 목표 {tsec})\n{final_path}\n{code}_대사.srt\n{code}_내레이션.srt\n\n요약: {res.get('summary','')[:120]}"))
         except Exception as e:
             self.q.put(("err", f"{type(e).__name__}: {e}"))
 
@@ -425,7 +441,7 @@ class App:
         try:
             segs = transcribe(self.video, self.cfg["whisper_model"], self.logln)
             meta = fetch_meta(self.cfg["meta_api"], self.code.get().strip(), self.logln)
-            res = call_llm(prompt_auto(meta, segs), self.cfg["llm"], self.logln)
+            res = call_llm(prompt_auto(meta, segs, int(self.cfg.get("target_sec", 60))), self.cfg["llm"], self.logln)
             self.result = res
             self.q.put(("preview", json.dumps(res, ensure_ascii=False, indent=2)))
             self.logln("자동 분석 완료 — 미리보기 확인/수정 후 [확정].")
