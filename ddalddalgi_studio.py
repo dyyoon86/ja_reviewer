@@ -280,15 +280,18 @@ class App:
         nb = ttk.Notebook(root); nb.pack(fill="both", expand=True, padx=8, pady=6)
         # ── 수동 탭 ──
         manual = ttk.Frame(nb, padding=6); nb.add(manual, text="수동 (정사장면 직접 제외)")
-        self.video_frame = tk.Frame(manual, bg="black", height=240); self.video_frame.pack(fill="x")
+        self.video_frame = tk.Frame(manual, bg="black", height=240)
+        self.video_frame.pack(fill="x"); self.video_frame.pack_propagate(False)
+        self.vlc_warn = ttk.Label(manual, foreground="red", text="")
+        self.vlc_warn.pack(fill="x")
         pc = ttk.Frame(manual); pc.pack(fill="x", pady=4)
-        ttk.Button(pc, text="▶/⏸", command=self.toggle_play).pack(side="left")
+        ttk.Button(pc, text="▶/⏸ (Space)", command=self.toggle_play).pack(side="left")
         self.seek = ttk.Scale(pc, from_=0, to=1000, command=self.on_seek); self.seek.pack(side="left", fill="x", expand=True, padx=6)
-        self.tpos = ttk.Label(pc, text="00:00:00"); self.tpos.pack(side="left")
+        self.tpos = ttk.Label(pc, text="00:00:00 / 00:00:00"); self.tpos.pack(side="left")
         mk = ttk.Frame(manual); mk.pack(fill="x", pady=2)
-        ttk.Button(mk, text="제외 시작 ◀", command=self.mark_start).pack(side="left")
-        ttk.Button(mk, text="제외 끝 ▶", command=self.mark_end).pack(side="left", padx=4)
-        ttk.Label(mk, text="  또는 텍스트 입력(12:30-18:00, 45:00-52:00):").pack(side="left")
+        ttk.Button(mk, text="제외 시작 [ (또는 I)", command=self.mark_start).pack(side="left")
+        ttk.Button(mk, text="제외 끝 ] (또는 O)", command=self.mark_end).pack(side="left", padx=4)
+        ttk.Label(mk, text="  ←/→ 5초이동 ·  또는 텍스트(12:30-18:00, 45:00-52:00):").pack(side="left")
         self.exq = ttk.Entry(mk); self.exq.pack(side="left", fill="x", expand=True, padx=4)
         ttk.Button(mk, text="추가", command=self.add_text_ranges).pack(side="left")
         self.exlist = tk.Listbox(manual, height=4); self.exlist.pack(fill="x", pady=2)
@@ -310,29 +313,40 @@ class App:
         self.log = scrolledtext.ScrolledText(root, height=8); self.log.pack(fill="x", padx=8, pady=(0, 6))
         self.root.after(120, self.pump)
         self._init_vlc()
+        self._bind_keys()
         self.root.after(300, self._tick)
 
     # ── VLC ──
     def _init_vlc(self):
         try:
             import vlc
-            self.vlc = vlc.Instance(); self.player = self.vlc.media_player_new()
-            self.logln("플레이어(VLC) 준비됨.")
-        except Exception:
-            self.logln("※ VLC/python-vlc 없음 → 수동은 '텍스트 입력'으로만. (pip install python-vlc + VLC 설치 시 영상 마킹 가능)")
+            self.vlc = vlc.Instance("--no-xlib") if os.name != "nt" else vlc.Instance()
+            self.player = self.vlc.media_player_new()
+            self.logln("플레이어(VLC) 준비됨.  단축키: Space=재생/정지, [ 또는 I=제외시작, ] 또는 O=제외끝, ←/→=5초")
+        except Exception as e:
+            self.player = None
+            self.vlc_warn.config(text="⚠ VLC 미인식 → 영상 재생/마킹 불가. 아래 '텍스트'로 제외구간 입력하세요.  "
+                                      "해결: ① VLC(64bit) 설치  ② pip install python-vlc  ③ 파이썬/VLC 비트수 일치(둘 다 64bit)")
+            self.logln(f"※ VLC 로드 실패: {e}")
 
     def _attach_video(self):
         if not self.player: return
         try:
+            self.root.update_idletasks()
             wid = self.video_frame.winfo_id()
             if os.name == "nt": self.player.set_hwnd(wid)
             else: self.player.set_xwindow(wid)
-        except Exception: pass
+        except Exception as e:
+            self.logln(f"※ 영상 임베드 실패: {e}")
 
     def toggle_play(self):
         if not self.player: return
         if self.player.is_playing(): self.player.pause()
         else: self.player.play()
+
+    def seek_rel(self, d):
+        if self.player and self.player.get_length() > 0:
+            self.player.set_time(max(0, self.player.get_time() + int(d * 1000)))
 
     def on_seek(self, v):
         if self.player and self.player.get_length() > 0 and getattr(self, "_user_seek", True):
@@ -345,18 +359,44 @@ class App:
             try: self.seek.set(cur / ln * 1000)
             except Exception: pass
             self._user_seek = True
-            self.tpos.config(text=hhmmss(cur / 1000))
+            self.tpos.config(text=f"{hhmmss(cur/1000)} / {hhmmss(ln/1000)}")
         self.root.after(300, self._tick)
 
-    def cur_sec(self):
-        return (self.player.get_time() / 1000) if (self.player and self.player.get_time() >= 0) else 0.0
+    # ── 키보드 ──
+    def _bind_keys(self):
+        r = self.root
+        r.bind("<space>", lambda e: self._kb(e, self.toggle_play))
+        r.bind("<bracketleft>", lambda e: self._kb(e, self.mark_start))   # [
+        r.bind("<bracketright>", lambda e: self._kb(e, self.mark_end))    # ]
+        r.bind("<Key-i>", lambda e: self._kb(e, self.mark_start))
+        r.bind("<Key-o>", lambda e: self._kb(e, self.mark_end))
+        r.bind("<Left>", lambda e: self._kb(e, lambda: self.seek_rel(-5)))
+        r.bind("<Right>", lambda e: self._kb(e, lambda: self.seek_rel(5)))
 
-    def mark_start(self): self._mark_start = self.cur_sec(); self.logln(f"제외 시작: {hhmmss(self._mark_start)}")
+    def _kb(self, e, fn):
+        w = self.root.focus_get()
+        if w is not None and w.winfo_class() in ("TEntry", "Entry", "TCombobox", "Text"):
+            return
+        fn(); return "break"
+
+    def cur_sec(self):
+        if not self.player: return None
+        t = self.player.get_time()
+        return (t / 1000) if t >= 0 else 0.0
+
+    def mark_start(self):
+        s = self.cur_sec()
+        if s is None: return messagebox.showinfo("", "영상을 재생해야 마킹됩니다. (VLC 없으면 텍스트 입력)")
+        self._mark_start = s; self.logln(f"● 제외 시작: {hhmmss(s)}")
+
     def mark_end(self):
-        if self._mark_start is None: return messagebox.showinfo("", "먼저 '제외 시작'을 누르세요.")
-        a, b = self._mark_start, self.cur_sec()
+        e = self.cur_sec()
+        if e is None: return messagebox.showinfo("", "영상을 재생해야 마킹됩니다. (VLC 없으면 텍스트 입력)")
+        if self._mark_start is None: return messagebox.showinfo("", "먼저 '제외 시작'([ 또는 I)을 누르세요.")
+        a, b = self._mark_start, e
         if b <= a: return messagebox.showinfo("", "끝이 시작보다 뒤여야 합니다.")
         self.excludes.append((a, b)); self._mark_start = None; self._refresh_ex()
+        self.logln(f"● 제외 구간 추가: {hhmmss(a)} ~ {hhmmss(b)}")
 
     def add_text_ranges(self):
         rs = ranges_from_text(self.exq.get())
@@ -396,6 +436,11 @@ class App:
         if self.player:
             self._attach_video()
             self.player.set_media(self.vlc.media_new(f))
+            self.player.play()                                    # 자동 재생(첫 프레임 표시)
+            self.root.after(400, lambda: self.player.set_pause(1))  # 바로 일시정지(재생은 Space)
+            self.logln("영상 로드 — Space로 재생, [ ] 로 제외구간 마킹.")
+        else:
+            self.logln("VLC 없음 — 텍스트 칸에 제외구간 입력하세요.")
 
     def save_settings(self):
         tsec = TARGETS.get(self.tgt.get(), 60)
