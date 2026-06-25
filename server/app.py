@@ -30,12 +30,13 @@ ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 CFG_PATH = ROOT / "studio_config.json"
 SUB_TEMPLATES = {
-    "기본 · 대사 하단 / 내레이션 상단(노랑)": P.STYLE_DEFAULT,
-    "심플 · 대사·내레이션 모두 하단 흰색": {
-        "dialogue": {**P.STYLE_DEFAULT["dialogue"]},
+    "기본 · 대사하단/내레이션상단/강조중앙/정보우상단": {**P.STYLE_DEFAULT},
+    "심플 · 대사·내레이션 하단 흰색": {
+        **P.STYLE_DEFAULT,
         "narration": {**P.STYLE_DEFAULT["narration"], "color": "#FFFFFF", "v": "bottom", "margin": 110},
     },
-    "예능 · 큰 노랑 내레이션": {
+    "예능 · 큰 노랑 내레이션 + 빨강 강조": {
+        **P.STYLE_DEFAULT,
         "dialogue": {**P.STYLE_DEFAULT["dialogue"], "size": 40},
         "narration": {**P.STYLE_DEFAULT["narration"], "size": 48, "color": "#FFE600"},
     },
@@ -95,6 +96,15 @@ def jerr(jid, e):
 
 def run_bg(fn):
     threading.Thread(target=fn, daemon=True).start()
+
+
+def write_narration(outdir, code, nar_rt):
+    """내레이션 출력 — SRT(텍스트, TTS·호환용) + JSON(유형 style 포함, 굽기용). 둘 다 25자 분할."""
+    P.write_srt([(s, e, t) for s, e, t, *_ in nar_rt], outdir / f"{code}_내레이션.srt")
+    nar_split = P.split_entries(nar_rt, 24)
+    data = [{"start": round(s, 3), "end": round(e, 3), "text": t, "style": (x[0] if x else "기본")}
+            for s, e, t, *x in nar_split]
+    (outdir / f"{code}_내레이션.json").write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
 @app.get("/events/{jid}")
@@ -276,10 +286,10 @@ async def review(req: Request):
             P.cut_video(path, keep, final, lambda m: jlog(jid, m))
             jfile(jid, "최종 영상", final)
             dlg = [(float(d["start"]), float(d["end"]), d["ko"]) for d in res.get("dialogue", [])]
-            nar = [(float(d["start"]), float(d["end"]), d["text"]) for d in res.get("narration", [])]
+            nar = [(float(d["start"]), float(d["end"]), d["text"], d.get("style", "기본")) for d in res.get("narration", [])]
             P.write_srt(P.retime(dlg, keep, snap=False), outdir / f"{code}_대사.srt")
             jfile(jid, "대사 자막", outdir / f"{code}_대사.srt")
-            P.write_srt(P.retime(nar, keep, snap=True), outdir / f"{code}_내레이션.srt")
+            write_narration(outdir, code, P.retime(nar, keep, snap=True))
             jfile(jid, "내레이션 자막", outdir / f"{code}_내레이션.srt")
             jdone(jid, {"mode": "manual", "final": final,
                         "srt_dialogue": str(outdir / f"{code}_대사.srt"),
@@ -311,10 +321,10 @@ async def render(req: Request):
             jfile(jid, "최종 영상", final)
             jstep(jid, 2, 2, "자막 생성")
             dlg = [(float(d["start"]), float(d["end"]), d["ko"]) for d in res.get("dialogue", [])]
-            nar = [(float(d["start"]), float(d["end"]), d["text"]) for d in res.get("narration", [])]
+            nar = [(float(d["start"]), float(d["end"]), d["text"], d.get("style", "기본")) for d in res.get("narration", [])]
             P.write_srt(P.retime(dlg, keep, snap=False), outdir / f"{code}_대사.srt")
             jfile(jid, "대사 자막", outdir / f"{code}_대사.srt")
-            P.write_srt(P.retime(nar, keep, snap=True), outdir / f"{code}_내레이션.srt")
+            write_narration(outdir, code, P.retime(nar, keep, snap=True))
             jfile(jid, "내레이션 자막", outdir / f"{code}_내레이션.srt")
             jdone(jid, {"mode": "auto", "final": final,
                         "srt_dialogue": str(outdir / f"{code}_대사.srt"),
@@ -455,9 +465,11 @@ async def burn(req: Request):
                 raise RuntimeError(f"원본 영상이 없습니다: {final} (먼저 리뷰 생성)")
             dsrt = outdir / f"{code}_대사.srt"
             nsrt = outdir / f"{code}_내레이션.srt"
+            njson = outdir / f"{code}_내레이션.json"     # 유형(style) 포함 → 있으면 타입별 스타일
             out = str(outdir / f"{code}_final_subbed.mp4")
             jstep(jid, 1, 1, "자막 굽기(ffmpeg)")
-            P.burn_subs(str(src), str(dsrt), str(nsrt), out, styles, lambda m: jlog(jid, m))
+            P.burn_subs(str(src), str(dsrt), str(nsrt), out, styles,
+                        str(njson) if njson.is_file() else None, lambda m: jlog(jid, m))
             jfile(jid, "자막 입힌 영상", out)
             c["sub_styles"] = styles; save_cfg(c)   # 마지막 사용 스타일 기억
             jdone(jid, {"mode": "burn", "subbed": out, "source": str(src)})

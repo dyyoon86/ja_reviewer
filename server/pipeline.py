@@ -125,17 +125,17 @@ def _wrap_chunks(text, maxlen=24):
 def split_entries(entries, maxlen=24):
     """긴 자막을 maxlen 이하 여러 항목으로 분할 — 시간은 글자수 비례로 배분(싱크 유지)."""
     out = []
-    for a, b, t in entries:
+    for a, b, t, *extra in entries:
         chunks = _wrap_chunks(t, maxlen)
         if len(chunks) <= 1:
-            out.append((a, b, chunks[0] if chunks else "")); continue
+            out.append((a, b, chunks[0] if chunks else "", *extra)); continue
         total = sum(len(c) for c in chunks) or 1
         span = max(0.0, b - a); cur = a
         for k, c in enumerate(chunks):
             e = b if k == len(chunks) - 1 else cur + span * (len(c) / total)
             if e <= cur:
                 e = cur + 0.3
-            out.append((cur, e, c)); cur = e
+            out.append((cur, e, c, *extra)); cur = e
     return out
 
 
@@ -245,7 +245,9 @@ def _style():
     return ("[톤] 3분휴지 스타일 — 정중체(~습니다)+솔직 호불호+마니아 은어(미드/포텐/피지컬/육덕/하메리/1인칭/펠라/시추에이션)"
             "+레이블 맥락. [내레이션 구성] 인트로→상황설명→평가→총평, 섹스 스킵 구간은 브릿지('이후 호텔로…'). "
             "평가/감상은 그럴듯하게 창작하되 메타·시놉과 모순 금지. [대사] 자연스러운 한국어 구어체(번역투 금지), 신음류 제외/(신음). "
-            "[자막 길이] 대사·내레이션의 각 항목 텍스트는 25자 이내로, 길면 의미 단위(절·구)로 끊어 여러 항목으로 나눠라.\n"
+            "[자막 길이] 대사·내레이션의 각 항목 텍스트는 25자 이내로, 길면 의미 단위(절·구)로 끊어 여러 항목으로 나눠라. "
+            "[내레이션 유형] 각 내레이션 항목에 style을 지정 — '기본'(일반 해설), '강조'(핵심·펀치라인·반전·리액션), "
+            "'정보'(배우 스펙·수치·레이블·메타 등 정보성 자막). 리뷰 채널처럼 유형을 적절히 섞어 리듬감 있게.\n"
             + _translate())
 
 
@@ -258,7 +260,7 @@ def prompt_auto(meta, segs, target_sec=60):
             f"(2)스토리(설정·관계·전환·갈등·결말)를 드러내는 핵심 구간만 keep으로 골라 **합쳐서 {target_sec}초 ±20% 목표**. "
             f"(3)도입~결말 흐름이 보이게 고루 분포. 시간은 원본 영상 기준 초.\n"
             f"[출력 JSON만] {{\"summary\":\"3~5줄\",\"stars\":1~5,\"keep\":[[시작,끝],...],"
-            f"\"dialogue\":[{{\"start\":초,\"end\":초,\"ko\":\"\"}}],\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\"}}]}}")
+            f"\"dialogue\":[{{\"start\":초,\"end\":초,\"ko\":\"\"}}],\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\",\"style\":\"기본|강조|정보\"}}]}}")
 
 
 def prompt_manual(meta, segs, target_sec=60):
@@ -270,7 +272,7 @@ def prompt_manual(meta, segs, target_sec=60):
             f"(2)스토리(설정·관계·전환·갈등·결말)를 드러내는 핵심 구간만 keep으로 골라 **합쳐서 {target_sec}초 ±20% 목표**. "
             f"(3)정사 선별은 하지 말 것(이미 제거됨). 시간은 이 자막 기준 초.\n"
             f"[출력 JSON만] {{\"summary\":\"3~5줄\",\"stars\":1~5,\"keep\":[[시작,끝],...],"
-            f"\"dialogue\":[{{\"start\":초,\"end\":초,\"ko\":\"\"}}],\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\"}}]}}")
+            f"\"dialogue\":[{{\"start\":초,\"end\":초,\"ko\":\"\"}}],\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\",\"style\":\"기본|강조|정보\"}}]}}")
 
 
 # ─── ④ 컷 / 재타이밍 ─────────────────────────────────────────────────────────
@@ -281,14 +283,14 @@ def retime(entries, keep, snap=False, default_dur=4.0):
     for a, b in keep:
         offs.append(acc); acc += (b - a)
     total = acc; out = []
-    for s, e, t in entries:
+    for s, e, *rest in entries:
         placed = False
         for (a, b), off in zip(keep, offs):
             if s >= a - 0.05 and s < b + 0.05:
                 ns = off + max(0.0, s - a); ne = off + min(b - a, e - a)
                 if ne <= ns:
                     ne = ns + 0.5
-                out.append((ns, ne, t)); placed = True; break
+                out.append((ns, ne, *rest)); placed = True; break
         if placed or not snap:
             continue
         if s < keep[0][0]:
@@ -301,7 +303,7 @@ def retime(entries, keep, snap=False, default_dur=4.0):
         ne = min(total, ns + (e - s if e > s else default_dur))
         if ne <= ns:
             ne = min(total, ns + default_dur)
-        out.append((ns, ne, t))
+        out.append((ns, ne, *rest))
     out.sort(key=lambda x: x[0]); return out
 
 
@@ -452,13 +454,21 @@ _ALIGN = {("bottom", "left"): 1, ("bottom", "center"): 2, ("bottom", "right"): 3
           ("middle", "left"): 4, ("middle", "center"): 5, ("middle", "right"): 6,
           ("top", "left"): 7, ("top", "center"): 8, ("top", "right"): 9}
 
-# 기본 스타일 (대사=하단 흰색, 내레이션=상단 노랑)
+# 기본 스타일 — 대사(하단 흰), 내레이션=기본(상단 노랑), 강조(중앙 큰 빨강), 정보(우상단 작은 하늘)
 STYLE_DEFAULT = {
     "dialogue":  {"font": "Malgun Gothic", "size": 42, "color": "#FFFFFF", "outline_color": "#000000",
                   "outline": 2.2, "shadow": 0.4, "bold": True, "v": "bottom", "h": "center", "margin": 46},
     "narration": {"font": "Malgun Gothic", "size": 38, "color": "#FFD400", "outline_color": "#000000",
                   "outline": 2.2, "shadow": 0.4, "bold": True, "v": "top", "h": "center", "margin": 40},
+    "emphasis":  {"font": "Malgun Gothic", "size": 52, "color": "#FF3B3B", "outline_color": "#000000",
+                  "outline": 2.8, "shadow": 0.6, "bold": True, "v": "middle", "h": "center", "margin": 60},
+    "info":      {"font": "Malgun Gothic", "size": 32, "color": "#8FE3FF", "outline_color": "#00243A",
+                  "outline": 2.0, "shadow": 0.3, "bold": True, "v": "top", "h": "right", "margin": 30},
 }
+
+# LLM이 붙이는 내레이션 유형 → ASS 스타일명
+STYLE_TAGNAME = {"기본": "Narration", "일반": "Narration", "강조": "Emphasis", "정보": "Info",
+                 "normal": "Narration", "emphasis": "Emphasis", "info": "Info"}
 
 
 def _style_line(name, st):
@@ -472,18 +482,24 @@ def _style_line(name, st):
 
 
 def build_ass(dialogue, narration, out_ass, width, height, styles=None):
-    styles = styles or STYLE_DEFAULT
+    styles = styles or {}
+    S = {k: {**STYLE_DEFAULT[k], **(styles.get(k) or {})} for k in ("dialogue", "narration", "emphasis", "info")}
     L = ["[Script Info]", "ScriptType: v4.00+", f"PlayResX: {width}", f"PlayResY: {height}",
          "WrapStyle: 2", "ScaledBorderAndShadow: yes", "",
          "[V4+ Styles]",
          "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
          "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
          "Alignment, MarginL, MarginR, MarginV, Encoding",
-         _style_line("Dialogue", styles.get("dialogue")),
-         _style_line("Narration", styles.get("narration")),
+         _style_line("Dialogue", S["dialogue"]),
+         _style_line("Narration", S["narration"]),
+         _style_line("Emphasis", S["emphasis"]),
+         _style_line("Info", S["info"]),
          "", "[Events]",
          "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"]
-    evs = [(s, e, "Dialogue", t) for s, e, t in dialogue] + [(s, e, "Narration", t) for s, e, t in narration]
+    evs = [(it[0], it[1], "Dialogue", it[2]) for it in dialogue]
+    for it in narration:                       # (s,e,text) 또는 (s,e,text,style)
+        tag = it[3] if len(it) > 3 else "기본"
+        evs.append((it[0], it[1], STYLE_TAGNAME.get(tag, "Narration"), it[2]))
     evs.sort(key=lambda x: x[0])
     for s, e, style, t in evs:
         txt = str(t).replace("\n", "\\N")
@@ -492,10 +508,14 @@ def build_ass(dialogue, narration, out_ass, width, height, styles=None):
     return out_ass
 
 
-def burn_subs(video, dialogue_srt, narration_srt, out_video, styles=None, log=print):
+def burn_subs(video, dialogue_srt, narration_srt, out_video, styles=None, narration_json=None, log=print):
     w, h = video_wh(video)
     dlg = srt_parse(dialogue_srt) if dialogue_srt and Path(dialogue_srt).is_file() else []
-    nar = srt_parse(narration_srt) if narration_srt and Path(narration_srt).is_file() else []
+    if narration_json and Path(narration_json).is_file():     # 유형(style) 포함 내레이션
+        data = json.loads(Path(narration_json).read_text(encoding="utf-8"))
+        nar = [(float(d["start"]), float(d["end"]), d["text"], d.get("style", "기본")) for d in data]
+    else:
+        nar = srt_parse(narration_srt) if narration_srt and Path(narration_srt).is_file() else []
     if not dlg and not nar:
         raise RuntimeError("입힐 자막(SRT)이 없습니다.")
     ass_path = Path(out_video).with_suffix(".ass")

@@ -308,21 +308,23 @@ function loadSubTemplates(pick){
     SUBTPL=d||{}; const s=$("#subTpl"); s.innerHTML="";
     Object.keys(SUBTPL).forEach(n=>{const o=document.createElement("option");o.value=n;o.textContent=n;s.appendChild(o);});
     const first=pick||Object.keys(SUBTPL)[0];
-    if(first){ s.value=first; const t=SUBTPL[first]; applyStyle("dlg",t.dialogue); applyStyle("nar",t.narration); }
+    if(first){ s.value=first; applyTpl(SUBTPL[first]); }
   }).catch(()=>{});
 }
-$("#subTpl").onchange=()=>{ const t=SUBTPL[$("#subTpl").value]; if(t){applyStyle("dlg",t.dialogue);applyStyle("nar",t.narration);} };
+function applyTpl(t){ if(!t) return; applyStyle("dlg",t.dialogue); applyStyle("nar",t.narration); applyStyle("emp",t.emphasis); applyStyle("inf",t.info); }
+function allStyles(){ return {dialogue:collectStyle("dlg"), narration:collectStyle("nar"), emphasis:collectStyle("emp"), info:collectStyle("inf")}; }
+$("#subTpl").onchange=()=>{ applyTpl(SUBTPL[$("#subTpl").value]); };
 $("#btnTplSave").onclick=()=>{
   const name=$("#subTplName").value.trim(); if(!name){ log("템플릿 이름을 입력하세요","warn"); return; }
   fetch("/sub/templates",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    name, styles:{dialogue:collectStyle("dlg"), narration:collectStyle("nar")}
+    name, styles:allStyles()
   })}).then(r=>r.json()).then(()=>{ $("#subTplName").value=""; loadSubTemplates(name); log("✔ 템플릿 저장: "+name,"ok"); });
 };
 $("#btnBurn").onclick=()=>{
   const code=curCode(); if(!code){ log("품번을 입력하세요","warn"); return; }
   log("── 자막 입히기 시작 ──");
   fetch("/burn",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    code, styles:{dialogue:collectStyle("dlg"), narration:collectStyle("nar")}
+    code, styles:allStyles()
   })}).then(r=>r.json()).then(j=>runJob(j.job,(r)=>{
     $("#resultCard").style.display="block";
     $("#result").innerHTML=`<div class="ok">✔ 자막 입힌 영상</div><div>${r.subbed}</div>`;

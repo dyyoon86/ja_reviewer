@@ -179,7 +179,45 @@
         </span>
       </div>
 
-      <div class="hint">_final_voiced.mp4(있으면) 또는 _final.mp4에 자막을 박아 <code>_final_subbed.mp4</code> 생성. 폰트는 윈도우 설치명(예: 맑은 고딕 = Malgun Gothic).</div>
+      <div class="muted" style="margin:10px 0 4px"><b style="color:#FF6B6B">강조</b> 내레이션 (핵심·펀치라인)</div>
+      <div class="formrow">
+        <span class="fld"><span class="lbl">폰트</span><input id="empFont" style="width:128px"></span>
+        <span class="fld"><span class="lbl">크기</span><input id="empSize" type="number" style="width:58px"></span>
+        <label class="muted"><input type="checkbox" id="empBold" style="height:auto;vertical-align:middle"> 굵게</label>
+      </div>
+      <div class="formrow">
+        <span class="fld"><span class="lbl">색</span><input id="empColor" type="color" style="width:40px;padding:2px"></span>
+        <span class="fld"><span class="lbl">외곽선</span><input id="empOutColor" type="color" style="width:40px;padding:2px"></span>
+        <span class="fld"><span class="lbl">굵기</span><input id="empOutline" type="number" step="0.2" style="width:58px"></span>
+        <span class="fld"><span class="lbl">여백</span><input id="empMargin" type="number" style="width:58px"></span>
+      </div>
+      <div class="formrow">
+        <span class="fld"><span class="lbl">위치</span>
+          <select id="empV"><option value="top">위</option><option value="middle">중간</option><option value="bottom">아래</option></select>
+          <select id="empH"><option value="left">좌</option><option value="center">중앙</option><option value="right">우</option></select>
+        </span>
+      </div>
+
+      <div class="muted" style="margin:10px 0 4px"><b style="color:#8FE3FF">정보</b> 내레이션 (스펙·수치·메타)</div>
+      <div class="formrow">
+        <span class="fld"><span class="lbl">폰트</span><input id="infFont" style="width:128px"></span>
+        <span class="fld"><span class="lbl">크기</span><input id="infSize" type="number" style="width:58px"></span>
+        <label class="muted"><input type="checkbox" id="infBold" style="height:auto;vertical-align:middle"> 굵게</label>
+      </div>
+      <div class="formrow">
+        <span class="fld"><span class="lbl">색</span><input id="infColor" type="color" style="width:40px;padding:2px"></span>
+        <span class="fld"><span class="lbl">외곽선</span><input id="infOutColor" type="color" style="width:40px;padding:2px"></span>
+        <span class="fld"><span class="lbl">굵기</span><input id="infOutline" type="number" step="0.2" style="width:58px"></span>
+        <span class="fld"><span class="lbl">여백</span><input id="infMargin" type="number" style="width:58px"></span>
+      </div>
+      <div class="formrow">
+        <span class="fld"><span class="lbl">위치</span>
+          <select id="infV"><option value="top">위</option><option value="middle">중간</option><option value="bottom">아래</option></select>
+          <select id="infH"><option value="left">좌</option><option value="center">중앙</option><option value="right">우</option></select>
+        </span>
+      </div>
+
+      <div class="hint">LLM이 내레이션을 <b>기본/강조/정보</b>로 분류 → 타입별로 위 스타일 적용. _final_voiced(있으면)/_final.mp4에 박아 <code>_final_subbed.mp4</code> 생성. 폰트는 윈도우 설치명(맑은 고딕 = Malgun Gothic).</div>
       <div class="actions">
         <button class="go spacer" id="btnBurn">● 자막 영상 만들기</button>
       </div>
