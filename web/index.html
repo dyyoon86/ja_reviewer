@@ -80,10 +80,7 @@
         </div>
         <div class="formrow">
           <span class="fld"><span class="lbl">전사</span><select id="whisper"><option value="large-v3">large-v3 (정확)</option><option value="distil-large-v3">distil-large-v3 (빠름)</option><option value="medium">medium</option><option value="small">small</option></select></span>
-          <span class="fld"><span class="lbl">방식</span><select id="mode">
-            <option value="summary">요약형 (짜집기·줄거리 골고루)</option>
-            <option value="highlight">하이라이트형 (알파컷식·후킹 몰아서)</option>
-          </select></span>
+          <span class="muted">faster-whisper · 일본어</span>
         </div>
         <div class="formrow" style="align-items:flex-start">
           <span class="fld" style="align-items:flex-start;width:100%">
@@ -110,6 +107,10 @@
           <li>
             <span class="st-badge" id="badgeAi">—</span>
             <span class="st-label"><b>② AI 처리</b> <span class="muted">압축·번역·내레이션 + 컷 → <code>_final.mp4</code></span></span>
+            <select id="mode" title="요약형=줄거리 짜집기 / 하이라이트형=알파컷식 후킹 몰아서" style="width:170px">
+              <option value="summary">짜집기 (요약형)</option>
+              <option value="highlight">알파컷 (하이라이트형)</option>
+            </select>
             <button class="go" id="btnStepAi">실행</button>
           </li>
           <li>
