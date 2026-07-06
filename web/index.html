@@ -54,7 +54,9 @@
 
       <!-- ── 수동 ── -->
       <div class="pane active" id="pane-manual">
-        <div class="sec"><span class="num">1</span> 구간 잘라내기 <span class="muted">· 품번 불필요</span></div>
+        <details class="acc" open>
+        <summary class="sec"><span class="num">1</span> 구간 잘라내기 <span class="muted">· 품번 불필요</span></summary>
+        <div class="acc-body">
         <div class="formrow" style="align-items:flex-start;margin-top:10px">
           <textarea id="exText" class="exText" rows="3"
             placeholder="텍스트로 구간 입력 (여러 줄 가능)&#10;12:30-18:00&#10;45:00-52:00" style="flex:1"></textarea>
@@ -69,9 +71,12 @@
           <label class="muted"><input type="checkbox" id="trimPrecise" style="height:auto;vertical-align:middle"> 정밀 컷(재인코딩·느림) — 기본은 무손실 초고속(컷 시작점이 키프레임에 스냅되어 마킹보다 최대 몇 초 더 잘릴 수 있음)</label>
         </div>
         <div class="hint">마킹 구간을 빼고 영상을 만들어 플레이어에 다시 로드합니다.</div>
+        </div>
+        </details>
 
-        <hr>
-        <div class="sec"><span class="num">2</span> 단계별 리뷰 생성 <span class="muted">· 품번 필요 · 단계별 저장/재실행</span></div>
+        <details class="acc" open>
+        <summary class="sec"><span class="num">2</span> 단계별 리뷰 생성 <span class="muted">· 품번 필요 · 단계별 저장/재실행</span></summary>
+        <div class="acc-body">
         <div class="formrow" style="margin-top:10px">
           <span class="fld"><span class="lbl">품번</span><input id="code" placeholder="SNOS-183" style="width:120px"></span>
           <button id="btnMeta">조회</button>
@@ -132,6 +137,8 @@
           <textarea id="aiPasteJson" placeholder='② codex/claude가 준 JSON 결과를 여기 붙여넣기  {"summary":…,"keep":[[시작,끝],…],"dialogue":[…],"narration":[…]}'></textarea>
           <div class="actions"><button class="primary spacer" id="btnAiManual">③ 붙여넣은 결과로 진행 (컷 + plan 저장)</button></div>
         </details>
+        </div>
+        </details>
       </div>
 
       <!-- ── 자동 ── -->
@@ -174,7 +181,9 @@
 
     <!-- ── TTS ── -->
     <div class="card">
-      <div class="sec"><span class="num">3</span> 내레이션 음성 <span class="muted">· voicebox TTS</span></div>
+      <details class="acc" open>
+      <summary class="sec"><span class="num">3</span> 내레이션 음성 <span class="muted">· voicebox TTS</span></summary>
+      <div class="acc-body">
       <div class="hint" style="margin:6px 0 12px">리뷰 후 <code>품번_내레이션.srt</code>를 한국어 음성으로 → <code>품번_내레이션.wav</code> (Qwen3-TTS 한국어 보이스 권장).</div>
       <div class="formrow">
         <span class="fld grow"><span class="lbl">주소</span><input id="ttsBase" placeholder="http://127.0.0.1:17493"></span>
@@ -199,11 +208,15 @@
         <label class="muted"><input type="checkbox" id="ttsMux" style="height:auto;vertical-align:middle"> 영상에 입히기 (원음 음소거 → _final_voiced.mp4)</label>
         <button class="go spacer" id="btnTts">● 내레이션 음성 생성</button>
       </div>
+      </div>
+      </details>
     </div>
 
     <!-- ── 자막 입히기(하드섭) ── -->
     <div class="card">
-      <div class="sec"><span class="num">4</span> 자막 입히기 <span class="muted">· 영상에 박기(하드섭)</span></div>
+      <details class="acc" open>
+      <summary class="sec"><span class="num">4</span> 자막 입히기 <span class="muted">· 영상에 박기(하드섭)</span></summary>
+      <div class="acc-body">
       <div class="formrow" style="margin-top:10px">
         <span class="fld grow"><span class="lbl">템플릿</span><select id="subTpl"></select></span>
         <input id="subTplName" placeholder="새 템플릿 이름" style="width:120px">
@@ -326,11 +339,15 @@
       <div class="actions">
         <button class="go spacer" id="btnBurn">● 자막 영상 만들기</button>
       </div>
+      </div>
+      </details>
     </div>
 
     <!-- ── 인포배너(품번 → 인포카드/워터마크 자동 오버레이) ── -->
     <div class="card">
-      <div class="sec"><span class="num">5</span> 인포배너 <span class="muted">· 품번만 넣으면 인포카드+워터마크 자동 생성·오버레이</span></div>
+      <details class="acc" open>
+      <summary class="sec"><span class="num">5</span> 인포배너 <span class="muted">· 품번만 넣으면 인포카드+워터마크 자동 생성·오버레이</span></summary>
+      <div class="acc-body">
       <div class="formrow" style="margin-top:10px">
         <span class="fld"><span class="lbl">품번</span><input id="icCode" placeholder="예: SNOS-152" style="width:150px"></span>
         <span class="fld"><span class="lbl">인포카드 노출(초)</span><input id="icHold" type="number" step="0.5" value="2" style="width:64px"></span>
@@ -347,6 +364,8 @@
       <div class="actions">
         <button class="go spacer" id="btnInfocard">● 인포배너 생성</button>
       </div>
+      </div>
+      </details>
     </div>
 
     <div class="card" id="resultCard" style="display:none">
