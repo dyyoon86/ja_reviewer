@@ -27,6 +27,12 @@ from fastapi.staticfiles import StaticFiles
 from . import pipeline as P
 
 ROOT = Path(__file__).resolve().parent.parent
+import sys as _sys
+_sys.path.insert(0, str(ROOT))
+try:
+    import gen_infocard as GIC          # 인포배너 자동생성 모듈
+except Exception:
+    GIC = None
 WEB = ROOT / "web"
 CFG_PATH = ROOT / "studio_config.json"
 SUB_TEMPLATES = {
@@ -206,6 +212,15 @@ def stream(path: str, request: Request):
     if status == 206:
         headers["Content-Range"] = f"bytes {start}-{end}/{size}"
     return StreamingResponse(gen(), status_code=status, headers=headers)
+
+
+@app.get("/image")
+def image(path: str):
+    p = Path(path)
+    if not p.is_file():
+        raise HTTPException(404, "파일 없음")
+    ctype = mimetypes.guess_type(p.name)[0] or "image/png"
+    return FileResponse(str(p), media_type=ctype)
 
 
 # ─── 메타 ────────────────────────────────────────────────────────────────────
@@ -517,6 +532,52 @@ async def burn(req: Request):
             jdone(jid, {"mode": "burn", "subbed": out, "source": str(src)})
         except Exception as e:
             jerr(jid, e)
+    run_bg(work)
+    return {"job": jid}
+
+
+# ─── ⑥ 인포배너 (품번 → 인포카드/워터마크 자동 오버레이) ─────────────────────
+@app.post("/infocard")
+async def infocard(req: Request):
+    if GIC is None:
+        raise HTTPException(500, "gen_infocard 모듈 로드 실패")
+    body = await req.json(); c = load_cfg()
+    code = (body.get("code") or "").strip()
+    if not code:
+        raise HTTPException(400, "품번(code)을 입력하세요.")
+    hold = float(body.get("hold", 2.0))
+    # 기본: 인코딩 없이 오버레이 소스(PNG)+미리보기만. encode=True면 mp4까지(느림).
+    do_encode = bool(body.get("encode", False))
+    src = body.get("source") or None
+    outdir = Path(c["out_dir"])
+
+    def work():
+        try:
+            outdir.mkdir(parents=True, exist_ok=True)
+            jstep(jid, 1, 2, "오버레이 소스 생성(인코딩 없음)")
+            out = str(outdir / (f"{code}_banner.mp4" if src else f"{code}_infocard_demo.mp4"))
+            r = GIC.generate(code, video=src if do_encode else None,
+                             out=out if do_encode else None, hold=hold,
+                             outdir=str(outdir / f"_infocard_{code}"),
+                             assets_only=not do_encode,
+                             log=lambda m: jlog(jid, m))
+            jstep(jid, 2, 2, "완료")
+            a = r["assets"]
+            jfile(jid, "프레임(상시)", a["frame"])
+            jfile(jid, "인포카드(앞 2초)", a["info"])
+            jfile(jid, "워터마크(상시)", a["wm"])
+            jfile(jid, "미리보기·인포카드", r["preview_info"])
+            jfile(jid, "미리보기·워터마크", r["preview_wm"])
+            if r.get("out"):
+                jfile(jid, "인포배너 영상", r["out"])
+            jdone(jid, {"mode": "infocard", "assets": a,
+                        "preview_info": r["preview_info"], "preview_wm": r["preview_wm"],
+                        "out": r.get("out") or "", "encoded": do_encode,
+                        "meta": {"code": r["meta"]["code"], "actress": r["meta"]["actress"],
+                                 "title": r["meta"]["title"]}})
+        except Exception as e:
+            jerr(jid, e)
+    jid = new_job()
     run_bg(work)
     return {"job": jid}
 

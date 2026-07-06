@@ -264,6 +264,27 @@
       </div>
     </div>
 
+    <!-- ── 인포배너(품번 → 인포카드/워터마크 자동 오버레이) ── -->
+    <div class="card">
+      <div class="sec"><span class="num">5</span> 인포배너 <span class="muted">· 품번만 넣으면 인포카드+워터마크 자동 생성·오버레이</span></div>
+      <div class="formrow" style="margin-top:10px">
+        <span class="fld"><span class="lbl">품번</span><input id="icCode" placeholder="예: SNOS-152" style="width:150px"></span>
+        <span class="fld"><span class="lbl">인포카드 노출(초)</span><input id="icHold" type="number" step="0.5" value="2" style="width:64px"></span>
+      </div>
+      <div class="formrow">
+        <label class="muted"><input type="checkbox" id="icEncode" style="height:auto;vertical-align:middle"> 영상에 직접 굽기(재인코딩·느림) — 평소엔 끄세요</label>
+      </div>
+      <div class="formrow" id="icSrcRow" style="display:none">
+        <span class="fld grow"><span class="lbl">대상 영상</span>
+          <input id="icSource" placeholder="비우면 _final_subbed→voiced→final 자동" style="width:100%"></span>
+        <label class="muted"><input type="checkbox" id="icUseCur" checked style="height:auto;vertical-align:middle"> 현재 영상</label>
+      </div>
+      <div class="hint">기본은 <b>인코딩 없이</b> 오버레이 <b>투명 PNG 3장</b>(프레임·인포카드·워터마크) + 미리보기만 생성 → 편집 프로그램 타임라인에 얹어 쓰세요(재인코딩 0초). DB에서 제목·배우·3사이즈·평점·조회수·발매일 자동 조회. 굳이 영상에 굽고 싶을 때만 위 체크(길면 오래 걸림 → 컷된 하이라이트에만 권장).</div>
+      <div class="actions">
+        <button class="go spacer" id="btnInfocard">● 인포배너 생성</button>
+      </div>
+    </div>
+
     <div class="card" id="resultCard" style="display:none">
       <div class="sec" style="margin-bottom:8px">결과</div>
       <div id="result" class="muted"></div>

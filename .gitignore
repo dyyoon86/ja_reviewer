@@ -7,3 +7,6 @@ ja_reviewer_out/
 *.srt
 *.mp4
 jav_2026.db*
+
+# tool cache
+.understand-anything/

@@ -438,6 +438,48 @@ $("#btnBurn").onclick=()=>{
   }));
 };
 
+// 인코딩 체크 시에만 대상영상 입력줄 표시
+if($("#icEncode")) $("#icEncode").onchange=()=>{
+  $("#icSrcRow").style.display=$("#icEncode").checked?"":"none";
+};
+
+// ⑤ 인포배너 — 품번 → 오버레이 소스(PNG) 생성 (인코딩 없음) + 미리보기
+$("#btnInfocard").onclick=()=>{
+  const code=($("#icCode").value||curCode()||"").trim();
+  if(!code){ log("품번을 입력하세요","warn"); return; }
+  const hold=parseFloat($("#icHold").value)||2.0;
+  const encode=$("#icEncode") && $("#icEncode").checked;
+  const useCur=$("#icUseCur") && $("#icUseCur").checked;
+  const source=($("#icSource").value||"").trim() || (useCur && videoPath ? videoPath : "");
+  log("── 인포배너 소스 생성 시작 ──"+(encode?(source?` (영상 오버레이 인코딩: ${source})`:" (데모 인코딩)"):" (PNG만·인코딩 없음)"));
+  fetch("/infocard",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    code, hold, source, encode
+  })}).then(r=>r.json()).then(j=>{
+    if(!j.job){ log("✖ 시작 실패: "+(j.detail||JSON.stringify(j)),"warn"); return; }
+    runJob(j.job,(r)=>{
+      $("#resultCard").style.display="block";
+      const m=r.meta||{}, a=r.assets||{};
+      const img=p=>`/image?path=${encodeURIComponent(p)}&t=${Date.now()}`;
+      let html=
+        `<div class="ok">✔ 인포배너 오버레이 소스 (인코딩 없음)</div>`+
+        (m.title?`<div class="muted">${m.code} · ${m.actress} · ${m.title}</div>`:'')+
+        `<div class="muted" style="margin:6px 0 2px">▼ 미리보기 (앞 2초 / 이후)</div>`+
+        `<div style="display:flex;gap:8px;flex-wrap:wrap">`+
+          `<img src="${img(r.preview_info)}" style="width:100%;max-width:420px;border-radius:8px">`+
+          `<img src="${img(r.preview_wm)}" style="width:100%;max-width:420px;border-radius:8px">`+
+        `</div>`+
+        `<div class="muted" style="margin:8px 0 2px">▼ 편집 프로그램에 얹을 투명 PNG</div>`+
+        `<div>· 프레임(상시): ${a.frame||''}</div>`+
+        `<div>· 인포카드(앞 ${hold}초): ${a.info||''}</div>`+
+        `<div>· 워터마크(상시): ${a.wm||''}</div>`;
+      if(r.out) html+=`<div style="margin-top:6px">영상: ${r.out}</div>`+
+        `<video src="/video/stream?path=${encodeURIComponent(r.out)}" controls autoplay muted loop style="width:100%;max-width:640px;border-radius:8px;margin-top:6px;background:#000"></video>`;
+      $("#result").innerHTML=html;
+      log("✔ 완료 — PNG를 편집 타임라인에 얹으세요(재인코딩 없음)","ok");
+    });
+  }).catch(e=>log("✖ 오류: "+e,"warn"));
+};
+
 // 초기 설정 로드 (양 탭 동기화)
 fetch("/config").then(r=>r.json()).then(c=>{
   if(c.llm){ $("#llm").value=c.llm; $("#llmA").value=c.llm; }
