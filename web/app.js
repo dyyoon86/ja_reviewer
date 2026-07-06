@@ -237,7 +237,8 @@ $("#btnTrim").onclick = () => {
   clearFiles();
   openTrimModal();
   fetch("/trim",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    path:videoPath, excludes, code:$("#code").value.trim()
+    path:videoPath, excludes, code:$("#code").value.trim(),
+    precise: !!($("#trimPrecise") && $("#trimPrecise").checked)
   })}).then(r=>r.json()).then(j=>{
     if(!j.job){ appendTrimLog("잘라내기 시작 실패"); setTrimProg(1,"실패","err"); return; }
     runTrimJob(j.job);
