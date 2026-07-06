@@ -463,7 +463,11 @@ $("#btnInfocard").onclick=()=>{
       let html=
         `<div class="ok">✔ 인포배너 오버레이 소스 (인코딩 없음)</div>`+
         (m.title?`<div class="muted">${m.code} · ${m.actress} · ${m.title}</div>`:'')+
-        `<div class="muted" style="margin:6px 0 2px">▼ 미리보기 (앞 2초 / 이후)</div>`+
+        (r.preview_anim?
+          `<div class="muted" style="margin:6px 0 2px">▼ 움직이는 미리보기 (인포카드→워터마크)</div>`+
+          `<video src="/video/stream?path=${encodeURIComponent(r.preview_anim)}&t=${Date.now()}" controls autoplay muted loop style="width:100%;max-width:640px;border-radius:8px;background:#000"></video>`
+          :'')+
+        `<div class="muted" style="margin:6px 0 2px">▼ 스틸 미리보기 (앞 2초 / 이후)</div>`+
         `<div style="display:flex;gap:8px;flex-wrap:wrap">`+
           `<img src="${img(r.preview_info)}" style="width:100%;max-width:420px;border-radius:8px">`+
           `<img src="${img(r.preview_wm)}" style="width:100%;max-width:420px;border-radius:8px">`+

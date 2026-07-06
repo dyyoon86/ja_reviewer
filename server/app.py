@@ -568,10 +568,13 @@ async def infocard(req: Request):
             jfile(jid, "워터마크(상시)", a["wm"])
             jfile(jid, "미리보기·인포카드", r["preview_info"])
             jfile(jid, "미리보기·워터마크", r["preview_wm"])
+            if r.get("preview_anim"):
+                jfile(jid, "움직이는 미리보기(4초)", r["preview_anim"])
             if r.get("out"):
                 jfile(jid, "인포배너 영상", r["out"])
             jdone(jid, {"mode": "infocard", "assets": a,
                         "preview_info": r["preview_info"], "preview_wm": r["preview_wm"],
+                        "preview_anim": r.get("preview_anim") or "",
                         "out": r.get("out") or "", "encoded": do_encode,
                         "meta": {"code": r["meta"]["code"], "actress": r["meta"]["actress"],
                                  "title": r["meta"]["title"]}})

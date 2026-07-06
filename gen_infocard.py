@@ -300,7 +300,10 @@ def pick_encoder(prefer=None):
                               capture_output=True, text=True).stdout
     except Exception:
         pass
-    if prefer == "nvenc" or "h264_nvenc" in have:
+    # NVENC는 인코더 목록에 있어도 실제 GPU/드라이버 없으면 실패 → GPU 존재 확인
+    gpu = os.path.exists("/proc/driver/nvidia") or shutil.which("nvidia-smi") is not None \
+          or os.name == "nt"   # 윈도우(RTX3060 렌더 머신)는 시도
+    if prefer == "nvenc" or ("h264_nvenc" in have and gpu):
         enc = (["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "20", "-b:v", "0"],
                "h264_nvenc(GPU)")
     else:
@@ -370,7 +373,7 @@ def _preview_still(layers, keys, out_png):
 
 # ────────────────────────────── 재사용 API ──────────────────────────────
 def generate(code, video=None, out=None, hold=2.0, outdir=None, log=print,
-             assets_only=True):
+             assets_only=True, preview_anim=True):
     """품번 → 인포배너 오버레이 소스 생성.
     assets_only=True(기본): 인코딩 없이 오버레이 PNG(프레임/인포카드/워터마크) +
        미리보기 스틸 2장만 생성 → 편집 프로그램에 얹어 사용. (초 단위, 재인코딩 안 함)
@@ -397,8 +400,18 @@ def generate(code, video=None, out=None, hold=2.0, outdir=None, log=print,
     prev_info = _preview_still(layers, ["frame", "info"], os.path.join(outdir, f"{code}_미리보기_인포카드.png"))
     prev_wm   = _preview_still(layers, ["frame", "wm"],   os.path.join(outdir, f"{code}_미리보기_워터마크.png"))
 
+    # 움직이는 미리보기(짧은 4초 애니 데모) — 짧아서 빠름
+    prev_anim = None
+    if preview_anim:
+        try:
+            log("[infocard] 움직이는 미리보기(4초 애니) 생성 중…")
+            prev_anim = compose(layers, os.path.join(outdir, f"{code}_미리보기_애니.mp4"),
+                                video=None, hold=hold, log=log)
+        except Exception as e:
+            log(f"[infocard] 애니 미리보기 실패(무시): {e}")
+
     result = {"assets": assets, "preview_info": prev_info, "preview_wm": prev_wm,
-              "layers": layers, "meta": m, "out": None}
+              "preview_anim": prev_anim, "layers": layers, "meta": m, "out": None}
 
     if not assets_only:
         out = out or (
