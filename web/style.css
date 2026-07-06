@@ -105,3 +105,23 @@ audio{width:100%;margin:8px 0}
 .picklist .pk-reason{flex:1;color:#cdd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .picklist .pk-play{background:#e50914;border:none;color:#fff;border-radius:6px;padding:3px 9px;cursor:pointer}
 .picklist .pk-play:hover{filter:brightness(1.1)}
+
+/* 프리뷰 구간 아이템(헤더+본문) */
+.picklist .pk-item{display:block;padding:8px 10px;border-bottom:1px solid #22222a}
+.picklist .pk-item:last-child{border-bottom:none}
+.pk-head{display:flex;align-items:center;gap:8px}
+.pk-head .pk-t{font-variant-numeric:tabular-nums;color:#9ad;min-width:118px}
+.pk-head .pk-hook{font-weight:800;color:#ffd23f;min-width:30px}
+.pk-head .pk-reason{flex:1;color:#cdd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.pk-head .pk-play{background:#e50914;border:none;color:#fff;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:12px}
+.pk-head .pk-play:hover{filter:brightness(1.1)}
+.pk-body{margin:6px 0 2px;padding-left:6px;border-left:2px solid #2e2e38}
+.pk-line{font-size:13px;line-height:1.5;padding:1px 0;display:flex;gap:6px;align-items:baseline}
+.pk-line .pk-tag{font-size:10px;font-weight:800;padding:1px 5px;border-radius:4px;flex-shrink:0;opacity:.85}
+.pk-line.dlg.f .pk-tag{background:#3a2b4a;color:#e6b3ff}
+.pk-line.dlg.m .pk-tag{background:#243a4a;color:#9fdcff}
+.pk-line.nar .pk-tag{background:#2a2a33;color:#bbb}
+.pk-line.nar{color:#bfe3c9}
+.pk-line.nar.emph{color:#ffd23f;font-weight:700}
+.pk-line.nar.info{color:#9fdcff}
+.pk-line.muted{color:#777}

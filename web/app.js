@@ -200,7 +200,14 @@ function applyPickResult(result){
   buildPickPreview(result);
 }
 
-// 구간 목록 프리뷰 (picks 있으면 후킹점수/이유, 없으면 keep)
+function _esc(s){ return (s||"").replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])); }
+// 구간 [a,b] 안에 들어오는 자막 라인 필터(시작시각 기준)
+function _within(list, a, b){
+  return (Array.isArray(list)?list:[]).filter(d=> +d.start >= a-0.1 && +d.start < b+0.1)
+    .sort((x,y)=>+x.start-+y.start);
+}
+
+// 구간 목록 프리뷰 — 각 구간에 한글 대사(화자) + 내레이션(유형)까지 펼침
 function buildPickPreview(result){
   const ul = $("#pickPreview"); ul.innerHTML = "";
   let rows = [];
@@ -209,17 +216,35 @@ function buildPickPreview(result){
   } else if(result && Array.isArray(result.keep)){
     rows = result.keep.map(k=>({a:+k[0], b:+k[1], hook:null, reason:""}));
   }
-  rows.sort((x,y)=> (y.hook||0)-(x.hook||0) || x.a-y.a); // 후킹점수 높은 순
-  rows.forEach((r,i)=>{
-    const li=document.createElement("li");
-    const play=document.createElement("button");
-    play.className="pk-play"; play.textContent="▶";
-    play.onclick=()=>seekPlay(r.a, r.b);
-    li.innerHTML =
+  rows.sort((x,y)=> (y.hook||0)-(x.hook||0) || x.a-y.a);
+  const dlgs = result.dialogue || [], nars = result.narration || [];
+  rows.forEach((r)=>{
+    const li=document.createElement("li"); li.className="pk-item";
+    // 헤더 줄
+    const head=document.createElement("div"); head.className="pk-head";
+    head.innerHTML =
       `<span class="pk-t">${hhmmss(r.a)} ~ ${hhmmss(r.b)}</span>`+
-      (r.hook!=null?`<span class="pk-hook">★${r.hook}</span>`:`<span class="pk-hook"></span>`)+
-      `<span class="pk-reason">${(r.reason||"").replace(/</g,"&lt;")}</span>`;
-    li.appendChild(play);
+      (r.hook!=null?`<span class="pk-hook">★${r.hook}</span>`:``)+
+      `<span class="pk-reason">${_esc(r.reason)}</span>`;
+    const play=document.createElement("button");
+    play.className="pk-play"; play.textContent="▶ 재생";
+    play.onclick=()=>seekPlay(r.a, r.b);
+    head.appendChild(play);
+    li.appendChild(head);
+    // 본문: 대사 + 내레이션
+    const body=document.createElement("div"); body.className="pk-body";
+    _within(dlgs, r.a, r.b).forEach(d=>{
+      const sp=(d.speaker==="남")?"남":"여";
+      body.insertAdjacentHTML("beforeend",
+        `<div class="pk-line dlg ${sp==="남"?"m":"f"}"><span class="pk-tag">${sp}</span>${_esc(d.ko)}</div>`);
+    });
+    _within(nars, r.a, r.b).forEach(n=>{
+      const st=n.style||"기본";
+      body.insertAdjacentHTML("beforeend",
+        `<div class="pk-line nar ${st==="강조"?"emph":st==="정보"?"info":""}"><span class="pk-tag">내레</span>${_esc(n.text)}</div>`);
+    });
+    if(!body.children.length) body.innerHTML='<div class="pk-line muted">이 구간 자막 없음</div>';
+    li.appendChild(body);
     ul.appendChild(li);
   });
   if(!rows.length) ul.innerHTML = '<li class="muted" style="padding:8px">구간이 없습니다.</li>';
