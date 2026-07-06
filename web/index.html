@@ -126,17 +126,9 @@
         </ul>
         <div class="hint">각 단계 결과는 파일로 저장됩니다. 중간에 에러나면 그 단계만 다시 누르면 돼요(앞 단계 결과 재사용). 품번 입력/조회 시 진행 상태를 자동 표시. 배지: — 대기 · … 진행 · ✓ 완료 · ✗ 오류.</div>
 
-        <details id="aiManualBox" style="margin-top:10px" open>
-          <summary class="muted" style="cursor:pointer">수동 모드 — codex/claude 직접 실행 → 붙여넣기 (AI 거부/빈 응답 시)</summary>
-          <div class="formrow" style="margin-top:8px">
-            <button id="btnAiPrompt">① 프롬프트 만들기</button>
-            <button id="btnAiPromptCopy">📋 복사</button>
-            <span class="muted">아래 칸에 전송 프롬프트 표시 → 전체선택 복사 → codex/claude에 붙여 실행</span>
-          </div>
-          <textarea id="aiPromptOut" readonly placeholder="① 버튼을 누르면 '전송하는 프롬프트 전문'이 여기 표시됩니다 — 칸 클릭 후 Ctrl+A → Ctrl+C 로 복사해 codex/claude에 붙여넣으세요" style="min-height:120px"></textarea>
-          <textarea id="aiPasteJson" placeholder='② codex/claude가 준 JSON 결과를 여기 붙여넣기  {"summary":…,"keep":[[시작,끝],…],"dialogue":[…],"narration":[…]}'></textarea>
-          <div class="actions"><button class="primary spacer" id="btnAiManual">③ 붙여넣은 결과로 진행 (컷 + plan 저장)</button></div>
-        </details>
+        <div class="actions">
+          <button id="btnManualOpen" class="spacer">🛠 수동 모드 (AI 거부·빈 응답 시)</button>
+        </div>
         </div>
         </details>
       </div>
@@ -371,6 +363,33 @@
     <div class="card" id="resultCard" style="display:none">
       <div class="sec" style="margin-bottom:8px">결과</div>
       <div id="result" class="muted"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 수동 모드 모달 (프롬프트 만들기 → 붙여넣기) ── -->
+<div id="manualModal" class="modal" style="display:none">
+  <div class="modal-box">
+    <div class="modal-head">
+      <span>🛠 수동 모드 · codex/claude 직접 실행 → 결과 붙여넣기</span>
+      <button id="manualClose" class="x" title="닫기">✕</button>
+    </div>
+    <div class="hint" style="margin:0 0 12px">서버의 AI가 거부하거나 빈 응답일 때 사용. ① 프롬프트를 복사해 codex/claude에 붙여 실행 → ② 받은 JSON을 붙여넣고 ③ 진행.</div>
+
+    <div class="mstep"><span class="mnum">1</span> 프롬프트 복사</div>
+    <div class="formrow" style="margin:8px 0">
+      <button id="btnAiPrompt">프롬프트 만들기</button>
+      <button id="btnAiPromptCopy" class="primary">📋 클립보드 복사</button>
+      <span class="muted">복사 후 codex/claude에 붙여 실행</span>
+    </div>
+    <textarea id="aiPromptOut" readonly placeholder="'프롬프트 만들기'를 누르면 전송 프롬프트 전문이 여기 표시됩니다. '클립보드 복사'로 한 번에 복사하세요." style="min-height:150px"></textarea>
+
+    <div class="mstep" style="margin-top:16px"><span class="mnum">2</span> 결과 JSON 붙여넣기</div>
+    <textarea id="aiPasteJson" style="margin-top:8px;min-height:140px" placeholder='codex/claude가 준 JSON 결과 붙여넣기  {"summary":…,"keep":[[시작,끝],…],"dialogue":[…],"narration":[…]}'></textarea>
+
+    <div class="modal-actions">
+      <button id="manualCancel">닫기</button>
+      <button class="primary spacer" id="btnAiManual">③ 붙여넣은 결과로 진행 (컷 + plan 저장)</button>
     </div>
   </div>
 </div>

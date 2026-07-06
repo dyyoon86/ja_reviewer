@@ -265,6 +265,14 @@ $("#trimUse").onclick = () => {
   collapseAcc("#btnTrim");   // ① 완료 → 접기
 };
 
+// ── 수동 모드 모달 (프롬프트 만들기 → 붙여넣기) ──
+function openManual(){ if(!needCode()) return; $("#manualModal").style.display="flex"; }
+function closeManual(){ $("#manualModal").style.display="none"; }
+$("#btnManualOpen").onclick = openManual;
+$("#manualClose").onclick = closeManual;
+$("#manualCancel").onclick = closeManual;
+$("#manualModal").addEventListener("click",(e)=>{ if(e.target.id==="manualModal") closeManual(); });
+
 // ② 리뷰 생성(원샷) — 품번 필요
 if($("#btnReview")) $("#btnReview").onclick = () => {
   if(!needVideo() || !needCode()) return;
@@ -374,7 +382,7 @@ $("#btnAiManual").onclick = () => {
   fetch("/step/ai/manual",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
     code, result:txt
   })}).then(r=>r.json()).then(j=>runJob(j.job,(res)=>{
-    setBadge("badgeAi","done"); showResult(res);
+    setBadge("badgeAi","done"); showResult(res); closeManual();
     log(`✔ 수동 결과 적용 완료 (최종 ${Math.round(res.final_sec||0)}초)`,"ok");
     refreshSteps(code);
   }, ()=>setBadge("badgeAi","err")));
