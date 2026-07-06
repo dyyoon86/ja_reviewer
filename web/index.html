@@ -210,102 +210,119 @@
         <button id="btnTplSave">저장</button>
       </div>
 
-      <div class="muted" style="margin:8px 0 4px"><b style="color:#FFFFFF">대사 (여배우)</b></div>
-      <div class="formrow">
-        <span class="fld"><span class="lbl">폰트</span><input id="dlgFont" style="width:128px"></span>
-        <span class="fld"><span class="lbl">크기</span><input id="dlgSize" type="number" style="width:58px"></span>
-        <label class="muted"><input type="checkbox" id="dlgBold" style="height:auto;vertical-align:middle"> 굵게</label>
-      </div>
-      <div class="formrow">
-        <span class="fld"><span class="lbl">색</span><input id="dlgColor" type="color" style="width:40px;padding:2px"></span>
-        <span class="fld"><span class="lbl">외곽선</span><input id="dlgOutColor" type="color" style="width:40px;padding:2px"></span>
-        <span class="fld"><span class="lbl">굵기</span><input id="dlgOutline" type="number" step="0.2" style="width:58px"></span>
-        <span class="fld"><span class="lbl">여백</span><input id="dlgMargin" type="number" style="width:58px"></span>
-      </div>
-      <div class="formrow">
-        <span class="fld"><span class="lbl">위치</span>
-          <select id="dlgV"><option value="top">위</option><option value="middle">중간</option><option value="bottom">아래</option></select>
-          <select id="dlgH"><option value="left">좌</option><option value="center">중앙</option><option value="right">우</option></select>
-        </span>
-      </div>
+      <details class="adv" id="advStyles">
+        <summary>🎨 세부 자막 스타일 <span class="muted" style="font-weight:400">· 평소엔 템플릿만 골라도 됩니다 (펼쳐서 미세조정)</span></summary>
+        <div class="advbody">
 
-      <div class="muted" style="margin:10px 0 4px"><b style="color:#7FD0FF">대사 (남배우)</b></div>
-      <div class="formrow">
-        <span class="fld"><span class="lbl">폰트</span><input id="dlmFont" style="width:128px"></span>
-        <span class="fld"><span class="lbl">크기</span><input id="dlmSize" type="number" style="width:58px"></span>
-        <label class="muted"><input type="checkbox" id="dlmBold" style="height:auto;vertical-align:middle"> 굵게</label>
-      </div>
-      <div class="formrow">
-        <span class="fld"><span class="lbl">색</span><input id="dlmColor" type="color" style="width:40px;padding:2px"></span>
-        <span class="fld"><span class="lbl">외곽선</span><input id="dlmOutColor" type="color" style="width:40px;padding:2px"></span>
-        <span class="fld"><span class="lbl">굵기</span><input id="dlmOutline" type="number" step="0.2" style="width:58px"></span>
-        <span class="fld"><span class="lbl">여백</span><input id="dlmMargin" type="number" style="width:58px"></span>
-      </div>
-      <div class="formrow">
-        <span class="fld"><span class="lbl">위치</span>
-          <select id="dlmV"><option value="top">위</option><option value="middle">중간</option><option value="bottom">아래</option></select>
-          <select id="dlmH"><option value="left">좌</option><option value="center">중앙</option><option value="right">우</option></select>
-        </span>
-      </div>
+          <details class="stylegrp">
+            <summary><span class="dot" style="background:#FFFFFF"></span> 대사 <b>여배우</b></summary>
+            <div class="grpbody">
+              <div class="formrow">
+                <span class="fld"><span class="lbl">폰트</span><input id="dlgFont" style="width:128px"></span>
+                <span class="fld"><span class="lbl">크기</span><input id="dlgSize" type="number" style="width:58px"></span>
+                <label class="muted"><input type="checkbox" id="dlgBold" style="height:auto;vertical-align:middle"> 굵게</label>
+              </div>
+              <div class="formrow">
+                <span class="fld"><span class="lbl">색</span><input id="dlgColor" type="color" style="width:40px;padding:2px"></span>
+                <span class="fld"><span class="lbl">외곽선</span><input id="dlgOutColor" type="color" style="width:40px;padding:2px"></span>
+                <span class="fld"><span class="lbl">굵기</span><input id="dlgOutline" type="number" step="0.2" style="width:58px"></span>
+                <span class="fld"><span class="lbl">여백</span><input id="dlgMargin" type="number" style="width:58px"></span>
+                <span class="fld"><span class="lbl">위치</span>
+                  <select id="dlgV"><option value="top">위</option><option value="middle">중간</option><option value="bottom">아래</option></select>
+                  <select id="dlgH"><option value="left">좌</option><option value="center">중앙</option><option value="right">우</option></select>
+                </span>
+              </div>
+            </div>
+          </details>
 
-      <div class="muted" style="margin:10px 0 4px"><b style="color:var(--txt)">내레이션</b> 스타일</div>
-      <div class="formrow">
-        <span class="fld"><span class="lbl">폰트</span><input id="narFont" style="width:128px"></span>
-        <span class="fld"><span class="lbl">크기</span><input id="narSize" type="number" style="width:58px"></span>
-        <label class="muted"><input type="checkbox" id="narBold" style="height:auto;vertical-align:middle"> 굵게</label>
-      </div>
-      <div class="formrow">
-        <span class="fld"><span class="lbl">색</span><input id="narColor" type="color" style="width:40px;padding:2px"></span>
-        <span class="fld"><span class="lbl">외곽선</span><input id="narOutColor" type="color" style="width:40px;padding:2px"></span>
-        <span class="fld"><span class="lbl">굵기</span><input id="narOutline" type="number" step="0.2" style="width:58px"></span>
-        <span class="fld"><span class="lbl">여백</span><input id="narMargin" type="number" style="width:58px"></span>
-      </div>
-      <div class="formrow">
-        <span class="fld"><span class="lbl">위치</span>
-          <select id="narV"><option value="top">위</option><option value="middle">중간</option><option value="bottom">아래</option></select>
-          <select id="narH"><option value="left">좌</option><option value="center">중앙</option><option value="right">우</option></select>
-        </span>
-      </div>
+          <details class="stylegrp">
+            <summary><span class="dot" style="background:#7FD0FF"></span> 대사 <b>남배우</b></summary>
+            <div class="grpbody">
+              <div class="formrow">
+                <span class="fld"><span class="lbl">폰트</span><input id="dlmFont" style="width:128px"></span>
+                <span class="fld"><span class="lbl">크기</span><input id="dlmSize" type="number" style="width:58px"></span>
+                <label class="muted"><input type="checkbox" id="dlmBold" style="height:auto;vertical-align:middle"> 굵게</label>
+              </div>
+              <div class="formrow">
+                <span class="fld"><span class="lbl">색</span><input id="dlmColor" type="color" style="width:40px;padding:2px"></span>
+                <span class="fld"><span class="lbl">외곽선</span><input id="dlmOutColor" type="color" style="width:40px;padding:2px"></span>
+                <span class="fld"><span class="lbl">굵기</span><input id="dlmOutline" type="number" step="0.2" style="width:58px"></span>
+                <span class="fld"><span class="lbl">여백</span><input id="dlmMargin" type="number" style="width:58px"></span>
+                <span class="fld"><span class="lbl">위치</span>
+                  <select id="dlmV"><option value="top">위</option><option value="middle">중간</option><option value="bottom">아래</option></select>
+                  <select id="dlmH"><option value="left">좌</option><option value="center">중앙</option><option value="right">우</option></select>
+                </span>
+              </div>
+            </div>
+          </details>
 
-      <div class="muted" style="margin:10px 0 4px"><b style="color:#FF6B6B">강조</b> 내레이션 (핵심·펀치라인)</div>
-      <div class="formrow">
-        <span class="fld"><span class="lbl">폰트</span><input id="empFont" style="width:128px"></span>
-        <span class="fld"><span class="lbl">크기</span><input id="empSize" type="number" style="width:58px"></span>
-        <label class="muted"><input type="checkbox" id="empBold" style="height:auto;vertical-align:middle"> 굵게</label>
-      </div>
-      <div class="formrow">
-        <span class="fld"><span class="lbl">색</span><input id="empColor" type="color" style="width:40px;padding:2px"></span>
-        <span class="fld"><span class="lbl">외곽선</span><input id="empOutColor" type="color" style="width:40px;padding:2px"></span>
-        <span class="fld"><span class="lbl">굵기</span><input id="empOutline" type="number" step="0.2" style="width:58px"></span>
-        <span class="fld"><span class="lbl">여백</span><input id="empMargin" type="number" style="width:58px"></span>
-      </div>
-      <div class="formrow">
-        <span class="fld"><span class="lbl">위치</span>
-          <select id="empV"><option value="top">위</option><option value="middle">중간</option><option value="bottom">아래</option></select>
-          <select id="empH"><option value="left">좌</option><option value="center">중앙</option><option value="right">우</option></select>
-        </span>
-      </div>
+          <details class="stylegrp">
+            <summary><span class="dot" style="background:#d8d8e0"></span> <b>내레이션</b> (기본)</summary>
+            <div class="grpbody">
+              <div class="formrow">
+                <span class="fld"><span class="lbl">폰트</span><input id="narFont" style="width:128px"></span>
+                <span class="fld"><span class="lbl">크기</span><input id="narSize" type="number" style="width:58px"></span>
+                <label class="muted"><input type="checkbox" id="narBold" style="height:auto;vertical-align:middle"> 굵게</label>
+              </div>
+              <div class="formrow">
+                <span class="fld"><span class="lbl">색</span><input id="narColor" type="color" style="width:40px;padding:2px"></span>
+                <span class="fld"><span class="lbl">외곽선</span><input id="narOutColor" type="color" style="width:40px;padding:2px"></span>
+                <span class="fld"><span class="lbl">굵기</span><input id="narOutline" type="number" step="0.2" style="width:58px"></span>
+                <span class="fld"><span class="lbl">여백</span><input id="narMargin" type="number" style="width:58px"></span>
+                <span class="fld"><span class="lbl">위치</span>
+                  <select id="narV"><option value="top">위</option><option value="middle">중간</option><option value="bottom">아래</option></select>
+                  <select id="narH"><option value="left">좌</option><option value="center">중앙</option><option value="right">우</option></select>
+                </span>
+              </div>
+            </div>
+          </details>
 
-      <div class="muted" style="margin:10px 0 4px"><b style="color:#8FE3FF">정보</b> 내레이션 (스펙·수치·메타)</div>
-      <div class="formrow">
-        <span class="fld"><span class="lbl">폰트</span><input id="infFont" style="width:128px"></span>
-        <span class="fld"><span class="lbl">크기</span><input id="infSize" type="number" style="width:58px"></span>
-        <label class="muted"><input type="checkbox" id="infBold" style="height:auto;vertical-align:middle"> 굵게</label>
-      </div>
-      <div class="formrow">
-        <span class="fld"><span class="lbl">색</span><input id="infColor" type="color" style="width:40px;padding:2px"></span>
-        <span class="fld"><span class="lbl">외곽선</span><input id="infOutColor" type="color" style="width:40px;padding:2px"></span>
-        <span class="fld"><span class="lbl">굵기</span><input id="infOutline" type="number" step="0.2" style="width:58px"></span>
-        <span class="fld"><span class="lbl">여백</span><input id="infMargin" type="number" style="width:58px"></span>
-      </div>
-      <div class="formrow">
-        <span class="fld"><span class="lbl">위치</span>
-          <select id="infV"><option value="top">위</option><option value="middle">중간</option><option value="bottom">아래</option></select>
-          <select id="infH"><option value="left">좌</option><option value="center">중앙</option><option value="right">우</option></select>
-        </span>
-      </div>
+          <details class="stylegrp">
+            <summary><span class="dot" style="background:#FF6B6B"></span> <b>강조</b> 내레이션 <span class="muted" style="font-weight:400">· 핵심·펀치라인</span></summary>
+            <div class="grpbody">
+              <div class="formrow">
+                <span class="fld"><span class="lbl">폰트</span><input id="empFont" style="width:128px"></span>
+                <span class="fld"><span class="lbl">크기</span><input id="empSize" type="number" style="width:58px"></span>
+                <label class="muted"><input type="checkbox" id="empBold" style="height:auto;vertical-align:middle"> 굵게</label>
+              </div>
+              <div class="formrow">
+                <span class="fld"><span class="lbl">색</span><input id="empColor" type="color" style="width:40px;padding:2px"></span>
+                <span class="fld"><span class="lbl">외곽선</span><input id="empOutColor" type="color" style="width:40px;padding:2px"></span>
+                <span class="fld"><span class="lbl">굵기</span><input id="empOutline" type="number" step="0.2" style="width:58px"></span>
+                <span class="fld"><span class="lbl">여백</span><input id="empMargin" type="number" style="width:58px"></span>
+                <span class="fld"><span class="lbl">위치</span>
+                  <select id="empV"><option value="top">위</option><option value="middle">중간</option><option value="bottom">아래</option></select>
+                  <select id="empH"><option value="left">좌</option><option value="center">중앙</option><option value="right">우</option></select>
+                </span>
+              </div>
+            </div>
+          </details>
 
-      <div class="hint">LLM이 내레이션을 <b>기본/강조/정보</b>로 분류 → 타입별로 위 스타일 적용. _final_voiced(있으면)/_final.mp4에 박아 <code>_final_subbed.mp4</code> 생성. 폰트는 윈도우 설치명(맑은 고딕 = Malgun Gothic).</div>
+          <details class="stylegrp">
+            <summary><span class="dot" style="background:#8FE3FF"></span> <b>정보</b> 내레이션 <span class="muted" style="font-weight:400">· 스펙·수치·메타</span></summary>
+            <div class="grpbody">
+              <div class="formrow">
+                <span class="fld"><span class="lbl">폰트</span><input id="infFont" style="width:128px"></span>
+                <span class="fld"><span class="lbl">크기</span><input id="infSize" type="number" style="width:58px"></span>
+                <label class="muted"><input type="checkbox" id="infBold" style="height:auto;vertical-align:middle"> 굵게</label>
+              </div>
+              <div class="formrow">
+                <span class="fld"><span class="lbl">색</span><input id="infColor" type="color" style="width:40px;padding:2px"></span>
+                <span class="fld"><span class="lbl">외곽선</span><input id="infOutColor" type="color" style="width:40px;padding:2px"></span>
+                <span class="fld"><span class="lbl">굵기</span><input id="infOutline" type="number" step="0.2" style="width:58px"></span>
+                <span class="fld"><span class="lbl">여백</span><input id="infMargin" type="number" style="width:58px"></span>
+                <span class="fld"><span class="lbl">위치</span>
+                  <select id="infV"><option value="top">위</option><option value="middle">중간</option><option value="bottom">아래</option></select>
+                  <select id="infH"><option value="left">좌</option><option value="center">중앙</option><option value="right">우</option></select>
+                </span>
+              </div>
+            </div>
+          </details>
+
+        </div>
+      </details>
+
+      <div class="hint">템플릿만 골라도 바로 사용 가능. LLM이 내레이션을 <b>기본/강조/정보</b>로 분류 → 타입별 스타일 적용. _final_voiced(있으면)/_final.mp4에 박아 <code>_final_subbed.mp4</code> 생성. 폰트는 윈도우 설치명(맑은 고딕 = Malgun Gothic).</div>
       <div class="actions">
         <button class="go spacer" id="btnBurn">● 자막 영상 만들기</button>
       </div>
