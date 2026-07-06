@@ -495,6 +495,8 @@ async def step_ai(req: Request):
     body = await req.json(); c = load_cfg()
     code = body["code"]
     target = int(body.get("target_sec", c["target_sec"])); llm = body.get("llm", c["llm"])
+    hint = (body.get("hint") or "").strip()
+    mode = body.get("mode", "summary")  # summary(요약형·짜집기) | highlight(하이라이트형·알파컷식)
     jid = new_job()
 
     def work():
@@ -511,10 +513,12 @@ async def step_ai(req: Request):
                     for d in json.loads(tj.read_text(encoding="utf-8"))]
             jstep(jid, 1, 3, "메타 조회")
             m = P.fetch_meta(c["meta_api"], code, lambda x: jlog(jid, x))
-            jstep(jid, 2, 3, f"AI 압축·번역·내레이션 ({llm} 추론, 보통 1~3분)")
+            label = "하이라이트형(알파컷식)" if mode == "highlight" else "요약형(짜집기)"
+            jstep(jid, 2, 3, f"AI {label} 압축·번역·내레이션 ({llm} 추론, 보통 1~3분)")
+            pf = P.prompt_highlight if mode == "highlight" else P.prompt_manual
             hb = heartbeat(jid, f"AI 처리({llm})")
             try:
-                res = P.call_llm(P.prompt_manual(m, segs, target), llm, lambda x: jlog(jid, x))
+                res = P.call_llm(pf(m, segs, target, hint=hint), llm, lambda x: jlog(jid, x))
             finally:
                 hb.set()
             keep = P.parse_keep(res.get("keep", []))
@@ -544,6 +548,8 @@ async def step_ai_prompt(req: Request):
     """수동 모드용 — ② AI에 보낼 프롬프트 전문을 반환(복사해서 codex/claude 직접 실행)."""
     body = await req.json(); c = load_cfg()
     code = body["code"]; target = int(body.get("target_sec", c["target_sec"]))
+    hint = (body.get("hint") or "").strip()
+    mode = body.get("mode", "summary")
     outdir = work_dir(c, code)
     tj = outdir / f"{code}_전사.json"
     if not tj.is_file():
@@ -553,7 +559,8 @@ async def step_ai_prompt(req: Request):
         m = P.fetch_meta(c["meta_api"], code, log=lambda *_: None)
     except Exception as e:
         raise HTTPException(502, f"메타 조회 실패: {e}")
-    return {"prompt": P.prompt_manual(m, segs, target)}
+    pf = P.prompt_highlight if mode == "highlight" else P.prompt_manual
+    return {"prompt": pf(m, segs, target, hint=hint)}
 
 
 @app.post("/step/ai/manual")
