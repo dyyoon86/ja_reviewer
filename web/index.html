@@ -74,6 +74,13 @@
           <span class="fld"><span class="lbl">전사</span><select id="whisper"><option value="large-v3">large-v3 (정확)</option><option value="distil-large-v3">distil-large-v3 (빠름)</option><option value="medium">medium</option><option value="small">small</option></select></span>
           <span class="muted">faster-whisper · 일본어</span>
         </div>
+        <div class="formrow" style="align-items:flex-start">
+          <span class="fld" style="align-items:flex-start;width:100%">
+            <span class="lbl" style="padding-top:6px">맥락·지시</span>
+            <textarea id="hint" rows="2" style="flex:1;width:100%"
+              placeholder="전사 힌트 + 요약 지시 겸용. 예) 간호사물, 존댓말 위주. 반전 결말 강조. 3분휴지 스타일 진하게."></textarea>
+          </span>
+        </div>
         <div class="actions">
           <button class="go spacer" id="btnReview">② 리뷰 생성 (전사 + AI 압축 + 자막)</button>
         </div>
@@ -91,6 +98,13 @@
         <div class="formrow">
           <span class="fld"><span class="lbl">전사</span><select id="whisperA"><option value="large-v3">large-v3 (정확)</option><option value="distil-large-v3">distil-large-v3 (빠름)</option><option value="medium">medium</option><option value="small">small</option></select></span>
           <span class="muted">faster-whisper · 일본어</span>
+        </div>
+        <div class="formrow" style="align-items:flex-start">
+          <span class="fld" style="align-items:flex-start;width:100%">
+            <span class="lbl" style="padding-top:6px">맥락·지시</span>
+            <textarea id="hintA" rows="2" style="flex:1;width:100%"
+              placeholder="전사 힌트 + 요약/구간선정 지시 겸용. 예) NTR물, 배우 존댓말. 도입부 갈등 꼭 포함. 후킹 강하게."></textarea>
+          </span>
         </div>
         <div class="actions">
           <button class="go spacer" id="btnAnalyze">● 자동 분석</button>

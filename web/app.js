@@ -171,7 +171,8 @@ $("#btnReview").onclick = () => {
   log("── ② 리뷰 생성 시작 ──");
   fetch("/review",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
     path:videoPath, code:$("#code").value.trim(),
-    target_sec:+$("#target").value, llm:$("#llm").value, model:$("#whisper").value
+    target_sec:+$("#target").value, llm:$("#llm").value, model:$("#whisper").value,
+    hint:($("#hint")?$("#hint").value.trim():"")
   })}).then(r=>r.json()).then(j=>runJob(j.job, showResult));
 };
 
@@ -182,7 +183,8 @@ $("#btnAnalyze").onclick = () => {
   log("── 자동 분석 시작 ──");
   fetch("/analyze",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
     path:videoPath, code:$("#codeA").value.trim(),
-    target_sec:+$("#targetA").value, llm:$("#llmA").value, model:$("#whisperA").value
+    target_sec:+$("#targetA").value, llm:$("#llmA").value, model:$("#whisperA").value,
+    hint:($("#hintA")?$("#hintA").value.trim():"")
   })}).then(r=>r.json()).then(j=>runJob(j.job, (res)=>{
     $("#autoJson").value = JSON.stringify(res.result, null, 2);
     $("#btnRender").disabled = false;

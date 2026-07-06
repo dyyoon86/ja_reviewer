@@ -224,16 +224,18 @@ async def analyze(req: Request):
     body = await req.json(); c = load_cfg()
     path = body["path"]; code = body["code"]
     target = int(body.get("target_sec", c["target_sec"])); llm = body.get("llm", c["llm"])
+    hint = (body.get("hint") or "").strip()
     jid = new_job()
 
     def work():
         try:
-            jstep(jid, 1, 3, "전사(faster-whisper)")
-            segs = P.transcribe(path, body.get("model", c["whisper_model"]), lambda m: jlog(jid, m))
-            jstep(jid, 2, 3, "메타 조회")
+            jstep(jid, 1, 3, "메타 조회")
             m = P.fetch_meta(c["meta_api"], code, lambda x: jlog(jid, x))
+            init = "。".join(x for x in [P.build_initial_prompt(m), hint] if x) or None  # 맥락/지시 → Whisper 힌트
+            jstep(jid, 2, 3, "전사(faster-whisper)")
+            segs = P.transcribe(path, body.get("model", c["whisper_model"]), lambda m2: jlog(jid, m2), initial_prompt=init)
             jstep(jid, 3, 3, "AI 분석(구간·번역·내레이션)")
-            res = P.call_llm(P.prompt_auto(m, segs, target), llm, lambda x: jlog(jid, x))
+            res = P.call_llm(P.prompt_auto(m, segs, target, hint=hint), llm, lambda x: jlog(jid, x))
             jdone(jid, {"mode": "auto", "result": res})
         except Exception as e:
             jerr(jid, e)
@@ -276,17 +278,19 @@ async def review(req: Request):
     path = body["path"]; code = body["code"]
     target = int(body.get("target_sec", c["target_sec"])); llm = body.get("llm", c["llm"])
     model = body.get("model", c["whisper_model"])
+    hint = (body.get("hint") or "").strip()
     jid = new_job()
 
     def work():
         try:
             outdir = Path(c["out_dir"]); outdir.mkdir(parents=True, exist_ok=True)
-            jstep(jid, 1, 4, f"전사(faster-whisper {model})")
-            segs = P.transcribe(path, model, lambda m: jlog(jid, m))
-            jstep(jid, 2, 4, "메타 조회")
+            jstep(jid, 1, 4, "메타 조회")
             m = P.fetch_meta(c["meta_api"], code, lambda x: jlog(jid, x))
+            init = "。".join(x for x in [P.build_initial_prompt(m), hint] if x) or None  # 맥락/지시 → Whisper 힌트
+            jstep(jid, 2, 4, f"전사(faster-whisper {model})")
+            segs = P.transcribe(path, model, lambda m2: jlog(jid, m2), initial_prompt=init)
             jstep(jid, 3, 4, "AI 압축·번역·내레이션")
-            res = P.call_llm(P.prompt_manual(m, segs, target), llm, lambda x: jlog(jid, x))
+            res = P.call_llm(P.prompt_manual(m, segs, target, hint=hint), llm, lambda x: jlog(jid, x))
             keep = [(float(a), float(b)) for a, b in res.get("keep", [])]
             if not keep:
                 raise RuntimeError("LLM이 keep 구간을 못 골랐습니다.")
