@@ -30,16 +30,15 @@ def _fmt(t):
 
 
 def write_srt(rows, path, field):
+    # (start,end,text) 형태로 정상화 후 기록 — 타임스탬프 역전/겹침 제거
+    triples = [(r["start"], r["end"], (r.get(field) or "").strip())
+               for r in rows if (r.get(field) or "").strip()]
+    triples = P.sanitize_segments(triples)
     lines = []
-    n = 0
-    for r in rows:
-        txt = (r.get(field) or "").strip()
-        if not txt:
-            continue
-        n += 1
-        lines.append(f"{n}\n{_fmt(r['start'])} --> {_fmt(r['end'])}\n{txt}\n")
+    for n, (a, b, txt) in enumerate(triples, 1):
+        lines.append(f"{n}\n{_fmt(a)} --> {_fmt(b)}\n{txt}\n")
     Path(path).write_text("\n".join(lines), encoding="utf-8")
-    return n
+    return len(triples)
 
 
 def main():

@@ -139,10 +139,32 @@ def split_entries(entries, maxlen=24):
     return out
 
 
+def sanitize_segments(entries, min_dur=0.2):
+    """SRT 타임스탬프 정상화: 역전(start>end) 교정 + 시간순 정렬 + 겹침 제거.
+    Whisper가 가끔 뱉는 뒤집힌/겹친 타임코드를 SRT로 내보내기 전에 무조건 통과시킨다."""
+    rows = []
+    for e in entries:
+        a, b, *rest = e
+        a = max(0.0, float(a)); b = float(b)
+        if b < a:                       # start>end → 교환(역전 교정)
+            a, b = b, a
+        if b - a < min_dur:             # 0길이/과소 → 최소 길이
+            b = a + min_dur
+        rows.append([a, b, *rest])
+    rows.sort(key=lambda x: (x[0], x[1]))
+    for i in range(len(rows) - 1):      # 앞 세그 end가 다음 start를 넘으면 클램프(겹침 제거)
+        if rows[i][1] > rows[i + 1][0]:
+            rows[i][1] = max(rows[i][0] + min_dur * 0.5, rows[i + 1][0])
+    return [tuple(r) for r in rows]
+
+
 def write_srt(entries, path, maxlen=24):
-    """SRT 출력. maxlen 글자 이하로 자동 분할(시간 비례 배분). maxlen=0이면 분할 안 함."""
+    """SRT 출력. maxlen 글자 이하로 자동 분할(시간 비례 배분). maxlen=0이면 분할 안 함.
+    출력 직전 항상 sanitize_segments 로 타임스탬프 역전/겹침을 정상화한다."""
+    entries = sanitize_segments(entries)
     if maxlen:
         entries = split_entries(entries, maxlen)
+    entries = sanitize_segments(entries)   # 분할 후에도 한 번 더 보장
     out = [f"{i}\n{s2srt(a)} --> {s2srt(b)}\n{t}" for i, (a, b, t) in enumerate(entries, 1)]
     Path(path).write_text("\n\n".join(out) + "\n", encoding="utf-8")
 
@@ -234,6 +256,7 @@ def transcribe(video, model_name="large-v3", log=print, initial_prompt=None):
         out.append((float(s.start), float(s.end), t))
         if out and len(out) % 50 == 0:
             log(f"   …{len(out)}")
+    out = sanitize_segments(out)   # 타임스탬프 역전/겹침/순서 정상화
     log(f"전사 완료: {len(out)} 세그먼트 (환청/무의미 {dropped}개 제거)")
     return out
 
