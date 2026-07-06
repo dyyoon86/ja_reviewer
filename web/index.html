@@ -97,7 +97,10 @@
         </div>
         <div class="formrow">
           <span class="fld"><span class="lbl">전사</span><select id="whisperA"><option value="large-v3">large-v3 (정확)</option><option value="distil-large-v3">distil-large-v3 (빠름)</option><option value="medium">medium</option><option value="small">small</option></select></span>
-          <span class="muted">faster-whisper · 일본어</span>
+          <span class="fld"><span class="lbl">방식</span><select id="modeA">
+            <option value="summary">요약형 (줄거리 골고루)</option>
+            <option value="highlight">하이라이트형 (후킹 몰아서)</option>
+          </select></span>
         </div>
         <div class="formrow" style="align-items:flex-start">
           <span class="fld" style="align-items:flex-start;width:100%">
@@ -108,11 +111,16 @@
         </div>
         <div class="actions">
           <button class="go spacer" id="btnAnalyze">● 자동 분석</button>
+          <button id="btnLoadPick" title="저장된 AI 선정 결과 불러오기">📂 불러오기</button>
         </div>
-        <div class="hint">AI가 영상 전체를 분석해 핵심 구간을 자동 선정. 아래 결과 확인/수정 후 확정.</div>
-        <textarea id="autoJson" placeholder="분석 결과(JSON)가 여기 표시됩니다."></textarea>
+        <div class="hint">요약형=앞·중간·뒤 골고루 / 하이라이트형=후킹 밀도 높은 순간만. 아래 프리뷰에서 구간 재생·확인 후 확정.</div>
+        <ul id="pickPreview" class="picklist"></ul>
+        <details style="margin-top:6px"><summary class="muted">원본 JSON 보기/수정</summary>
+          <textarea id="autoJson" placeholder="분석 결과(JSON)가 여기 표시됩니다."></textarea>
+        </details>
         <div class="actions">
           <button class="primary spacer" id="btnRender" disabled>확정 → 컷 &amp; 자막 생성</button>
+          <button id="btnSavePick" disabled title="AI 선정 결과를 파일로 저장(나중에 재조회)">💾 저장</button>
         </div>
       </div>
     </div>

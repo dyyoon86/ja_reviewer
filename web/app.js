@@ -180,16 +180,78 @@ function needCodeA(){ if(!$("#codeA").value.trim()){ log("품번을 입력하세
 
 $("#btnAnalyze").onclick = () => {
   if(!needVideo() || !needCodeA()) return;
-  log("── 자동 분석 시작 ──");
+  const mode = $("#modeA") ? $("#modeA").value : "summary";
+  log(`── 자동 분석 시작 (${mode==="highlight"?"하이라이트형":"요약형"}) ──`);
   fetch("/analyze",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
     path:videoPath, code:$("#codeA").value.trim(),
     target_sec:+$("#targetA").value, llm:$("#llmA").value, model:$("#whisperA").value,
-    hint:($("#hintA")?$("#hintA").value.trim():"")
+    hint:($("#hintA")?$("#hintA").value.trim():""), mode
   })}).then(r=>r.json()).then(j=>runJob(j.job, (res)=>{
-    $("#autoJson").value = JSON.stringify(res.result, null, 2);
-    $("#btnRender").disabled = false;
-    log("자동 분석 완료 — 결과 확인/수정 후 [확정]","ok");
+    applyPickResult(res.result);
+    log("자동 분석 완료 — 프리뷰에서 재생·확인 후 [확정]","ok");
   }));
+};
+
+// AI 결과 → JSON 텍스트 + 프리뷰 목록 반영
+function applyPickResult(result){
+  $("#autoJson").value = JSON.stringify(result, null, 2);
+  $("#btnRender").disabled = false;
+  $("#btnSavePick").disabled = false;
+  buildPickPreview(result);
+}
+
+// 구간 목록 프리뷰 (picks 있으면 후킹점수/이유, 없으면 keep)
+function buildPickPreview(result){
+  const ul = $("#pickPreview"); ul.innerHTML = "";
+  let rows = [];
+  if(result && Array.isArray(result.picks) && result.picks.length){
+    rows = result.picks.map(p=>({a:+p.start, b:+p.end, hook:p.hook, reason:p.reason||""}));
+  } else if(result && Array.isArray(result.keep)){
+    rows = result.keep.map(k=>({a:+k[0], b:+k[1], hook:null, reason:""}));
+  }
+  rows.sort((x,y)=> (y.hook||0)-(x.hook||0) || x.a-y.a); // 후킹점수 높은 순
+  rows.forEach((r,i)=>{
+    const li=document.createElement("li");
+    const play=document.createElement("button");
+    play.className="pk-play"; play.textContent="▶";
+    play.onclick=()=>seekPlay(r.a, r.b);
+    li.innerHTML =
+      `<span class="pk-t">${hhmmss(r.a)} ~ ${hhmmss(r.b)}</span>`+
+      (r.hook!=null?`<span class="pk-hook">★${r.hook}</span>`:`<span class="pk-hook"></span>`)+
+      `<span class="pk-reason">${(r.reason||"").replace(/</g,"&lt;")}</span>`;
+    li.appendChild(play);
+    ul.appendChild(li);
+  });
+  if(!rows.length) ul.innerHTML = '<li class="muted" style="padding:8px">구간이 없습니다.</li>';
+}
+
+// 구간 재생: start로 시킹 → 재생 → end에서 정지
+let _seekStopAt = null;
+function seekPlay(a, b){
+  if(!videoPath){ log("영상을 먼저 열어주세요","warn"); return; }
+  _seekStopAt = b;
+  vid.currentTime = Math.max(0, a);
+  vid.play();
+}
+vid.addEventListener("timeupdate", ()=>{
+  if(_seekStopAt!=null && vid.currentTime >= _seekStopAt){ vid.pause(); _seekStopAt=null; }
+});
+
+// AI 선정 결과 저장/불러오기
+$("#btnSavePick").onclick = () => {
+  const code=$("#codeA").value.trim(); if(!code){ log("품번을 입력하세요","warn"); return; }
+  let res; try{ res=JSON.parse($("#autoJson").value); }catch(e){ log("JSON 오류: "+e,"warn"); return; }
+  fetch("/pick/save",{method:"POST",headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({code, result:res})}).then(r=>r.json())
+    .then(j=> log(j.ok?`✔ 저장: ${j.path}`:"저장 실패","ok"));
+};
+$("#btnLoadPick").onclick = () => {
+  const code=$("#codeA").value.trim(); if(!code){ log("품번을 입력하세요","warn"); return; }
+  fetch("/pick/load",{method:"POST",headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({code})}).then(r=>r.json()).then(j=>{
+      if(!j.ok||!j.result){ log("저장된 결과 없음","warn"); return; }
+      applyPickResult(j.result); log("✔ 저장된 AI 선정 결과 불러옴","ok");
+    });
 };
 
 $("#btnRender").onclick = () => {

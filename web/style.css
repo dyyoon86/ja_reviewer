@@ -93,3 +93,15 @@ ul.files li .pth{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-s
 #log{height:150px;overflow:auto;background:#0b0b0e;border:1px solid var(--line);border-radius:8px;
   padding:10px;font-family:Consolas,monospace;font-size:12px;color:#cfcfd8;white-space:pre-wrap;line-height:1.6}
 audio{width:100%;margin:8px 0}
+
+/* AI 선정 결과 프리뷰 목록 */
+.picklist{list-style:none;margin:8px 0;padding:0;max-height:260px;overflow:auto;
+  border:1px solid #2a2a33;border-radius:8px}
+.picklist:empty{display:none}
+.picklist li{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid #22222a;font-size:13px}
+.picklist li:last-child{border-bottom:none}
+.picklist .pk-t{font-variant-numeric:tabular-nums;color:#9ad;min-width:118px}
+.picklist .pk-hook{font-weight:800;color:#ffd23f;min-width:36px}
+.picklist .pk-reason{flex:1;color:#cdd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.picklist .pk-play{background:#e50914;border:none;color:#fff;border-radius:6px;padding:3px 9px;cursor:pointer}
+.picklist .pk-play:hover{filter:brightness(1.1)}

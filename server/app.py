@@ -225,6 +225,7 @@ async def analyze(req: Request):
     path = body["path"]; code = body["code"]
     target = int(body.get("target_sec", c["target_sec"])); llm = body.get("llm", c["llm"])
     hint = (body.get("hint") or "").strip()
+    mode = body.get("mode", "summary")  # summary(요약형) | highlight(하이라이트형)
     jid = new_job()
 
     def work():
@@ -234,13 +235,39 @@ async def analyze(req: Request):
             init = "。".join(x for x in [P.build_initial_prompt(m), hint] if x) or None  # 맥락/지시 → Whisper 힌트
             jstep(jid, 2, 3, "전사(faster-whisper)")
             segs = P.transcribe(path, body.get("model", c["whisper_model"]), lambda m2: jlog(jid, m2), initial_prompt=init)
-            jstep(jid, 3, 3, "AI 분석(구간·번역·내레이션)")
-            res = P.call_llm(P.prompt_auto(m, segs, target, hint=hint), llm, lambda x: jlog(jid, x))
+            label = "하이라이트" if mode == "highlight" else "요약"
+            jstep(jid, 3, 3, f"AI 분석({label}·구간·번역·내레이션)")
+            pf = P.prompt_highlight if mode == "highlight" else P.prompt_auto
+            res = P.call_llm(pf(m, segs, target, hint=hint), llm, lambda x: jlog(jid, x))
+            res["_mode"] = mode
             jdone(jid, {"mode": "auto", "result": res})
         except Exception as e:
             jerr(jid, e)
     run_bg(work)
     return {"job": jid}
+
+
+# ─── AI 선정 결과 저장/불러오기 (수기 마킹처럼 재조회) ────────────────────────
+@app.post("/pick/save")
+async def pick_save(req: Request):
+    body = await req.json(); c = load_cfg()
+    code = (body.get("code") or "").strip()
+    if not code:
+        raise HTTPException(400, "품번 필요")
+    outdir = Path(c["out_dir"]); outdir.mkdir(parents=True, exist_ok=True)
+    fp = outdir / f"{code}_pick.json"
+    fp.write_text(json.dumps(body.get("result") or {}, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "path": str(fp)}
+
+
+@app.post("/pick/load")
+async def pick_load(req: Request):
+    body = await req.json(); c = load_cfg()
+    code = (body.get("code") or "").strip()
+    fp = Path(c["out_dir"]) / f"{code}_pick.json"
+    if not fp.exists():
+        return {"ok": False, "result": None}
+    return {"ok": True, "result": json.loads(fp.read_text(encoding="utf-8"))}
 
 
 # ─── ① 잘라내기 (품번 불필요) — 선택 구간 삭제 후 트림 영상 생성 ─────────────
