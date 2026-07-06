@@ -90,7 +90,7 @@ def _good_break(word):
     return any(word.endswith(s) for s in _BREAK_SUFFIX)
 
 
-def _wrap_chunks(text, maxlen=24):
+def _wrap_chunks(text, maxlen=25):
     """텍스트를 maxlen 이하로 — 절/구 경계(연결어미·조사·문장부호)에서 우선 끊는다."""
     text = " ".join(str(text).split())
     if len(text) <= maxlen:
@@ -122,7 +122,7 @@ def _wrap_chunks(text, maxlen=24):
     return chunks or [text[:maxlen]]
 
 
-def split_entries(entries, maxlen=24):
+def split_entries(entries, maxlen=25):
     """긴 자막을 maxlen 이하 여러 항목으로 분할 — 시간은 글자수 비례로 배분(싱크 유지)."""
     out = []
     for a, b, t, *extra in entries:
@@ -158,7 +158,7 @@ def sanitize_segments(entries, min_dur=0.2):
     return [tuple(r) for r in rows]
 
 
-def write_srt(entries, path, maxlen=24):
+def write_srt(entries, path, maxlen=25):
     """SRT 출력. maxlen 글자 이하로 자동 분할(시간 비례 배분). maxlen=0이면 분할 안 함.
     출력 직전 항상 sanitize_segments 로 타임스탬프 역전/겹침을 정상화한다."""
     entries = sanitize_segments(entries)

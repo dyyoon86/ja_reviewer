@@ -206,6 +206,19 @@ function _within(list, a, b){
   return (Array.isArray(list)?list:[]).filter(d=> +d.start >= a-0.1 && +d.start < b+0.1)
     .sort((x,y)=>+x.start-+y.start);
 }
+// 실제 SRT처럼 25자 내외로 조각내 보여주기(공백 경계 우선)
+function _chunk25(text, max){
+  max = max||25; const t=(text||"").replace(/\s+/g," ").trim();
+  if(t.length<=max) return [t];
+  const words=t.split(" "), out=[]; let cur="";
+  for(const w of words){
+    const cand = cur? cur+" "+w : w;
+    if(cand.length>max && cur){ out.push(cur); cur=w; }
+    else cur=cand;
+  }
+  if(cur) out.push(cur);
+  return out;
+}
 
 // 구간 목록 프리뷰 — 각 구간에 한글 대사(화자) + 내레이션(유형)까지 펼침
 function buildPickPreview(result){
@@ -235,13 +248,17 @@ function buildPickPreview(result){
     const body=document.createElement("div"); body.className="pk-body";
     _within(dlgs, r.a, r.b).forEach(d=>{
       const sp=(d.speaker==="남")?"남":"여";
-      body.insertAdjacentHTML("beforeend",
-        `<div class="pk-line dlg ${sp==="남"?"m":"f"}"><span class="pk-tag">${sp}</span>${_esc(d.ko)}</div>`);
+      _chunk25(d.ko).forEach((c,ci)=>{
+        body.insertAdjacentHTML("beforeend",
+          `<div class="pk-line dlg ${sp==="남"?"m":"f"}"><span class="pk-tag">${ci===0?sp:"·"}</span>${_esc(c)}</div>`);
+      });
     });
     _within(nars, r.a, r.b).forEach(n=>{
       const st=n.style||"기본";
-      body.insertAdjacentHTML("beforeend",
-        `<div class="pk-line nar ${st==="강조"?"emph":st==="정보"?"info":""}"><span class="pk-tag">내레</span>${_esc(n.text)}</div>`);
+      _chunk25(n.text).forEach((c,ci)=>{
+        body.insertAdjacentHTML("beforeend",
+          `<div class="pk-line nar ${st==="강조"?"emph":st==="정보"?"info":""}"><span class="pk-tag">${ci===0?"내레":"·"}</span>${_esc(c)}</div>`);
+      });
     });
     if(!body.children.length) body.innerHTML='<div class="pk-line muted">이 구간 자막 없음</div>';
     li.appendChild(body);
