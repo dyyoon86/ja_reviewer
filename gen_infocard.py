@@ -22,12 +22,28 @@ DB(jav_2026.db) 조회 → 인포카드 / 워터마크 / 액자프레임 오버�
 import argparse, base64, colorsys, json, os, re, shutil, sqlite3, subprocess, sys, tempfile
 
 HERE   = os.path.dirname(os.path.abspath(__file__))
-DB     = os.environ.get("JAV_DB", "/home/dyyoon/jav_scrap/jav_2026.db")
+
+def _first_existing(*cands):
+    for c in cands:
+        if c and os.path.exists(c):
+            return c
+    return cands[0] if cands else ""
+
+# DB: 환경변수 → 리눅스(우분투 서버) → 이 레포 옆 jav_scrap (Windows)
+DB = _first_existing(
+    os.environ.get("JAV_DB"),
+    "/home/dyyoon/jav_scrap/jav_2026.db",
+    os.path.join(os.path.dirname(HERE), "jav_scrap", "jav_2026.db"),
+)
+JAV_ROOT = os.path.dirname(DB)   # photo/thumb 상대경로 기준
 MASCOT = os.path.join(HERE, "server", "assets", "mascot.png")
-CHROME = os.environ.get(
-    "PW_CHROME",
+# CHROME: 환경변수 → 리눅스 경로. 없으면 None → playwright 번들 chromium 사용
+CHROME = _first_existing(
+    os.environ.get("PW_CHROME"),
     "/home/dyyoon/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome",
 )
+if not (CHROME and os.path.exists(CHROME)):
+    CHROME = None
 
 # ────────────────────────────── DB 조회 ──────────────────────────────
 def fetch_meta(code: str) -> dict:
@@ -58,14 +74,14 @@ def fetch_meta(code: str) -> dict:
     # 배우 프로필 사진(SFW 헤드샷) 절대경로
     photo = a.get("photo_path") or w.get("actress_photo") or ""
     if photo and not os.path.isabs(photo):
-        photo = os.path.join("/home/dyyoon/jav_scrap", photo)
+        photo = os.path.join(JAV_ROOT, photo)
     if not (photo and os.path.exists(photo)):
         photo = ""
 
     # 썸네일(색 추출 전용 — 화면 표시 안 함)
     thumb = w.get("thumb_path") or ""
     if thumb and not os.path.isabs(thumb):
-        thumb = os.path.join("/home/dyyoon/jav_scrap", thumb)
+        thumb = os.path.join(JAV_ROOT, thumb)
     if not (thumb and os.path.exists(thumb)):
         thumb = ""
 
@@ -272,7 +288,7 @@ def render_layers(m: dict, outdir: str, theme=None) -> dict:
     }
     paths = {}
     with sync_playwright() as p:
-        b = p.chromium.launch(executable_path=CHROME)
+        b = p.chromium.launch(executable_path=CHROME) if CHROME else p.chromium.launch()
         for name, (html, transp) in pages.items():
             f = os.path.join(outdir, f"_L_{name}.html")
             with open(f, "w") as fp: fp.write(html)

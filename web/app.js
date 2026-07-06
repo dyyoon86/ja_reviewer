@@ -22,6 +22,18 @@ $("#btnBrowse").onclick = async () => {
 };
 $("#btnOpen").onclick = () => { const p=$("#path").value.trim(); if(p) openVideo(p); };
 
+// 새 영상 열면 우측 패널(결과·단계배지·AI 입출력)을 초기화 — 이전 영상 정보 잔류 방지
+function resetForNewVideo(){
+  const rc=$("#resultCard"); if(rc) rc.style.display="none";
+  const r=$("#result"); if(r) r.innerHTML="";
+  const po=$("#aiPromptOut"); if(po) po.value="";
+  const pj=$("#aiPasteJson"); if(pj) pj.value="";
+  const aj=$("#autoJson"); if(aj) aj.value="";
+  const br=$("#btnRender"); if(br) br.disabled=true;
+  setBadge("badgeTranscribe","idle"); setBadge("badgeAi","idle"); setBadge("badgeSubs","idle");
+  clearFiles(); setProg(0,"대기 중");
+}
+
 async function openVideo(path){
   try{
     const r = await fetch("/open",{method:"POST",headers:{'Content-Type':'application/json'},
@@ -33,10 +45,12 @@ async function openVideo(path){
     excludes = []; pendingIn = null; renderEx();
     log(`영상 로드: ${j.name} (${hhmmss(duration)})`, "ok");
     // 품번 자동 추정 (파일명에서 XXX-000 패턴) → 양 탭에 채움
+    resetForNewVideo();
     const mm = j.name.match(/([A-Za-z]{2,6})-?(\d{2,5})/);
     if(mm){ const guess=(mm[1]+"-"+mm[2]).toUpperCase();
-      if(!$("#code").value) $("#code").value=guess;
-      if(!$("#codeA").value) $("#codeA").value=guess; }
+      $("#code").value=guess; $("#codeA").value=guess; }
+    else { $("#code").value=""; $("#codeA").value=""; }
+    refreshSteps();
   }catch(e){ log("열기 오류: "+e,"warn"); }
 }
 
@@ -137,36 +151,114 @@ function addFile(tag, path){
   $("#files").appendChild(li);
 }
 
-function runJob(job, onDone){
+function runJob(job, onDone, onErr){
   clearFiles(); setProg(0.04, "시작…");
   const es = new EventSource(`/events/${job}`);
   es.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
     if(m.type==="log") log("  "+m.msg);
     else if(m.type==="step"){ const fr=m.total?m.n/m.total:0; setProg(fr, `${m.n}/${m.total} · ${m.label}`); }
+    else if(m.type==="progress"){ setProg(m.frac, `${m.label||''} ${Math.round((m.frac||0)*100)}%`); }
     else if(m.type==="file"){ addFile(m.label, m.path); }
-    else if(m.type==="error"){ log("✖ 오류: "+m.msg,"warn"); setProg(1,"오류","err"); es.close(); }
-    else if(m.type==="done"){ setProg(1,"완료","done"); es.close(); onDone(m.result); }
+    else if(m.type==="error"){ log("✖ 오류: "+m.msg,"warn"); setProg(1,"오류","err"); es.close(); if(onErr) onErr(m.msg); }
+    else if(m.type==="done"){ setProg(1,"완료","done"); es.close(); if(onDone) onDone(m.result); }
   };
 }
 
-// ① 잘라내기 — 품번 불필요
+// ① 잘라내기 — 품번 불필요 (전용 모달: 진행 바 → 잘라낸 결과만 따로 보기)
+let trimResultPath = null, trimResultDur = 0;
+
+function openTrimModal(){
+  $("#trimModal").style.display = "flex";
+  $("#trimProgress").style.display = "block";
+  $("#trimResult").style.display = "none";
+  $("#trimTitle").textContent = "선택 구간 잘라내는 중…";
+  $("#trimLog").textContent = "";
+  trimResultPath = null; trimResultDur = 0;
+  setTrimProg(0.04, "준비 중…", "pulse");
+}
+function closeTrimModal(){
+  $("#trimModal").style.display = "none";
+  const tv = $("#trimVid"); tv.pause(); tv.removeAttribute("src"); tv.load();
+}
+function setTrimProg(frac, label, cls){
+  const f = $("#trimProgFill");
+  f.style.width = Math.round((frac||0)*100)+"%";
+  f.className = "prog-fill"+(cls?" "+cls:"");
+  if(label!==undefined) $("#trimProgStep").textContent = label;
+}
+function appendTrimLog(msg){
+  const el = $("#trimLog");
+  el.textContent += (el.textContent?"\n":"") + msg;
+  el.scrollTop = el.scrollHeight;
+}
+function showTrimResult(res){
+  trimResultPath = res.video; trimResultDur = res.duration || 0;
+  $("#trimTitle").textContent = "✅ 잘라낸 결과 미리보기";
+  $("#trimProgress").style.display = "none";
+  $("#trimResult").style.display = "block";
+  const tv = $("#trimVid");
+  tv.src = `/video/stream?path=${encodeURIComponent(res.video)}&t=${Date.now()}`;
+  tv.play().catch(()=>{});
+  let extra="";
+  if(res.cut_text && res.cut_text.length)
+    extra += `<div class="muted" style="margin-top:8px">✂ 삭제: ${res.cut_text.join(", ")}</div>`;
+  if(res.keep_text && res.keep_text.length)
+    extra += `<div class="muted">남김: ${res.keep_text.join(", ")}</div>`;
+  $("#trimMeta").innerHTML =
+    `<span class="ok">길이 ${hhmmss(trimResultDur)}</span> · <span class="pth">${res.video}</span>` + extra;
+  log(`✔ 잘라내기 완료: ${res.video} (${hhmmss(trimResultDur)})`, "ok");
+  if(res.cut_text) log(`  ✂ 삭제 구간: ${res.cut_text.join(", ")}`);
+}
+function runTrimJob(job){
+  const es = new EventSource(`/events/${job}`);
+  es.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    if(m.type==="log"){ log("  "+m.msg); appendTrimLog(m.msg); }
+    else if(m.type==="step"){ setTrimProg(0.06, m.label, "pulse"); }
+    else if(m.type==="progress"){
+      const fr = 0.06 + 0.92*(m.frac||0);
+      setTrimProg(fr, `${m.label||"잘라내는 중"} ${Math.round((m.frac||0)*100)}%`);
+    }
+    else if(m.type==="file"){ addFile(m.label, m.path); }
+    else if(m.type==="error"){
+      log("✖ 오류: "+m.msg, "warn"); appendTrimLog("✖ 오류: "+m.msg);
+      setTrimProg(1, "오류", "err"); es.close();
+    }
+    else if(m.type==="done"){ setTrimProg(1, "완료", "done"); es.close(); showTrimResult(m.result); }
+  };
+  es.onerror = () => { es.close(); };
+}
+
 $("#btnTrim").onclick = () => {
   if(!needVideo()) return;
   if(!excludes.length){ log("삭제할 구간을 하나 이상 추가하세요","warn"); return; }
   log("── ① 잘라내기 시작 ──");
+  clearFiles();
+  openTrimModal();
   fetch("/trim",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    path:videoPath, excludes
-  })}).then(r=>r.json()).then(j=>runJob(j.job, (res)=>{
-    videoPath = res.video; duration = res.duration || 0;
-    vid.src = `/video/stream?path=${encodeURIComponent(res.video)}`;
-    excludes = []; pendingIn = null; renderEx();
-    log(`✔ 잘라낸 영상 로드: ${res.video} (${hhmmss(duration)}). 품번 넣고 ②를 누르세요.`,"ok");
-  }));
+    path:videoPath, excludes, code:$("#code").value.trim()
+  })}).then(r=>r.json()).then(j=>{
+    if(!j.job){ appendTrimLog("잘라내기 시작 실패"); setTrimProg(1,"실패","err"); return; }
+    runTrimJob(j.job);
+  }).catch(e=>{ appendTrimLog("요청 실패: "+e); setTrimProg(1,"실패","err"); });
 };
 
-// ② 리뷰 생성 — 품번 필요
-$("#btnReview").onclick = () => {
+// 결과 모달 액션
+$("#trimClose").onclick = closeTrimModal;
+$("#trimReopen").onclick = closeTrimModal;
+$("#trimModal").addEventListener("click", (e)=>{ if(e.target.id==="trimModal") closeTrimModal(); });
+$("#trimUse").onclick = () => {
+  if(!trimResultPath) return;
+  videoPath = trimResultPath; duration = trimResultDur;
+  vid.src = `/video/stream?path=${encodeURIComponent(trimResultPath)}`;
+  excludes = []; pendingIn = null; renderEx();
+  log(`✔ 잘라낸 영상으로 계속: ${trimResultPath} (${hhmmss(duration)}). 품번 넣고 ②를 누르세요.`,"ok");
+  closeTrimModal();
+};
+
+// ② 리뷰 생성(원샷) — 품번 필요
+if($("#btnReview")) $("#btnReview").onclick = () => {
   if(!needVideo() || !needCode()) return;
   log("── ② 리뷰 생성 시작 ──");
   fetch("/review",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
@@ -175,6 +267,149 @@ $("#btnReview").onclick = () => {
     hint:($("#hint")?$("#hint").value.trim():"")
   })}).then(r=>r.json()).then(j=>runJob(j.job, showResult));
 };
+
+// ② 단계별 리뷰 생성 — 각 단계 독립 실행/재실행, 결과는 서버가 파일로 저장
+function setBadge(id, state){  // state: done|run|err|idle
+  const b=$("#"+id); if(!b) return;
+  const sym={done:"✓",run:"…",err:"✗",idle:"—"};
+  b.textContent=sym[state]||"—";
+  b.className="st-badge"+(state&&state!=="idle"?" "+state:"");
+}
+let trimAvail = null;
+function refreshSteps(code){
+  code=(code||$("#code").value||"").trim();
+  if(!code){ setBadge("badgeTranscribe","idle"); setBadge("badgeAi","idle"); setBadge("badgeSubs","idle");
+    $("#btnUseTrim").style.display="none"; trimAvail=null; return; }
+  fetch("/state/"+encodeURIComponent(code)).then(r=>r.json()).then(s=>{
+    const st=s.steps||{};
+    setBadge("badgeTranscribe", st.transcribe?"done":"idle");
+    setBadge("badgeAi", st.ai?"done":"idle");
+    setBadge("badgeSubs", st.subs?"done":"idle");
+    // 이전에 잘라낸 결과가 있고, 지금 연 영상이 그 trim 자체가 아니면 → 사용 버튼 노출
+    const tb=$("#btnUseTrim");
+    const isTrim = videoPath && /_trim\.mp4$/i.test(videoPath);
+    if(s.trim_exists && s.trim_video && !isTrim){
+      trimAvail={path:s.trim_video, dur:s.trim_sec||0};
+      tb.textContent=`✂ 이전에 잘라낸 결과 사용 (${hhmmss(s.trim_sec||0)})`;
+      tb.style.display="";
+    } else { trimAvail=null; tb.style.display="none"; }
+  }).catch(()=>{});
+}
+$("#btnUseTrim").onclick = () => {
+  if(!trimAvail) return;
+  videoPath=trimAvail.path; duration=trimAvail.dur;
+  vid.src=`/video/stream?path=${encodeURIComponent(trimAvail.path)}&t=${Date.now()}`;
+  excludes=[]; pendingIn=null; renderEx();
+  log(`✔ 이전에 잘라낸 결과 사용: ${trimAvail.path} (${hhmmss(duration)}). 품번 넣고 ① 전사부터 진행하세요.`,"ok");
+  $("#btnUseTrim").style.display="none";
+};
+
+// ① 전사 — 현재 영상(잘라낸 것) → 일본어 STT 저장
+$("#btnStepTranscribe").onclick = () => {
+  if(!needVideo() || !needCode()) return;
+  const code=$("#code").value.trim();
+  log("── ① 전사 시작 ──"); setBadge("badgeTranscribe","run");
+  fetch("/step/transcribe",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    path:videoPath, code, model:$("#whisper").value
+  })}).then(r=>r.json()).then(j=>runJob(j.job, (res)=>{
+    setBadge("badgeTranscribe","done");
+    log(`✔ 전사 완료: ${res.count} 세그먼트 → ${res.srt}`,"ok");
+    refreshSteps(code);
+  }, ()=>setBadge("badgeTranscribe","err")));
+};
+
+// ② AI 처리 — 저장된 전사 + 메타 → LLM 압축·번역·내레이션 + 컷
+$("#btnStepAi").onclick = () => {
+  if(!needCode()) return;
+  const code=$("#code").value.trim();
+  log("── ② AI 처리 시작 ──"); setBadge("badgeAi","run");
+  fetch("/step/ai",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    code, target_sec:+$("#target").value, llm:$("#llm").value
+  })}).then(r=>r.json()).then(j=>runJob(j.job, (res)=>{
+    setBadge("badgeAi","done"); showResult(res);
+    log(`✔ AI 처리 완료 (최종 ${Math.round(res.final_sec||0)}초)`,"ok");
+    refreshSteps(code);
+  }, ()=>setBadge("badgeAi","err")));
+};
+
+// ② 수동 모드 — 프롬프트 화면 표시 → 직접 복붙
+$("#btnAiPrompt").onclick = () => {
+  if(!needCode()) return;
+  const code=$("#code").value.trim();
+  $("#aiPromptOut").value="프롬프트 생성 중…";
+  fetch("/step/ai/prompt",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    code, target_sec:+$("#target").value
+  })}).then(async r=>{
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok){ $("#aiPromptOut").value=""; log("✖ 프롬프트 생성 실패: "+(j.detail||r.status)+" (① 전사 먼저 / 메타조회 확인)","warn"); return; }
+    const ta=$("#aiPromptOut");
+    ta.value=j.prompt;
+    ta.focus(); ta.select();   // 바로 Ctrl+C 가능
+    log(`✔ 전송 프롬프트 표시됨(${j.prompt.length}자). 칸에서 Ctrl+A→Ctrl+C 로 복사해 codex/claude에 붙여넣으세요`,"ok");
+  }).catch(e=>{ $("#aiPromptOut").value=""; log("✖ 프롬프트 생성 오류: "+e,"warn"); });
+};
+$("#btnAiPromptCopy").onclick = async () => {
+  const t=$("#aiPromptOut").value;
+  if(!t){ log("먼저 ① 프롬프트 만들기를 누르세요","warn"); return; }
+  try{ await navigator.clipboard.writeText(t); log("✔ 프롬프트 클립보드 복사됨","ok"); }
+  catch(e){ $("#aiPromptOut").focus(); $("#aiPromptOut").select(); log("클립보드 권한 없음 → 칸에서 Ctrl+C 로 복사하세요","warn"); }
+};
+$("#btnAiManual").onclick = () => {
+  if(!needCode()) return;
+  const code=$("#code").value.trim();
+  const txt=$("#aiPasteJson").value.trim();
+  if(!txt){ log("결과 JSON을 먼저 붙여넣으세요","warn"); return; }
+  log("── ② 수동 결과 적용 시작 ──"); setBadge("badgeAi","run");
+  fetch("/step/ai/manual",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    code, result:txt
+  })}).then(r=>r.json()).then(j=>runJob(j.job,(res)=>{
+    setBadge("badgeAi","done"); showResult(res);
+    log(`✔ 수동 결과 적용 완료 (최종 ${Math.round(res.final_sec||0)}초)`,"ok");
+    refreshSteps(code);
+  }, ()=>setBadge("badgeAi","err")));
+};
+
+// ③ 자막 — 저장된 plan.json → 한글 대사/내레이션 SRT
+$("#btnStepSubs").onclick = () => {
+  if(!needCode()) return;
+  const code=$("#code").value.trim();
+  log("── ③ 자막 생성 시작 ──"); setBadge("badgeSubs","run");
+  fetch("/step/subs",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    code
+  })}).then(r=>r.json()).then(j=>runJob(j.job, (res)=>{
+    setBadge("badgeSubs","done"); showResult(res);
+    log("✔ 자막 생성 완료","ok");
+    refreshSteps(code);
+  }, ()=>setBadge("badgeSubs","err")));
+};
+
+// ── LLM(codex/claude) 연결 확인 ──
+function setLlmBadge(id, name, st){ // st: ok|fail|run|idle
+  const b=$("#"+id); if(!b) return;
+  const sym={ok:"✓",fail:"✗",run:"…",idle:"—"};
+  b.textContent=`${name} ${sym[st]||"—"}`;
+  b.className="st-badge"+(st==="ok"?" done":st==="fail"?" err":st==="run"?" run":"");
+}
+$("#btnLlmCheck").onclick = () => {
+  setLlmBadge("badgeCodex","codex","run"); setLlmBadge("badgeClaude","claude","run");
+  $("#llmStatus").textContent="확인 중… (각 CLI에 짧은 프롬프트 왕복, 10~30초)";
+  log("── LLM 연결 확인 ──");
+  fetch("/llm/check").then(r=>r.json()).then(d=>{
+    ["codex","claude"].forEach(n=>{
+      const x=d[n]||{}; const id=n==="codex"?"badgeCodex":"badgeClaude";
+      setLlmBadge(id, n, x.ok?"ok":"fail");
+      log(`  ${n}: ${x.ok?"✓":"✗"} ${x.msg||""}`, x.ok?"ok":"warn");
+    });
+    $("#llmStatus").textContent="확인 완료 (✓=설치·로그인·응답 정상)";
+  }).catch(e=>{
+    setLlmBadge("badgeCodex","codex","fail"); setLlmBadge("badgeClaude","claude","fail");
+    log("✖ 연결 확인 실패: "+e,"warn");
+  });
+};
+
+// 품번 바뀌면 진행 상태 자동 갱신
+$("#code").addEventListener("change", ()=>refreshSteps());
+$("#code").addEventListener("blur", ()=>refreshSteps());
 
 function needCodeA(){ if(!$("#codeA").value.trim()){ log("품번을 입력하세요","warn"); return false; } return true; }
 
@@ -331,6 +566,7 @@ function checkMeta(code){
     const j=await r.json().catch(()=>({}));
     if(!r.ok){ log("✖ 메타 조회 실패: "+(j.detail||("HTTP "+r.status))+" — meta_api 연결/품번 확인","warn"); return; }
     log(`✅ DB 연결 OK — ${j.actress||'?'} / ${j.label||'?'} / ${j.meas||''}${j.title?(' / '+j.title):''}`,"ok");
+    refreshSteps(code);
   }).catch(e=>log("✖ 연결 오류: "+e+" (meta_api 주소/네트워크 확인)","warn"));
 }
 $("#btnMeta").onclick=()=>checkMeta($("#code").value);
@@ -484,11 +720,27 @@ $("#btnInfocard").onclick=()=>{
   }).catch(e=>log("✖ 오류: "+e,"warn"));
 };
 
+// ── 출력 폴더 설정 ──
+function saveOutDir(){
+  const v=$("#outDir").value.trim(); if(!v) return;
+  fetch("/config",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({out_dir:v})})
+    .then(r=>r.json()).then(()=>log(`✔ 출력 폴더 설정: ${v}`,"ok")).catch(()=>{});
+}
+$("#btnOutDir").onclick = () => {
+  fetch("/browse_dir",{method:"POST"}).then(r=>r.json()).then(r=>{
+    if(r.path){ $("#outDir").value=r.path; saveOutDir(); }
+    else if(r.error){ log("폴더 다이얼로그 실패: "+r.error+" → 경로 직접 입력","warn"); }
+  }).catch(()=>{});
+};
+$("#outDir").addEventListener("change", saveOutDir);
+
 // 초기 설정 로드 (양 탭 동기화)
 fetch("/config").then(r=>r.json()).then(c=>{
   if(c.llm){ $("#llm").value=c.llm; $("#llmA").value=c.llm; }
   if(c.target_sec){ $("#target").value=c.target_sec; $("#targetA").value=c.target_sec; }
   if(c.whisper_model){ $("#whisper").value=c.whisper_model; $("#whisperA").value=c.whisper_model; }
   if(c.tts_base){ $("#ttsBase").value=c.tts_base; }
+  if(c.out_dir){ $("#outDir").value=c.out_dir; }
 }).catch(()=>{});
 loadSubTemplates();
+refreshSteps();

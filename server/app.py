@@ -71,6 +71,56 @@ def save_cfg(c):
     except Exception: pass
 
 
+# ─── 단계별 상태(품번별) — 전사 → AI처리 → 자막. 각 단계 결과는 파일로 저장. ────
+def _state_file(outdir, code):
+    return Path(outdir) / f"{code}_state.json"
+
+
+def load_state(outdir, code):
+    f = _state_file(outdir, code)
+    if f.is_file():
+        try:
+            return json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {"code": code, "video": None, "target": None, "llm": None, "model": None,
+            "summary": "", "stars": None}
+
+
+def save_state(outdir, code, **fields):
+    st = load_state(outdir, code)
+    st.update(fields)
+    try:
+        _state_file(outdir, code).write_text(json.dumps(st, ensure_ascii=False, indent=1), encoding="utf-8")
+    except Exception:
+        pass
+    return st
+
+
+def steps_status(outdir, code):
+    """단계 완료 여부는 '결과 파일 존재'로 판정 → 서버 재시작/수동삭제에도 견고."""
+    o = Path(outdir)
+    return {"transcribe": (o / f"{code}_전사.json").is_file(),
+            "ai": (o / f"{code}_plan.json").is_file(),
+            "subs": (o / f"{code}_대사.srt").is_file()}
+
+
+def _hms(x):
+    x = int(max(0, round(x)))
+    return f"{x // 3600:02d}:{x % 3600 // 60:02d}:{x % 60:02d}"
+
+
+def _safe(code):
+    return re.sub(r"[^0-9A-Za-z._-]", "_", (code or "").strip()) or "untitled"
+
+
+def work_dir(c, code):
+    """품번별 작업 폴더 {out_dir}/{품번}/ — 전사·컷·자막·plan·tts 전부 여기에 모음."""
+    d = Path(c["out_dir"]) / _safe(code)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 # ─── 잡 / SSE ────────────────────────────────────────────────────────────────
 def new_job():
     jid = uuid.uuid4().hex[:12]
@@ -84,6 +134,10 @@ def jlog(jid, msg):
 
 def jstep(jid, n, total, label):
     JOBS[jid]["q"].put({"type": "step", "n": n, "total": total, "label": label})
+
+
+def jprog(jid, frac, label=None):
+    JOBS[jid]["q"].put({"type": "progress", "frac": float(frac), "label": label})
 
 
 def jfile(jid, tag, path):
@@ -104,12 +158,25 @@ def run_bg(fn):
     threading.Thread(target=fn, daemon=True).start()
 
 
+def heartbeat(jid, label):
+    """오래 걸리는 블로킹 작업(LLM 호출 등) 중 살아있음을 N초마다 로그로 알림. stop.set()로 종료."""
+    stop = threading.Event()
+
+    def run():
+        n = 0
+        while not stop.wait(8):
+            n += 8
+            jlog(jid, f"  …{label} 진행 중 ({n}s 경과)")
+    threading.Thread(target=run, daemon=True).start()
+    return stop
+
+
 def write_narration(outdir, code, nar_rt):
-    """내레이션 출력 — SRT(텍스트, TTS·호환용) + JSON(유형 style 포함, 굽기용). 둘 다 25자 분할."""
-    P.write_srt([(s, e, t) for s, e, t, *_ in nar_rt], outdir / f"{code}_내레이션.srt")
-    nar_split = P.split_entries(nar_rt, 24)
+    """내레이션 출력 — SRT + JSON. 내레이션은 존댓말 완결문장이라 25자 분할 안 함(끊김·시간겹침 방지).
+    화면 줄바꿈은 굽기(ASS)에서 자동 처리. TTS도 완결문장이 자연스러움."""
+    P.write_srt([(s, e, t) for s, e, t, *_ in nar_rt], outdir / f"{code}_내레이션.srt", maxlen=0)
     data = [{"start": round(s, 3), "end": round(e, 3), "text": t, "style": (x[0] if x else "기본")}
-            for s, e, t, *x in nar_split]
+            for s, e, t, *x in nar_rt]
     (outdir / f"{code}_내레이션.json").write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
@@ -142,6 +209,16 @@ async def events(jid: str):
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+# ─── LLM 연결 체크 (codex/claude 설치·로그인·응답) ──────────────────────────
+@app.get("/llm/check")
+def llm_check():
+    out = {}
+    for name in ("codex", "claude"):
+        ok, msg = P.llm_ping(name)
+        out[name] = {"ok": ok, "msg": msg}
+    return out
+
+
 # ─── 설정 ────────────────────────────────────────────────────────────────────
 @app.get("/config")
 def get_config():
@@ -165,6 +242,20 @@ def browse():
             filetypes=[("영상", "*.mp4 *.mkv *.avi *.mov *.wmv"), ("모든 파일", "*.*")])
         r.destroy()
         return {"path": f or ""}
+    except Exception as e:
+        return JSONResponse({"path": "", "error": str(e)}, status_code=200)
+
+
+@app.post("/browse_dir")
+def browse_dir():
+    """출력 폴더용 네이티브 디렉토리 선택 다이얼로그."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        r = tk.Tk(); r.withdraw(); r.attributes("-topmost", True)
+        d = filedialog.askdirectory()
+        r.destroy()
+        return {"path": d or ""}
     except Exception as e:
         return JSONResponse({"path": "", "error": str(e)}, status_code=200)
 
@@ -251,9 +342,13 @@ async def analyze(req: Request):
             jstep(jid, 2, 3, "전사(faster-whisper)")
             segs = P.transcribe(path, body.get("model", c["whisper_model"]), lambda m2: jlog(jid, m2), initial_prompt=init)
             label = "하이라이트" if mode == "highlight" else "요약"
-            jstep(jid, 3, 3, f"AI 분석({label}·구간·번역·내레이션)")
+            jstep(jid, 3, 3, f"AI 분석({label}·구간·번역·내레이션) ({llm} 추론, 보통 1~3분)")
             pf = P.prompt_highlight if mode == "highlight" else P.prompt_auto
-            res = P.call_llm(pf(m, segs, target, hint=hint), llm, lambda x: jlog(jid, x))
+            hb = heartbeat(jid, f"AI 분석({llm})")
+            try:
+                res = P.call_llm(pf(m, segs, target, hint=hint), llm, lambda x: jlog(jid, x))
+            finally:
+                hb.set()
             res["_mode"] = mode
             jdone(jid, {"mode": "auto", "result": res})
         except Exception as e:
@@ -289,7 +384,7 @@ async def pick_load(req: Request):
 @app.post("/trim")
 async def trim(req: Request):
     body = await req.json(); c = load_cfg()
-    path = body["path"]
+    path = body["path"]; code = (body.get("code") or "").strip()
     excludes = [(float(a), float(b)) for a, b in body.get("excludes", [])]
     if not excludes:
         raise HTTPException(400, "삭제할 구간이 없습니다.")
@@ -297,16 +392,229 @@ async def trim(req: Request):
 
     def work():
         try:
-            outdir = Path(c["out_dir"]); outdir.mkdir(parents=True, exist_ok=True)
+            outdir = work_dir(c, code) if code else Path(c["out_dir"])
+            outdir.mkdir(parents=True, exist_ok=True)
             total = P.video_duration(path)
             keep = P.keep_from_exclude(total, excludes)
             if not keep:
                 raise RuntimeError("남는 구간이 없습니다.")
+            cut_sec = sum(b - a for a, b in excludes)
+            jlog(jid, f"원본 {_hms(total)} · 삭제 {len(excludes)}구간({_hms(cut_sec)}) → 남김 {len(keep)}구간")
+            for a, b in excludes:
+                jlog(jid, f"  ✂ 삭제 {_hms(a)}~{_hms(b)} ({_hms(b - a)})")
             out = str(outdir / (Path(path).stem + "_trim.mp4"))
             jstep(jid, 1, 1, "선택 구간 삭제 컷")
-            P.cut_video(path, keep, out, lambda m: jlog(jid, m))
+            P.cut_video(path, keep, out, lambda m: jlog(jid, m),
+                        lambda fr: jprog(jid, fr, "잘라내는 중"))
+            dur = P.video_duration(out)
+            # 잘라낸 구간 정보 사이드카 저장
+            info = [f"원본: {path}", f"원본 길이: {_hms(total)}", "",
+                    f"■ 삭제(잘라낸) 구간 — 합계 {_hms(cut_sec)}"]
+            info += [f"  {_hms(a)} ~ {_hms(b)}  ({_hms(b - a)})" for a, b in excludes]
+            info += ["", "■ 남긴 구간(이어붙임)"]
+            info += [f"  {_hms(a)} ~ {_hms(b)}" for a, b in keep]
+            info += ["", f"결과 영상: {out}", f"결과 길이: {_hms(dur)}"]
+            info_path = str(Path(out).with_name(Path(out).stem + "_info.txt"))
+            Path(info_path).write_text("\n".join(info), encoding="utf-8")
             jfile(jid, "잘라낸 영상", out)
-            jdone(jid, {"mode": "trim", "video": out, "duration": P.video_duration(out)})
+            jfile(jid, "컷 정보", info_path)
+            jdone(jid, {"mode": "trim", "video": out, "duration": dur,
+                        "cut_text": [f"{_hms(a)}~{_hms(b)} ({_hms(b - a)})" for a, b in excludes],
+                        "keep_text": [f"{_hms(a)}~{_hms(b)}" for a, b in keep]})
+        except Exception as e:
+            jerr(jid, e)
+    run_bg(work)
+    return {"job": jid}
+
+
+# ─── 단계별 리뷰 생성 ① 전사 → ② AI 처리 → ③ 자막 (각 단계 독립 재실행 가능) ──
+@app.get("/state/{code}")
+def state(code: str):
+    c = load_cfg(); outdir = work_dir(c, code)
+    st = load_state(outdir, code)
+    st["steps"] = steps_status(outdir, code)
+    final = outdir / f"{code}_final.mp4"
+    if final.is_file():
+        st["final"] = str(final); st["final_sec"] = P.video_duration(final)
+    # 이전에 잘라낸(_trim.mp4) 결과가 있으면 알려줘서 바로 쓰게 함 (가장 최근 것)
+    trims = sorted(outdir.glob("*_trim.mp4"), key=lambda p: p.stat().st_mtime)
+    if trims:
+        t = trims[-1]
+        st["trim_video"] = str(t); st["trim_exists"] = True
+        st["trim_sec"] = P.video_duration(t)
+        info = t.with_name(t.stem + "_info.txt")
+        if info.is_file():
+            st["trim_info"] = info.read_text(encoding="utf-8")
+    else:
+        st["trim_exists"] = False
+    return st
+
+
+@app.post("/step/transcribe")
+async def step_transcribe(req: Request):
+    """① 전사 — 영상(잘라낸 것) → 일본어 STT. {code}_전사.srt/.json 저장."""
+    body = await req.json(); c = load_cfg()
+    path = body["path"]; code = body["code"]
+    model = body.get("model", c["whisper_model"])
+    jid = new_job()
+
+    def work():
+        try:
+            outdir = work_dir(c, code)
+            jstep(jid, 1, 1, f"전사(faster-whisper {model})")
+            segs = P.transcribe(path, model, lambda m: jlog(jid, m),
+                                lambda fr: jprog(jid, fr, "전사"))
+            data = [{"start": round(s, 3), "end": round(e, 3), "text": t} for s, e, t in segs]
+            (outdir / f"{code}_전사.json").write_text(
+                json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+            P.write_srt([(s, e, t) for s, e, t in segs], outdir / f"{code}_전사.srt")
+            save_state(outdir, code, video=path, model=model)
+            jfile(jid, "전사 자막", outdir / f"{code}_전사.srt")
+            jdone(jid, {"step": "transcribe", "code": code, "count": len(segs),
+                        "srt": str(outdir / f"{code}_전사.srt")})
+        except Exception as e:
+            jerr(jid, e)
+    run_bg(work)
+    return {"job": jid}
+
+
+@app.post("/step/ai")
+async def step_ai(req: Request):
+    """② AI 처리 — 저장된 전사 + 메타 → LLM이 압축·번역·내레이션. plan.json 저장 + 컷."""
+    body = await req.json(); c = load_cfg()
+    code = body["code"]
+    target = int(body.get("target_sec", c["target_sec"])); llm = body.get("llm", c["llm"])
+    jid = new_job()
+
+    def work():
+        try:
+            outdir = work_dir(c, code)
+            tj = outdir / f"{code}_전사.json"
+            if not tj.is_file():
+                raise RuntimeError("전사 결과가 없습니다. 먼저 ① 전사를 실행하세요.")
+            st = load_state(outdir, code)
+            video = body.get("path") or st.get("video")
+            if not video or not Path(video).is_file():
+                raise RuntimeError("전사에 쓴 영상 경로를 찾을 수 없습니다. ① 전사를 다시 실행하세요.")
+            segs = [(d["start"], d["end"], d["text"])
+                    for d in json.loads(tj.read_text(encoding="utf-8"))]
+            jstep(jid, 1, 3, "메타 조회")
+            m = P.fetch_meta(c["meta_api"], code, lambda x: jlog(jid, x))
+            jstep(jid, 2, 3, f"AI 압축·번역·내레이션 ({llm} 추론, 보통 1~3분)")
+            hb = heartbeat(jid, f"AI 처리({llm})")
+            try:
+                res = P.call_llm(P.prompt_manual(m, segs, target), llm, lambda x: jlog(jid, x))
+            finally:
+                hb.set()
+            keep = P.parse_keep(res.get("keep", []))
+            if not keep:
+                raise RuntimeError("LLM이 keep 구간을 못 골랐습니다(빈 응답 — 헤드리스 거부 가능. 아래 수동 모드 사용).")
+            (outdir / f"{code}_plan.json").write_text(
+                json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
+            final = str(outdir / f"{code}_final.mp4")
+            jstep(jid, 3, 3, "핵심 구간 컷")
+            P.cut_video(video, keep, final, lambda mm: jlog(jid, mm),
+                        lambda fr: jprog(jid, fr, "컷"))
+            save_state(outdir, code, target=target, llm=llm,
+                       summary=res.get("summary", ""), stars=res.get("stars"))
+            jfile(jid, "AI 결과(plan)", outdir / f"{code}_plan.json")
+            jfile(jid, "최종 영상", final)
+            jdone(jid, {"step": "ai", "code": code, "final": final,
+                        "final_sec": P.video_duration(final),
+                        "summary": res.get("summary", ""), "stars": res.get("stars")})
+        except Exception as e:
+            jerr(jid, e)
+    run_bg(work)
+    return {"job": jid}
+
+
+@app.post("/step/ai/prompt")
+async def step_ai_prompt(req: Request):
+    """수동 모드용 — ② AI에 보낼 프롬프트 전문을 반환(복사해서 codex/claude 직접 실행)."""
+    body = await req.json(); c = load_cfg()
+    code = body["code"]; target = int(body.get("target_sec", c["target_sec"]))
+    outdir = work_dir(c, code)
+    tj = outdir / f"{code}_전사.json"
+    if not tj.is_file():
+        raise HTTPException(400, "전사 결과가 없습니다. 먼저 ① 전사를 실행하세요.")
+    segs = [(d["start"], d["end"], d["text"]) for d in json.loads(tj.read_text(encoding="utf-8"))]
+    try:
+        m = P.fetch_meta(c["meta_api"], code, log=lambda *_: None)
+    except Exception as e:
+        raise HTTPException(502, f"메타 조회 실패: {e}")
+    return {"prompt": P.prompt_manual(m, segs, target)}
+
+
+@app.post("/step/ai/manual")
+async def step_ai_manual(req: Request):
+    """수동 모드 — codex/claude가 준 JSON을 붙여넣으면 그대로 plan 저장 + 컷(LLM 호출 안 함)."""
+    body = await req.json(); c = load_cfg()
+    code = body["code"]; raw = body.get("result", "")
+    jid = new_job()
+
+    def work():
+        try:
+            outdir = work_dir(c, code)
+            st = load_state(outdir, code)
+            video = body.get("path") or st.get("video")
+            if not video or not Path(video).is_file():
+                raise RuntimeError("전사에 쓴 영상 경로를 찾을 수 없습니다. ① 전사를 다시 실행하세요.")
+            s = (raw or "").strip()
+            i, j = s.find("{"), s.rfind("}")
+            if i < 0 or j <= i:
+                raise RuntimeError("붙여넣은 텍스트에서 JSON({…})을 찾지 못했습니다.")
+            res = json.loads(s[i:j + 1])
+            keep = P.parse_keep(res.get("keep", []))
+            if not keep:
+                raise RuntimeError("붙여넣은 JSON에 keep 구간이 없습니다.")
+            (outdir / f"{code}_plan.json").write_text(
+                json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
+            final = str(outdir / f"{code}_final.mp4")
+            jstep(jid, 1, 1, "핵심 구간 컷")
+            P.cut_video(video, keep, final, lambda mm: jlog(jid, mm),
+                        lambda fr: jprog(jid, fr, "컷"))
+            save_state(outdir, code, summary=res.get("summary", ""), stars=res.get("stars"))
+            jfile(jid, "AI 결과(plan)", outdir / f"{code}_plan.json")
+            jfile(jid, "최종 영상", final)
+            jdone(jid, {"step": "ai", "code": code, "final": final,
+                        "final_sec": P.video_duration(final), "summary": res.get("summary", "")})
+        except Exception as e:
+            jerr(jid, e)
+    run_bg(work)
+    return {"job": jid}
+
+
+@app.post("/step/subs")
+async def step_subs(req: Request):
+    """③ 자막 — 저장된 plan.json → 한글 대사/내레이션 SRT(+JSON) 재타이밍 저장."""
+    body = await req.json(); c = load_cfg()
+    code = body["code"]
+    jid = new_job()
+
+    def work():
+        try:
+            outdir = work_dir(c, code)
+            plan = outdir / f"{code}_plan.json"
+            if not plan.is_file():
+                raise RuntimeError("AI 결과가 없습니다. 먼저 ② AI 처리를 실행하세요.")
+            res = json.loads(plan.read_text(encoding="utf-8"))
+            keep = P.parse_keep(res.get("keep", []))
+            if not keep:
+                raise RuntimeError("plan에 keep 구간이 없습니다.")
+            jstep(jid, 1, 2, "대사 자막(한글) 생성")
+            dlg = [(float(d["start"]), float(d["end"]), d["ko"], d.get("speaker", "여"))
+                   for d in res.get("dialogue", [])]
+            write_dialogue(outdir, code, P.retime(dlg, keep, snap=False))
+            jfile(jid, "대사 자막", outdir / f"{code}_대사.srt")
+            jstep(jid, 2, 2, "내레이션 자막 생성")
+            nar = [(float(d["start"]), float(d["end"]), d["text"], d.get("style", "기본"))
+                   for d in res.get("narration", [])]
+            write_narration(outdir, code, P.retime(nar, keep, snap=True))
+            jfile(jid, "내레이션 자막", outdir / f"{code}_내레이션.srt")
+            jdone(jid, {"step": "subs", "code": code,
+                        "srt_dialogue": str(outdir / f"{code}_대사.srt"),
+                        "srt_narration": str(outdir / f"{code}_내레이션.srt"),
+                        "summary": res.get("summary", ""), "stars": res.get("stars")})
         except Exception as e:
             jerr(jid, e)
     run_bg(work)
@@ -325,15 +633,19 @@ async def review(req: Request):
 
     def work():
         try:
-            outdir = Path(c["out_dir"]); outdir.mkdir(parents=True, exist_ok=True)
+            outdir = work_dir(c, code)
             jstep(jid, 1, 4, "메타 조회")
             m = P.fetch_meta(c["meta_api"], code, lambda x: jlog(jid, x))
             init = "。".join(x for x in [P.build_initial_prompt(m), hint] if x) or None  # 맥락/지시 → Whisper 힌트
             jstep(jid, 2, 4, f"전사(faster-whisper {model})")
             segs = P.transcribe(path, model, lambda m2: jlog(jid, m2), initial_prompt=init)
-            jstep(jid, 3, 4, "AI 압축·번역·내레이션")
-            res = P.call_llm(P.prompt_manual(m, segs, target, hint=hint), llm, lambda x: jlog(jid, x))
-            keep = [(float(a), float(b)) for a, b in res.get("keep", [])]
+            jstep(jid, 3, 4, f"AI 압축·번역·내레이션 ({llm} 추론, 보통 1~3분)")
+            hb = heartbeat(jid, f"AI 처리({llm})")
+            try:
+                res = P.call_llm(P.prompt_manual(m, segs, target, hint=hint), llm, lambda x: jlog(jid, x))
+            finally:
+                hb.set()
+            keep = P.parse_keep(res.get("keep", []))
             if not keep:
                 raise RuntimeError("LLM이 keep 구간을 못 골랐습니다.")
             final = str(outdir / f"{code}_final.mp4")
@@ -366,8 +678,8 @@ async def render(req: Request):
 
     def work():
         try:
-            outdir = Path(c["out_dir"]); outdir.mkdir(parents=True, exist_ok=True)
-            keep = [(float(a), float(b)) for a, b in res.get("keep", [])]
+            outdir = work_dir(c, code)
+            keep = P.parse_keep(res.get("keep", []))
             if not keep:
                 raise RuntimeError("keep 구간 없음")
             final = str(outdir / f"{code}_final.mp4")
@@ -442,7 +754,7 @@ async def tts(req: Request):
 
     def work():
         try:
-            outdir = Path(c["out_dir"])
+            outdir = work_dir(c, code)
             srt = outdir / f"{code}_내레이션.srt"
             if not srt.is_file():
                 raise RuntimeError(f"내레이션 SRT 없음: {srt} (먼저 리뷰 생성)")
@@ -507,7 +819,7 @@ async def burn(req: Request):
 
     def work():
         try:
-            outdir = Path(c["out_dir"])
+            outdir = work_dir(c, code)
             voiced = outdir / f"{code}_final_voiced.mp4"
             final = outdir / f"{code}_final.mp4"
             if body.get("source"):

@@ -28,9 +28,14 @@
         <span class="time" id="time">00:00:00 / 00:00:00</span>
       </div>
       <div class="hint">마킹한 구간(빨강)을 잘라냅니다. mkv/avi는 브라우저 미리보기가 안 될 수 있어요(mp4 권장).</div>
+      <button id="btnUseTrim" class="primary" style="display:none;margin-top:10px;width:100%">✂ 이전에 잘라낸 결과 사용</button>
     </div>
 
     <div class="card">
+      <div class="formrow" style="margin-bottom:12px">
+        <span class="fld grow"><span class="lbl">출력 폴더</span><input id="outDir" placeholder="~/ja_reviewer_out (잘라낸 영상·자막 저장 위치)"></span>
+        <button id="btnOutDir">폴더 선택</button>
+      </div>
       <div class="sec" style="margin-bottom:8px">진행 상황</div>
       <div class="prog"><div class="prog-fill" id="progFill"></div></div>
       <div class="muted" id="progStep" style="margin:8px 0 4px">대기 중</div>
@@ -63,7 +68,7 @@
         <div class="hint">마킹 구간을 빼고 영상을 만들어 플레이어에 다시 로드합니다.</div>
 
         <hr>
-        <div class="sec"><span class="num">2</span> 리뷰 생성 <span class="muted">· 품번 필요</span></div>
+        <div class="sec"><span class="num">2</span> 단계별 리뷰 생성 <span class="muted">· 품번 필요 · 단계별 저장/재실행</span></div>
         <div class="formrow" style="margin-top:10px">
           <span class="fld"><span class="lbl">품번</span><input id="code" placeholder="SNOS-183" style="width:120px"></span>
           <button id="btnMeta">조회</button>
@@ -81,10 +86,45 @@
               placeholder="전사 힌트 + 요약 지시 겸용. 예) 간호사물, 존댓말 위주. 반전 결말 강조. 3분휴지 스타일 진하게."></textarea>
           </span>
         </div>
-        <div class="actions">
-          <button class="go spacer" id="btnReview">② 리뷰 생성 (전사 + AI 압축 + 자막)</button>
+        <div class="formrow">
+          <button id="btnLlmCheck">LLM 연결 확인</button>
+          <span class="st-badge" id="badgeCodex" title="codex">codex —</span>
+          <span class="st-badge" id="badgeClaude" title="claude">claude —</span>
+          <span class="muted" id="llmStatus">설치·로그인·응답 확인 (콘텐츠 거부와는 별개)</span>
         </div>
-        <div class="hint">품번 메타 조회 → AI가 핵심만 골라 길이만큼 압축 → 자막·내레이션.</div>
+        <div class="actions">
+          <button class="go spacer" id="btnReview">② 리뷰 원샷 생성 (전사 + AI 압축 + 자막 한번에)</button>
+        </div>
+        <ul class="steps" id="steps">
+          <li>
+            <span class="st-badge" id="badgeTranscribe">—</span>
+            <span class="st-label"><b>① 전사</b> <span class="muted">일본어 STT → <code>_전사.srt</code></span></span>
+            <button class="go" id="btnStepTranscribe">실행</button>
+          </li>
+          <li>
+            <span class="st-badge" id="badgeAi">—</span>
+            <span class="st-label"><b>② AI 처리</b> <span class="muted">압축·번역·내레이션 + 컷 → <code>_final.mp4</code></span></span>
+            <button class="go" id="btnStepAi">실행</button>
+          </li>
+          <li>
+            <span class="st-badge" id="badgeSubs">—</span>
+            <span class="st-label"><b>③ 자막</b> <span class="muted">한글 대사/내레이션 SRT</span></span>
+            <button class="go" id="btnStepSubs">실행</button>
+          </li>
+        </ul>
+        <div class="hint">각 단계 결과는 파일로 저장됩니다. 중간에 에러나면 그 단계만 다시 누르면 돼요(앞 단계 결과 재사용). 품번 입력/조회 시 진행 상태를 자동 표시. 배지: — 대기 · … 진행 · ✓ 완료 · ✗ 오류.</div>
+
+        <details id="aiManualBox" style="margin-top:10px" open>
+          <summary class="muted" style="cursor:pointer">수동 모드 — codex/claude 직접 실행 → 붙여넣기 (AI 거부/빈 응답 시)</summary>
+          <div class="formrow" style="margin-top:8px">
+            <button id="btnAiPrompt">① 프롬프트 만들기</button>
+            <button id="btnAiPromptCopy">📋 복사</button>
+            <span class="muted">아래 칸에 전송 프롬프트 표시 → 전체선택 복사 → codex/claude에 붙여 실행</span>
+          </div>
+          <textarea id="aiPromptOut" readonly placeholder="① 버튼을 누르면 '전송하는 프롬프트 전문'이 여기 표시됩니다 — 칸 클릭 후 Ctrl+A → Ctrl+C 로 복사해 codex/claude에 붙여넣으세요" style="min-height:120px"></textarea>
+          <textarea id="aiPasteJson" placeholder='② codex/claude가 준 JSON 결과를 여기 붙여넣기  {"summary":…,"keep":[[시작,끝],…],"dialogue":[…],"narration":[…]}'></textarea>
+          <div class="actions"><button class="primary spacer" id="btnAiManual">③ 붙여넣은 결과로 진행 (컷 + plan 저장)</button></div>
+        </details>
       </div>
 
       <!-- ── 자동 ── -->
@@ -288,6 +328,34 @@
     <div class="card" id="resultCard" style="display:none">
       <div class="sec" style="margin-bottom:8px">결과</div>
       <div id="result" class="muted"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 잘라내기 진행/결과 모달 ── -->
+<div id="trimModal" class="modal" style="display:none">
+  <div class="modal-box">
+    <div class="modal-head">
+      <span id="trimTitle">선택 구간 잘라내는 중…</span>
+      <button id="trimClose" class="x" title="닫기">✕</button>
+    </div>
+
+    <!-- 진행 단계 -->
+    <div id="trimProgress">
+      <div class="prog big"><div class="prog-fill" id="trimProgFill"></div></div>
+      <div class="muted" id="trimProgStep" style="margin:10px 0 6px">준비 중…</div>
+      <div id="trimLog"></div>
+    </div>
+
+    <!-- 결과 단계 -->
+    <div id="trimResult" style="display:none">
+      <video id="trimVid" controls preload="metadata"></video>
+      <div id="trimMeta" class="muted" style="margin:10px 0"></div>
+      <div class="modal-actions">
+        <button id="trimReopen">닫기</button>
+        <button class="primary spacer" id="trimUse">이 영상으로 계속 ▶</button>
+      </div>
+      <div class="hint">잘라낸 결과만 따로 확인하는 화면입니다. 「이 영상으로 계속」을 누르면 편집 플레이어에 로드되어 품번 입력 → ② 리뷰 생성으로 이어집니다.</div>
     </div>
   </div>
 </div>

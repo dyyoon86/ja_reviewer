@@ -8,6 +8,7 @@
 
 log 콜백은 진행상황 출력용(기본 print). 서버에선 SSE 큐로 연결.
 """
+import os
 import re
 import json
 import subprocess
@@ -28,8 +29,11 @@ def sec2label(sec):
 
 # ─── 시간 / SRT 유틸 ──────────────────────────────────────────────────────────
 def s2srt(x):
-    x = max(0.0, x)
-    h = int(x // 3600); m = int(x % 3600 // 60); s = int(x % 60); ms = int(round((x - int(x)) * 1000))
+    # 전체 ms로 환산 후 분해 → 반올림이 1000ms로 넘쳐 ',1000'이 되는 버그 방지
+    total = int(round(max(0.0, x) * 1000))
+    h = total // 3600000; total %= 3600000
+    m = total // 60000; total %= 60000
+    s = total // 1000; ms = total % 1000
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
@@ -178,6 +182,22 @@ def video_duration(path):
         return 0.0
 
 
+def parse_keep(raw):
+    """LLM/사용자 keep 파싱 — [a,b] 또는 [a,b,'라벨'](3개+) 모두 허용. 앞 2개만 사용."""
+    out = []
+    for item in (raw or []):
+        try:
+            if isinstance(item, dict):
+                a = float(item.get("start")); b = float(item.get("end"))
+            else:
+                a = float(item[0]); b = float(item[1])
+            if b > a:
+                out.append((a, b))
+        except Exception:
+            continue
+    return out
+
+
 def keep_from_exclude(total, excludes, min_gap=0.3):
     """제외 구간 → 남길(keep) 구간(여집합)."""
     ex = sorted(excludes); keep = []; cur = 0.0
@@ -223,12 +243,50 @@ def _looks_hallucinated(t):
     return False
 
 
-def transcribe(video, model_name="large-v3", log=print, initial_prompt=None):
+_CUDA_DLL_DONE = False
+
+def _ensure_cuda_dll_path(log=print):
+    """faster-whisper(CTranslate2)가 cublas64_12.dll 등을 찾도록 nvidia 패키지 bin 경로를 등록.
+    CTranslate2는 cudnn만 자동 등록하고 cublas는 안 해서 PATH에 시스템 CUDA가 없으면 실패한다.
+    → venv 안 nvidia-*-cu12 패키지의 bin을 DLL 검색 경로/PATH에 직접 넣어 환경 무관하게 동작."""
+    global _CUDA_DLL_DONE
+    if _CUDA_DLL_DONE:
+        return
+    import os, sys, site
+    bases = []
+    try:
+        bases += site.getsitepackages()
+    except Exception:
+        pass
+    bases += [p for p in sys.path if p.endswith("site-packages")]
+    subs = ("nvidia/cublas/bin", "nvidia/cudnn/bin",
+            "nvidia/cuda_runtime/bin", "nvidia/cuda_nvrtc/bin")
+    added = []
+    seen = set()
+    for base in bases:
+        for sub in subs:
+            d = os.path.join(base, *sub.split("/"))
+            if os.path.isdir(d) and d not in seen:
+                seen.add(d)
+                try:
+                    os.add_dll_directory(d)
+                except Exception:
+                    pass
+                os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
+                added.append(d)
+    if added:
+        log(f"CUDA DLL 경로 등록: {len(added)}개 (cublas/cudnn)")
+    _CUDA_DLL_DONE = True
+
+
+def transcribe(video, model_name="large-v3", log=print, progress=None, initial_prompt=None):
     """
     고도화 전사. initial_prompt(작품 제목·배우명 등 맥락)를 주면 정확도↑.
     환청 억제 파라미터 + 후처리 필터로 신음/무음발 가짜자막을 걸러낸다.
+    progress(frac 0~1) 콜백을 주면 전사 진행률을 보고한다.
     """
     log(f"Whisper 전사 (모델 {model_name})...")
+    _ensure_cuda_dll_path(log)
     from faster_whisper import WhisperModel
     model = WhisperModel(model_name, device="auto", compute_type="auto")
     segs, info = model.transcribe(
@@ -245,17 +303,22 @@ def transcribe(video, model_name="large-v3", log=print, initial_prompt=None):
         vad_parameters=dict(min_silence_duration_ms=500, speech_pad_ms=200, threshold=0.5),
         initial_prompt=initial_prompt or None,
     )
+    dur = float(getattr(info, "duration", 0) or 0)
+    log(f"모델 로드/오디오 분석 완료 (길이 {dur:.0f}s). 전사 시작…")
     out, dropped = [], 0
-    for s in segs:
+    for s in segs:  # faster-whisper는 지연 생성 → 세그 처리할수록 s.end 증가
         t = (s.text or "").strip()
-        if not t:
-            continue
-        if _looks_hallucinated(t):
-            dropped += 1
-            continue
-        out.append((float(s.start), float(s.end), t))
+        if t:
+            if _looks_hallucinated(t):
+                dropped += 1
+            else:
+                out.append((float(s.start), float(s.end), t))
+        if progress and dur:
+            progress(max(0.0, min(0.99, float(s.end) / dur)))
         if out and len(out) % 50 == 0:
-            log(f"   …{len(out)}")
+            log(f"   …{len(out)} 세그먼트")
+    if progress:
+        progress(1.0)
     out = sanitize_segments(out)   # 타임스탬프 역전/겹침/순서 정상화
     log(f"전사 완료: {len(out)} 세그먼트 (환청/무의미 {dropped}개 제거)")
     return out
@@ -355,32 +418,82 @@ def fetch_meta(api, code, log=print):
 
 
 # ─── ③ LLM ───────────────────────────────────────────────────────────────────
+def _cli_path(name):
+    """Windows의 npm 글로벌 CLI는 name.cmd 가 실제 실행 래퍼. subprocess(['codex',...])는
+    PATHEXT를 안 뒤져 WinError2(파일 못 찾음) → .cmd/.exe/.bat 풀경로를 직접 찾아 반환."""
+    import shutil
+    if os.name == "nt":
+        for ext in (".cmd", ".exe", ".bat"):
+            p = shutil.which(name + ext)
+            if p:
+                return p
+    p = shutil.which(name)
+    if not p:
+        raise RuntimeError(f"{name} CLI를 찾을 수 없습니다 — 설치/PATH 확인하거나 다른 LLM을 선택하세요.")
+    return p
+
+
 def call_llm(prompt, which="claude", log=print):
     log(f"LLM({which}) 호출...")
+    # ★ 프롬프트는 반드시 STDIN으로 전달한다. 인자(argv)로 넘기면 긴 다중행(자막 본문)이
+    #   잘려 모델이 본문을 못 받고 "자막을 보내달라"는 헛응답을 한다(거부처럼 보임). stdin이면 정상.
     if which == "codex":
+        exe = _cli_path("codex")
         with tempfile.TemporaryDirectory() as td:
             outf = Path(td) / "o.json"
-            subprocess.run(["codex", "exec", "--ephemeral", "--skip-git-repo-check", "-o", str(outf), prompt],
-                           timeout=600, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run([exe, "exec", "--ephemeral", "--skip-git-repo-check",
+                            "-c", 'model_reasoning_effort="high"', "-o", str(outf)],
+                           input=prompt, timeout=900, text=True, encoding="utf-8", errors="replace",
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             txt = outf.read_text(encoding="utf-8") if outf.exists() else ""
     else:
-        p = subprocess.run(["claude", "-p", prompt], timeout=600, stdin=subprocess.DEVNULL,
-                           capture_output=True, text=True)
+        exe = _cli_path("claude")
+        p = subprocess.run([exe, "-p"], input=prompt, timeout=900, text=True,
+                           encoding="utf-8", errors="replace", capture_output=True)
         txt = p.stdout or ""
-    s = txt.strip(); i, j = s.find("{"), s.rfind("}")
-    if i < 0 or j <= i:
-        raise RuntimeError("LLM JSON 응답 없음 (CLI 로그인 확인)")
-    return json.loads(s[i:j + 1])
+    s = txt.strip(); i = s.find("{")
+    if i < 0:
+        raise RuntimeError("LLM JSON 응답 없음 (빈 응답/로그인 확인 — 헤드리스 거부 시 수동 모드 사용)")
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(s, i)
+        return obj
+    except json.JSONDecodeError:
+        j = s.rfind("}")
+        if j <= i:
+            raise RuntimeError("LLM JSON 응답 없음 (빈 응답/로그인 확인 — 헤드리스 거부 시 수동 모드 사용)")
+        return json.loads(s[i:j + 1])
+
+
+def llm_ping(which):
+    """CLI 연결/로그인/응답 확인용 — 자명한 프롬프트로 JSON 왕복. (콘텐츠 정책과 무관한 헬스체크)
+    반환: (ok: bool, msg: str)."""
+    try:
+        exe = _cli_path(which)
+    except Exception as e:
+        return False, str(e)
+    try:
+        r = call_llm('아래 JSON 한 줄만 출력: {"ok": true}', which, log=lambda *_: None)
+        if isinstance(r, dict) and r.get("ok") is True:
+            return True, "정상 (설치·로그인·응답 OK)"
+        return True, "응답함(형식은 약간 다름) — 로그인 정상으로 보임"
+    except Exception as e:
+        return False, str(e)[:120]
 
 
 def _meta_block(meta):
     g = ", ".join(meta.get("genres") or []) or (meta.get("genre") or "")
-    return (f"품번:{meta.get('code')} 배우:{meta.get('actress')}({meta.get('actress_ja')}) "
-            f"신체:{meta.get('meas')} 레이블:{meta.get('label')} 메이커:{meta.get('maker')} "
-            f"감독:{meta.get('director')} 시리즈:{meta.get('series_ja') or '-'} 장르:{g} "
-            f"발매:{(meta.get('release_date') or '')[:10]} 런타임:{meta.get('runtime_mins')}분 "
-            f"인기:조회{meta.get('views')}/좋아요{meta.get('likes')}/싫어요{meta.get('dislikes')}\n"
-            f"일본원제:{meta.get('title_ja')}\n한국어시놉시스:{meta.get('description')}")
+    out = (f"품번:{meta.get('code')} 배우:{meta.get('actress')}({meta.get('actress_ja')}) "
+           f"신체:{meta.get('meas')}"
+           + (f" 생일:{meta.get('birthday')}" if meta.get('birthday') else "")
+           + (f" 혈액형:{meta.get('blood_type')}" if meta.get('blood_type') else "")
+           + f" 레이블:{meta.get('label')} 메이커:{meta.get('maker')} "
+           f"감독:{meta.get('director')} 시리즈:{meta.get('series_ja') or '-'} 장르:{g} "
+           f"발매:{(meta.get('release_date') or '')[:10]} 런타임:{meta.get('runtime_mins')}분 "
+           f"인기:조회{meta.get('views')}/좋아요{meta.get('likes')}/싫어요{meta.get('dislikes')}\n"
+           f"일본원제:{meta.get('title_ja')}\n한국어시놉시스:{meta.get('description')}")
+    if meta.get("hook_title") or meta.get("hook_desc"):
+        out += f"\n편집훅(내레이션 활용): {meta.get('hook_title') or ''} — {meta.get('hook_desc') or ''}"
+    return out
 
 
 # 번역 규칙 — jav-subtitle-translate 스킬(AVDBS Eddy_Wind / 사용자 노션 원안)에서 추출.
@@ -408,6 +521,8 @@ def _style():
         "[★신뢰성 — 창작 절제] 영상을 못 봤으므로 '카메라 워크가 터진다'처럼 화면을 본 척하는 구체 평가는 금지. "
         "평가는 반드시 근거 위에서만: 시놉/설정/전개(자막 근거) + 인기지표(좋아요/싫어요 비율) + 배우스펙/레이블(메타). "
         "추측성 감상은 '설정상 ~할 겁니다','~라 기대됩니다'처럼 추측임을 드러내고, 단정('압권입니다')은 근거 있을 때만. "
+        "**[AI 문체 금지]** ① '작품은/영상은' 주어 ② '~에 초점을 둔 구성' ③ '~의 훅이 작동합니다' ④ 수식어 3개 이상 겹침. "
+        "**[유튜브 안전]** 약물 직접 언급 금지 — '약 먹이다/약물/수면제/최음제/약 기운' → '몽롱물', '분위기가 달라지는데..', '몸 상태가 이상해지는데..'로 대체. "
         "[내레이션 구성] 훅 → 작품/설정 소개 → 전개 포인트(자막 근거) → 근거 있는 평가 → 총평/별점. 섹스 스킵 구간은 브릿지('이후 장면은 생략하고…'). "
         "[대사] 자연스러운 한국어 구어체(번역투 금지), 신음류 제외/(신음). 각 대사에 speaker 지정 — '여'/'남'. "
         "[자막 길이] 각 항목 25자 이내, 길면 의미 단위로 끊어 여러 항목. "
@@ -498,17 +613,99 @@ def retime(entries, keep, snap=False, default_dur=4.0):
     out.sort(key=lambda x: x[0]); return out
 
 
-def cut_video(video, keep, out_path, log=print):
-    keep = sorted(keep)
-    log(f"ffmpeg 컷: {len(keep)}구간 이어붙이기 (재인코딩)...")
-    filt = []
-    for i, (a, b) in enumerate(keep):
-        filt.append(f"[0:v]trim={a}:{b},setpts=PTS-STARTPTS[v{i}];")
-        filt.append(f"[0:a]atrim={a}:{b},asetpts=PTS-STARTPTS[a{i}];")
-    n = len(keep)
-    fc = "".join(filt) + "".join(f"[v{i}][a{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=1[v][a]"
-    subprocess.run(["ffmpeg", "-y", "-i", str(video), "-filter_complex", fc, "-map", "[v]", "-map", "[a]",
-                    "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac", str(out_path)], check=True)
+_NVENC = None  # None=미확인, True/False=캐시
+
+def has_nvenc():
+    """ffmpeg에 h264_nvenc(NVIDIA GPU 인코더)가 있으면 True. 1회 확인 후 캐시."""
+    global _NVENC
+    if _NVENC is None:
+        try:
+            out = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"],
+                                 capture_output=True, text=True, encoding="utf-8", errors="replace")
+            _NVENC = "h264_nvenc" in (out.stdout or "")
+        except Exception:
+            _NVENC = False
+    return _NVENC
+
+
+def _vcodec_args(use_gpu):
+    """비디오 코덱 인자. GPU(NVENC)면 RTX에서 수배 빠름, 아니면 CPU libx264."""
+    if use_gpu:
+        return ["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "23", "-b:v", "0"]
+    return ["-c:v", "libx264", "-preset", "veryfast"]
+
+
+def cut_video(video, keep, out_path, log=print, progress=None):
+    """keep 구간만 남겨 이어붙인다. 구간마다 fast-seek(-ss)로 바로 점프해 추출 →
+    작업량이 '원본 길이'가 아니라 '남기는 길이'에 비례(긴 영상에서 짧게 남길 때 결정적).
+    추출은 RTX(NVENC) 재인코딩(없으면 libx264), 합치기는 무재인코딩(stream copy).
+    progress(frac 0~1) 콜백을 주면 전체 진행률을 보고한다."""
+    keep = [(float(a), float(b)) for a, b in sorted(keep) if float(b) - float(a) > 0.05]
+    if not keep:
+        raise RuntimeError("남길 구간이 없습니다.")
+    total = sum(b - a for a, b in keep) or 1.0
+    gpu = [has_nvenc()]  # 리스트=폴백 시 가변
+    log(f"ffmpeg 컷: {len(keep)}구간 추출 후 이어붙이기 "
+        f"({'GPU·NVENC' if gpu[0] else 'CPU·libx264'}, fast-seek)...")
+
+    def run(cmd, base, dur):
+        """base=이전까지 완료된 누적 초. 이 세그 out_time을 전체 진행률로 환산."""
+        if progress is None:
+            subprocess.run(cmd, check=True)
+            return
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                universal_newlines=True, encoding="utf-8", errors="replace")
+        for line in proc.stdout:
+            line = line.strip()
+            if line.startswith("out_time_us=") or line.startswith("out_time_ms="):
+                try:  # 둘 다 마이크로초로 출력되는 ffmpeg 빌드가 많음
+                    sec = min(dur, int(line.split("=", 1)[1]) / 1_000_000)
+                    progress(max(0.0, min(0.99, (base + sec) / total)))
+                except Exception:
+                    pass
+        proc.wait()
+        if proc.returncode != 0:
+            raise subprocess.CalledProcessError(proc.returncode, cmd)
+
+    with tempfile.TemporaryDirectory(prefix="jacut_") as td:
+        td = Path(td)
+        segs = []
+        base = 0.0
+        for i, (a, b) in enumerate(keep):
+            dur = b - a
+            seg = td / f"seg{i:03d}.mp4"
+
+            def build(use_gpu):
+                # GPU면 디코딩(NVDEC)+인코딩(NVENC) 둘 다 GPU → CPU 디코딩 병목 제거.
+                pre = ["ffmpeg", "-y"]
+                if use_gpu:
+                    pre += ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
+                return (pre + ["-ss", f"{a:.3f}", "-i", str(video), "-t", f"{dur:.3f}"]
+                        + _vcodec_args(use_gpu)
+                        + ["-c:a", "aac", "-avoid_negative_ts", "make_zero",
+                           "-progress", "pipe:1", "-nostats", str(seg)])
+
+            log(f"  구간 {i+1}/{len(keep)}: {s2srt(a)}~{s2srt(b)} ({dur:.1f}s) 추출")
+            if gpu[0]:
+                try:
+                    run(build(True), base, dur)
+                except Exception as e:
+                    log(f"  NVENC 실패({e}) → 이후 CPU(libx264)로 폴백")
+                    gpu[0] = False
+                    run(build(False), base, dur)
+            else:
+                run(build(False), base, dur)
+            segs.append(seg)
+            base += dur
+
+        # 이어붙이기 — 같은 코덱/파라미터라 무재인코딩(copy)로 즉시 결합
+        listf = td / "list.txt"
+        listf.write_text("".join(f"file '{p.as_posix()}'\n" for p in segs), encoding="utf-8")
+        log("  이어붙이기(무재인코딩 concat)...")
+        subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(listf),
+                        "-c", "copy", str(out_path)], check=True)
+    if progress:
+        progress(1.0)
     log(f"컷 완료: {out_path}")
 
 
@@ -577,6 +774,28 @@ def tts_generate(base, text, profile_id, language, out_wav, seed=None, log=print
         elif url2:
             with urllib.request.urlopen(url2, timeout=120) as r2:
                 Path(tmp).write_bytes(r2.read())
+        elif "id" in j and j.get("status") in ("generating", "pending", "queued"):
+            # 비동기 API: /history/{id} 폴링 → /audio/{id} 다운로드
+            import time as _time
+            gen_id = j["id"]
+            base_url = url.rstrip("/generate").rstrip("/")
+            log(f"  async 생성 중(id={gen_id[:8]}...)...")
+            for _ in range(90):
+                _time.sleep(3)
+                try:
+                    with urllib.request.urlopen(f"{base_url}/history/{gen_id}", timeout=10) as rh:
+                        hj = json.loads(rh.read())
+                    st = hj.get("status", "")
+                    if st == "completed":
+                        with urllib.request.urlopen(f"{base_url}/audio/{gen_id}", timeout=30) as ra:
+                            Path(tmp).write_bytes(ra.read())
+                        break
+                    elif st in ("failed", "error"):
+                        raise RuntimeError(f"voicebox 생성 실패: {hj.get('error')}")
+                except urllib.error.HTTPError:
+                    pass
+            else:
+                raise RuntimeError("voicebox 생성 타임아웃(270s)")
         else:
             raise RuntimeError(f"voicebox 응답에서 오디오를 못 찾음: keys={list(j.keys())}")
     # 표준 WAV(48k stereo)로 정규화
