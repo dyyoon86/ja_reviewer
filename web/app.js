@@ -151,6 +151,12 @@ function addFile(tag, path){
   $("#files").appendChild(li);
 }
 
+// 섹션 자동 접기 — 어떤 버튼이 속한 접이식 섹션을 접는다(완료 시)
+function collapseAcc(sel){
+  const b=$(sel); const d=b && b.closest && b.closest("details.acc");
+  if(d){ d.open=false; d.scrollIntoView({block:"nearest",behavior:"smooth"}); }
+}
+
 function runJob(job, onDone, onErr){
   clearFiles(); setProg(0.04, "시작…");
   const es = new EventSource(`/events/${job}`);
@@ -256,6 +262,7 @@ $("#trimUse").onclick = () => {
   excludes = []; pendingIn = null; renderEx();
   log(`✔ 잘라낸 영상으로 계속: ${trimResultPath} (${hhmmss(duration)}). 품번 넣고 ②를 누르세요.`,"ok");
   closeTrimModal();
+  collapseAcc("#btnTrim");   // ① 완료 → 접기
 };
 
 // ② 리뷰 생성(원샷) — 품번 필요
@@ -553,6 +560,7 @@ function showResult(r){
     (r.srt_narration?`<div>내레이션: ${r.srt_narration}</div>`:'')+
     (r.summary?`<div class="muted" style="margin-top:6px">요약: ${r.summary}</div>`:'');
   log("✔ 출력 완료","ok");
+  collapseAcc("#btnReview");   // ② 완료(원샷/자막단계/자동확정) → 접기
   // 리뷰 생성 후 자동 음성 생성 (옵션)
   if(r.srt_narration && $("#ttsAuto").checked){
     if(!$("#ttsProfile").value){ log("⚠ 자동 음성: 보이스를 먼저 선택하세요(보이스 목록 → 한국어).","warn"); return; }
@@ -625,6 +633,7 @@ function runTts(){
       (r.narration_wav?`<div>WAV: ${r.narration_wav}</div>`:'')+
       (r.voiced?`<div>입힌 영상: ${r.voiced}</div>`:'');
     log("✔ 내레이션 음성 완료","ok");
+    collapseAcc("#btnTts");   // ③ 완료 → 접기
   }));
 }
 $("#btnTts").onclick = runTts;
@@ -675,6 +684,7 @@ $("#btnBurn").onclick=()=>{
     $("#resultCard").style.display="block";
     $("#result").innerHTML=`<div class="ok">✔ 자막 입힌 영상</div><div>${r.subbed}</div>`;
     log("✔ 자막 영상 완료","ok");
+    collapseAcc("#btnBurn");   // ④ 완료 → 접기
   }));
 };
 
@@ -720,6 +730,7 @@ $("#btnInfocard").onclick=()=>{
         `<video src="/video/stream?path=${encodeURIComponent(r.out)}" controls autoplay muted loop style="width:100%;max-width:640px;border-radius:8px;margin-top:6px;background:#000"></video>`;
       $("#result").innerHTML=html;
       log("✔ 완료 — PNG를 편집 타임라인에 얹으세요(재인코딩 없음)","ok");
+      collapseAcc("#btnInfocard");   // ⑤ 완료 → 접기
     });
   }).catch(e=>log("✖ 오류: "+e,"warn"));
 };
