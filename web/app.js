@@ -757,6 +757,114 @@ $("#btnOutDir").onclick = () => {
 };
 $("#outDir").addEventListener("change", saveOutDir);
 
+// ── 작업 큐 (병렬 자동 처리) ────────────────────────────────────────────────
+const Q_ST = {  // status → [배지문구, css클래스]
+  needs_code:["품번?","nc"], queued:["대기","qd"], running:["진행","run"],
+  review:["✋검수","rev"], done:["✓완료","done"], error:["✗오류","err"], held:["⏸정지","held"]
+};
+let qPrev = {};   // id → status (검수대기/오류 전환 알림용)
+
+function qPipeline(){
+  return { transcribe:$("#qpTranscribe").checked, ai:$("#qpAi").checked,
+           subs:$("#qpSubs").checked, tts:$("#qpTts").checked, burn:$("#qpBurn").checked };
+}
+function qOpts(){
+  const o = { model:$("#whisper").value, llm:$("#llm").value,
+              target_sec:+$("#target").value, mode:($("#mode")?$("#mode").value:"summary") };
+  if($("#qpTts").checked){
+    o.tts_profile=$("#ttsProfile").value; o.tts_base=$("#ttsBase").value.trim()||undefined;
+    o.tts_seed=$("#ttsSeed").value!==""?+$("#ttsSeed").value:undefined; o.tts_mux=true;
+  }
+  return o;
+}
+
+$("#btnQAdd").onclick = async () => {
+  if($("#qpTts").checked && !$("#ttsProfile").value){
+    log("⚠ 큐 TTS 자동 진행: 먼저 ③에서 보이스를 선택하세요(보이스 목록 → 한국어)","warn"); return;
+  }
+  const r = await fetch("/browse_multi",{method:"POST"}).then(r=>r.json()).catch(()=>({paths:[]}));
+  if(r.error){ log("파일 다이얼로그 실패: "+r.error,"warn"); return; }
+  if(!r.paths || !r.paths.length) return;
+  const j = await fetch("/queue/add",{method:"POST",headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({paths:r.paths, pipeline:qPipeline(), opts:qOpts()})}).then(r=>r.json());
+  log(`📋 작업 큐에 ${j.added.length}개 추가 — 수작업하는 동안 자동 처리됩니다`,"ok");
+};
+
+function qAction(id, action, extra){
+  return fetch("/queue/item/"+id,{method:"POST",headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(Object.assign({action}, extra||{}))})
+    .then(async r=>{ if(!r.ok){ const e=await r.json().catch(()=>({})); log("✖ "+(e.detail||r.status),"warn"); } });
+}
+
+function qOpen(it){
+  // 큐 항목 클릭 → 우측 상세 화면에 로드(백그라운드 잡은 계속 돌아감)
+  openVideo(it.video);
+  setTimeout(()=>{  // openVideo의 파일명 자동추정을 큐의 확정 품번으로 덮어씀
+    if(it.code){ $("#code").value=it.code; $("#codeA").value=it.code; refreshSteps(it.code); }
+  }, 300);
+}
+
+function renderQueue(snap){
+  const ul=$("#qlist"); if(!ul) return;
+  const items=snap.items||[];
+  $("#qCount").textContent = items.length ? `${items.filter(i=>i.status==="running").length}▶ / ${items.length}` : "";
+  if(snap.lanes && $("#qLaneGpu")!==document.activeElement) $("#qLaneGpu").value=snap.lanes.gpu;
+  if(snap.lanes && $("#qLaneAi")!==document.activeElement) $("#qLaneAi").value=snap.lanes.ai;
+  if(!items.length){ ul.innerHTML='<li class="qempty muted">비어 있음 — 영상을 추가하면<br>수작업하는 동안 자동 처리됩니다</li>'; qPrev={}; return; }
+  ul.innerHTML="";
+  items.forEach(it=>{
+    // 상태 전환 알림 (검수대기/오류/완료 도달 시 로그로)
+    if(qPrev[it.id] && qPrev[it.id]!==it.status){
+      if(it.status==="review") log(`✋ [큐] ${it.code} 검수대기 — 좌측 목록에서 클릭해 확인하세요`,"ok");
+      if(it.status==="error")  log(`✗ [큐] ${it.code||it.name} 오류: ${it.error||""}`,"warn");
+      if(it.status==="done")   log(`✓ [큐] ${it.code} 전체 완료`,"ok");
+    }
+    qPrev[it.id]=it.status;
+    const [btxt,bcls]=Q_ST[it.status]||["?",""];
+    const li=document.createElement("li"); li.className="q-item "+bcls;
+    const pct=Math.round((it.progress||0)*100);
+    li.innerHTML =
+      `<div class="q-top"><b class="q-code">${it.code||"(품번?)"}</b>`+
+      `<span class="q-badge ${bcls}">${btxt}</span></div>`+
+      `<div class="q-name" title="${it.video}">${it.name}</div>`+
+      (it.status==="running"?`<div class="prog q-prog"><div class="prog-fill" style="width:${pct}%"></div></div>`:"")+
+      `<div class="q-stage">${it.stage_label||""}</div>`+
+      `<div class="q-actions"></div>`;
+    const acts=li.querySelector(".q-actions");
+    const mk=(t,title,fn)=>{ const b=document.createElement("button"); b.textContent=t; b.title=title;
+      b.onclick=(e)=>{ e.stopPropagation(); fn(); }; acts.appendChild(b); };
+    if(it.status==="needs_code")
+      mk("품번 입력","품번을 입력해 큐 진행",()=>{ const c=prompt(`품번 입력 (${it.name})`); if(c) qAction(it.id,"set_code",{code:c}); });
+    if(["queued","running"].includes(it.status)) mk("⏸","일시정지(현재 단계 후 중단)",()=>qAction(it.id,"hold"));
+    if(["held","error","review","done"].includes(it.status)) mk("▶","이어서/다시 실행(완료 단계는 건너뜀)",()=>qAction(it.id,"resume"));
+    if(it.status!=="running") mk("✕","목록에서 제거(파일은 유지)",()=>qAction(it.id,"remove"));
+    li.onclick=()=>qOpen(it);
+    ul.appendChild(li);
+  });
+}
+
+function connectQueue(){
+  try{
+    const es=new EventSource("/queue/events");
+    es.onmessage=(ev)=>{ try{ renderQueue(JSON.parse(ev.data)); }catch(_){} };
+    es.onerror=()=>{ es.close(); setTimeout(connectQueue, 3000); };  // 서버 재시작 등 → 재연결
+  }catch(_){ setTimeout(connectQueue, 3000); }
+}
+connectQueue();
+fetch("/queue").then(r=>r.json()).then(renderQueue).catch(()=>{});
+
+$("#btnQClear").onclick=()=>fetch("/queue/clear_finished",{method:"POST"});
+function saveLanes(){
+  fetch("/config",{method:"POST",headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({queue_gpu:+$("#qLaneGpu").value||1, queue_ai:+$("#qLaneAi").value||2})});
+}
+$("#qLaneGpu").addEventListener("change",saveLanes);
+$("#qLaneAi").addEventListener("change",saveLanes);
+$("#btnQCollapse").onclick=()=>{
+  const s=$("#qside"); s.classList.toggle("collapsed");
+  $("#btnQCollapse").textContent = s.classList.contains("collapsed")?"⟩":"⟨";
+};
+
 // 초기 설정 로드 (양 탭 동기화)
 fetch("/config").then(r=>r.json()).then(c=>{
   if(c.llm){ $("#llm").value=c.llm; $("#llmA").value=c.llm; }
@@ -764,6 +872,8 @@ fetch("/config").then(r=>r.json()).then(c=>{
   if(c.whisper_model){ $("#whisper").value=c.whisper_model; $("#whisperA").value=c.whisper_model; }
   if(c.tts_base){ $("#ttsBase").value=c.tts_base; }
   if(c.out_dir){ $("#outDir").value=c.out_dir; }
+  if(c.queue_gpu){ $("#qLaneGpu").value=c.queue_gpu; }
+  if(c.queue_ai){ $("#qLaneAi").value=c.queue_ai; }
 }).catch(()=>{});
 loadSubTemplates();
 refreshSteps();

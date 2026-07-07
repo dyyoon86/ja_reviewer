@@ -25,6 +25,10 @@ from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import pipeline as P
+from .stages import (Emitter, work_dir, load_state, save_state, steps_status,
+                     write_narration, write_dialogue, _hms, _safe,
+                     stage_transcribe, stage_ai, stage_subs, stage_tts, stage_burn)
+from .queue_mgr import QueueManager
 
 ROOT = Path(__file__).resolve().parent.parent
 import sys as _sys
@@ -52,6 +56,7 @@ DEFAULTS = {"meta_api": "http://172.30.1.40:8770", "llm": "claude",
             "whisper_model": "large-v3", "out_dir": str(Path.home() / "ja_reviewer_out"),
             "target_sec": 60,
             "tts_base": "http://127.0.0.1:17493", "tts_profile": "", "tts_language": "ko",
+            "queue_gpu": 1, "queue_ai": 2, "queue_tts": 1,
             "sub_styles": P.STYLE_DEFAULT, "sub_templates": SUB_TEMPLATES}
 
 app = FastAPI(title="ja_reviewer")
@@ -71,55 +76,10 @@ def save_cfg(c):
     except Exception: pass
 
 
-# ─── 단계별 상태(품번별) — 전사 → AI처리 → 자막. 각 단계 결과는 파일로 저장. ────
-def _state_file(outdir, code):
-    return Path(outdir) / f"{code}_state.json"
+QUEUE = QueueManager(load_cfg)   # 작업 큐(병렬 자동 처리) — 리소스 레인은 config의 queue_*
 
 
-def load_state(outdir, code):
-    f = _state_file(outdir, code)
-    if f.is_file():
-        try:
-            return json.loads(f.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    return {"code": code, "video": None, "target": None, "llm": None, "model": None,
-            "summary": "", "stars": None}
-
-
-def save_state(outdir, code, **fields):
-    st = load_state(outdir, code)
-    st.update(fields)
-    try:
-        _state_file(outdir, code).write_text(json.dumps(st, ensure_ascii=False, indent=1), encoding="utf-8")
-    except Exception:
-        pass
-    return st
-
-
-def steps_status(outdir, code):
-    """단계 완료 여부는 '결과 파일 존재'로 판정 → 서버 재시작/수동삭제에도 견고."""
-    o = Path(outdir)
-    return {"transcribe": (o / f"{code}_전사.json").is_file(),
-            "ai": (o / f"{code}_plan.json").is_file(),
-            "subs": (o / f"{code}_대사.srt").is_file()}
-
-
-def _hms(x):
-    x = int(max(0, round(x)))
-    return f"{x // 3600:02d}:{x % 3600 // 60:02d}:{x % 60:02d}"
-
-
-def _safe(code):
-    return re.sub(r"[^0-9A-Za-z._-]", "_", (code or "").strip()) or "untitled"
-
-
-def work_dir(c, code):
-    """품번별 작업 폴더 {out_dir}/{품번}/ — 전사·컷·자막·plan·tts 전부 여기에 모음."""
-    d = Path(c["out_dir"]) / _safe(code)
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
+# 품번별 상태/스테이지 코어는 server/stages.py 로 이관(작업 큐와 공유).
 
 # ─── 잡 / SSE ────────────────────────────────────────────────────────────────
 def new_job():
@@ -171,22 +131,13 @@ def heartbeat(jid, label):
     return stop
 
 
-def write_narration(outdir, code, nar_rt):
-    """내레이션 출력 — SRT + JSON. 내레이션은 존댓말 완결문장이라 25자 분할 안 함(끊김·시간겹침 방지).
-    화면 줄바꿈은 굽기(ASS)에서 자동 처리. TTS도 완결문장이 자연스러움."""
-    P.write_srt([(s, e, t) for s, e, t, *_ in nar_rt], outdir / f"{code}_내레이션.srt", maxlen=0)
-    data = [{"start": round(s, 3), "end": round(e, 3), "text": t, "style": (x[0] if x else "기본")}
-            for s, e, t, *x in nar_rt]
-    (outdir / f"{code}_내레이션.json").write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
-
-
-def write_dialogue(outdir, code, dlg_rt):
-    """대사 출력 — SRT(텍스트) + JSON(화자 speaker 포함, 굽기용). 둘 다 25자 분할."""
-    P.write_srt([(s, e, t) for s, e, t, *_ in dlg_rt], outdir / f"{code}_대사.srt")
-    dsplit = P.split_entries(dlg_rt, 24)
-    data = [{"start": round(s, 3), "end": round(e, 3), "text": t, "speaker": (x[0] if x else "여")}
-            for s, e, t, *x in dsplit]
-    (outdir / f"{code}_대사.json").write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+class JobEmitter(Emitter):
+    """SSE 잡큐(jid)로 진행상황을 흘리는 Emitter — 스테이지 코어(stages.py)용."""
+    def __init__(self, jid): self.jid = jid
+    def log(self, msg): jlog(self.jid, msg)
+    def step(self, n, total, label): jstep(self.jid, n, total, label)
+    def prog(self, frac, label=None): jprog(self.jid, frac, label)
+    def file(self, tag, path): jfile(self.jid, tag, path)
 
 
 @app.get("/events/{jid}")
@@ -258,6 +209,21 @@ def browse_dir():
         return {"path": d or ""}
     except Exception as e:
         return JSONResponse({"path": "", "error": str(e)}, status_code=200)
+
+
+@app.post("/browse_multi")
+def browse_multi():
+    """작업 큐용 — 영상 여러 개 선택 다이얼로그."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        r = tk.Tk(); r.withdraw(); r.attributes("-topmost", True)
+        fs = filedialog.askopenfilenames(
+            filetypes=[("영상", "*.mp4 *.mkv *.avi *.mov *.wmv"), ("모든 파일", "*.*")])
+        r.destroy()
+        return {"paths": list(fs or [])}
+    except Exception as e:
+        return JSONResponse({"paths": [], "error": str(e)}, status_code=200)
 
 
 @app.post("/open")
@@ -471,18 +437,7 @@ async def step_transcribe(req: Request):
 
     def work():
         try:
-            outdir = work_dir(c, code)
-            jstep(jid, 1, 1, f"전사(faster-whisper {model})")
-            segs = P.transcribe(path, model, lambda m: jlog(jid, m),
-                                lambda fr: jprog(jid, fr, "전사"))
-            data = [{"start": round(s, 3), "end": round(e, 3), "text": t} for s, e, t in segs]
-            (outdir / f"{code}_전사.json").write_text(
-                json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
-            P.write_srt([(s, e, t) for s, e, t in segs], outdir / f"{code}_전사.srt")
-            save_state(outdir, code, video=path, model=model)
-            jfile(jid, "전사 자막", outdir / f"{code}_전사.srt")
-            jdone(jid, {"step": "transcribe", "code": code, "count": len(segs),
-                        "srt": str(outdir / f"{code}_전사.srt")})
+            jdone(jid, stage_transcribe(c, code, path, model, JobEmitter(jid)))
         except Exception as e:
             jerr(jid, e)
     run_bg(work)
@@ -501,42 +456,8 @@ async def step_ai(req: Request):
 
     def work():
         try:
-            outdir = work_dir(c, code)
-            tj = outdir / f"{code}_전사.json"
-            if not tj.is_file():
-                raise RuntimeError("전사 결과가 없습니다. 먼저 ① 전사를 실행하세요.")
-            st = load_state(outdir, code)
-            video = body.get("path") or st.get("video")
-            if not video or not Path(video).is_file():
-                raise RuntimeError("전사에 쓴 영상 경로를 찾을 수 없습니다. ① 전사를 다시 실행하세요.")
-            segs = [(d["start"], d["end"], d["text"])
-                    for d in json.loads(tj.read_text(encoding="utf-8"))]
-            jstep(jid, 1, 3, "메타 조회")
-            m = P.fetch_meta(c["meta_api"], code, lambda x: jlog(jid, x))
-            label = "하이라이트형(알파컷식)" if mode == "highlight" else "요약형(짜집기)"
-            jstep(jid, 2, 3, f"AI {label} 압축·번역·내레이션 ({llm} 추론, 보통 1~3분)")
-            pf = P.prompt_highlight if mode == "highlight" else P.prompt_manual
-            hb = heartbeat(jid, f"AI 처리({llm})")
-            try:
-                res = P.call_llm(pf(m, segs, target, hint=hint), llm, lambda x: jlog(jid, x))
-            finally:
-                hb.set()
-            keep = P.parse_keep(res.get("keep", []))
-            if not keep:
-                raise RuntimeError("LLM이 keep 구간을 못 골랐습니다(빈 응답 — 헤드리스 거부 가능. 아래 수동 모드 사용).")
-            (outdir / f"{code}_plan.json").write_text(
-                json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
-            final = str(outdir / f"{code}_final.mp4")
-            jstep(jid, 3, 3, "핵심 구간 컷")
-            P.cut_video(video, keep, final, lambda mm: jlog(jid, mm),
-                        lambda fr: jprog(jid, fr, "컷"))
-            save_state(outdir, code, target=target, llm=llm,
-                       summary=res.get("summary", ""), stars=res.get("stars"))
-            jfile(jid, "AI 결과(plan)", outdir / f"{code}_plan.json")
-            jfile(jid, "최종 영상", final)
-            jdone(jid, {"step": "ai", "code": code, "final": final,
-                        "final_sec": P.video_duration(final),
-                        "summary": res.get("summary", ""), "stars": res.get("stars")})
+            jdone(jid, stage_ai(c, code, body.get("path"), target, llm, mode, hint,
+                                JobEmitter(jid)))
         except Exception as e:
             jerr(jid, e)
     run_bg(work)
@@ -611,28 +532,7 @@ async def step_subs(req: Request):
 
     def work():
         try:
-            outdir = work_dir(c, code)
-            plan = outdir / f"{code}_plan.json"
-            if not plan.is_file():
-                raise RuntimeError("AI 결과가 없습니다. 먼저 ② AI 처리를 실행하세요.")
-            res = json.loads(plan.read_text(encoding="utf-8"))
-            keep = P.parse_keep(res.get("keep", []))
-            if not keep:
-                raise RuntimeError("plan에 keep 구간이 없습니다.")
-            jstep(jid, 1, 2, "대사 자막(한글) 생성")
-            dlg = [(float(d["start"]), float(d["end"]), d["ko"], d.get("speaker", "여"))
-                   for d in res.get("dialogue", [])]
-            write_dialogue(outdir, code, P.retime(dlg, keep, snap=False))
-            jfile(jid, "대사 자막", outdir / f"{code}_대사.srt")
-            jstep(jid, 2, 2, "내레이션 자막 생성")
-            nar = [(float(d["start"]), float(d["end"]), d["text"], d.get("style", "기본"))
-                   for d in res.get("narration", [])]
-            write_narration(outdir, code, P.retime(nar, keep, snap=True))
-            jfile(jid, "내레이션 자막", outdir / f"{code}_내레이션.srt")
-            jdone(jid, {"step": "subs", "code": code,
-                        "srt_dialogue": str(outdir / f"{code}_대사.srt"),
-                        "srt_narration": str(outdir / f"{code}_내레이션.srt"),
-                        "summary": res.get("summary", ""), "stars": res.get("stars")})
+            jdone(jid, stage_subs(c, code, JobEmitter(jid)))
         except Exception as e:
             jerr(jid, e)
     run_bg(work)
@@ -772,37 +672,8 @@ async def tts(req: Request):
 
     def work():
         try:
-            outdir = work_dir(c, code)
-            srt = outdir / f"{code}_내레이션.srt"
-            if not srt.is_file():
-                raise RuntimeError(f"내레이션 SRT 없음: {srt} (먼저 리뷰 생성)")
-            entries = P.srt_parse(srt)
-            if not entries:
-                raise RuntimeError("내레이션 항목이 없습니다.")
-            clipdir = outdir / f"{code}_tts"; clipdir.mkdir(parents=True, exist_ok=True)
-            clips = []
-            total = len(entries) + 1 + (1 if mux else 0)
-            for i, (st, en, text) in enumerate(entries, 1):
-                jstep(jid, i, total, f"음성 {i}/{len(entries)}: {text[:18]}")
-                w = str(clipdir / f"n{i:03d}.wav")
-                P.tts_generate(base, text, profile, language, w, seed, lambda m: jlog(jid, m))
-                clips.append((st, w))
-            wav = str(outdir / f"{code}_내레이션.wav")
-            jstep(jid, len(entries) + 1, total, "내레이션 트랙 합성")
-            P.build_narration_wav(clips, wav, lambda m: jlog(jid, m))
-            jfile(jid, "내레이션 음성", wav)
-            out = {"mode": "tts", "narration_wav": wav, "count": len(clips)}
-            if mux:
-                final = outdir / f"{code}_final.mp4"
-                if final.is_file():
-                    voiced = str(outdir / f"{code}_final_voiced.mp4")
-                    jstep(jid, total, total, "영상에 음성 입히기")
-                    P.mux_narration(str(final), wav, voiced, log=lambda m: jlog(jid, m))
-                    jfile(jid, "음성 입힌 영상", voiced)
-                    out["voiced"] = voiced
-                else:
-                    jlog(jid, f"※ {final} 없음 → 믹스 생략(내레이션 WAV만 생성)")
-            jdone(jid, out)
+            jdone(jid, stage_tts(c, code, base, profile, language, seed, mux,
+                                 JobEmitter(jid)))
         except Exception as e:
             jerr(jid, e)
     run_bg(work)
@@ -837,29 +708,9 @@ async def burn(req: Request):
 
     def work():
         try:
-            outdir = work_dir(c, code)
-            voiced = outdir / f"{code}_final_voiced.mp4"
-            final = outdir / f"{code}_final.mp4"
-            if body.get("source"):
-                src = Path(body["source"])
-            elif voiced.is_file():
-                src = voiced            # 음성 입힌 영상 우선
-            elif final.is_file():
-                src = final
-            else:
-                raise RuntimeError(f"원본 영상이 없습니다: {final} (먼저 리뷰 생성)")
-            dsrt = outdir / f"{code}_대사.srt"
-            nsrt = outdir / f"{code}_내레이션.srt"
-            njson = outdir / f"{code}_내레이션.json"     # 유형(style) 포함 → 타입별 스타일
-            djson = outdir / f"{code}_대사.json"          # 화자(speaker) 포함 → 여/남 색 구분
-            out = str(outdir / f"{code}_final_subbed.mp4")
-            jstep(jid, 1, 1, "자막 굽기(ffmpeg)")
-            P.burn_subs(str(src), str(dsrt), str(nsrt), out, styles,
-                        str(njson) if njson.is_file() else None,
-                        str(djson) if djson.is_file() else None, lambda m: jlog(jid, m))
-            jfile(jid, "자막 입힌 영상", out)
+            r = stage_burn(c, code, styles, JobEmitter(jid), source=body.get("source"))
             c["sub_styles"] = styles; save_cfg(c)   # 마지막 사용 스타일 기억
-            jdone(jid, {"mode": "burn", "subbed": out, "source": str(src)})
+            jdone(jid, r)
         except Exception as e:
             jerr(jid, e)
     run_bg(work)
@@ -913,6 +764,72 @@ async def infocard(req: Request):
     jid = new_job()
     run_bg(work)
     return {"job": jid}
+
+
+# ─── 작업 큐 (병렬 자동 처리) ────────────────────────────────────────────────
+CODE_RE = re.compile(r"([A-Za-z]{2,6})-?(\d{2,5})")
+
+
+def guess_code(name):
+    m = CODE_RE.search(Path(name).stem)
+    return f"{m.group(1)}-{m.group(2)}".upper() if m else ""
+
+
+@app.get("/queue")
+def queue_snapshot():
+    return QUEUE.snapshot()
+
+
+@app.get("/queue/events")
+async def queue_events():
+    """큐 전체 스냅샷 SSE — 변경(version 증가) 시마다 전송."""
+    async def gen():
+        since = -1
+        while True:
+            v = await asyncio.to_thread(QUEUE.wait_version, since, 25.0)
+            if v == since:
+                yield ": keepalive\n\n"
+                continue
+            since = v
+            yield f"data: {json.dumps(QUEUE.snapshot(), ensure_ascii=False)}\n\n"
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.post("/queue/add")
+async def queue_add(req: Request):
+    """{paths:[..], pipeline:{transcribe,ai,subs,tts,burn}, opts:{model,llm,target_sec,mode,hint,tts_*}}"""
+    body = await req.json()
+    videos = [{"path": p, "code": guess_code(p)} for p in body.get("paths", [])]
+    ids = QUEUE.add(videos, body.get("pipeline") or
+                    {"transcribe": True, "ai": True, "subs": True},
+                    body.get("opts") or {})
+    return {"ok": True, "added": ids}
+
+
+@app.post("/queue/item/{iid}")
+async def queue_item_action(iid: str, req: Request):
+    """{action: hold|resume|remove|set_code, code?}"""
+    body = await req.json()
+    act = body.get("action")
+    if act == "hold":
+        QUEUE.hold(iid)
+    elif act == "resume":
+        QUEUE.resume(iid)
+    elif act == "remove":
+        if not QUEUE.remove(iid):
+            raise HTTPException(409, "진행 중인 항목은 삭제할 수 없습니다(일시정지 후 현재 단계 종료를 기다리세요).")
+    elif act == "set_code":
+        QUEUE.set_code(iid, body.get("code") or "")
+    else:
+        raise HTTPException(400, f"알 수 없는 action: {act}")
+    return {"ok": True}
+
+
+@app.post("/queue/clear_finished")
+def queue_clear_finished():
+    QUEUE.clear_finished()
+    return {"ok": True}
 
 
 # ─── 정적 프론트 ─────────────────────────────────────────────────────────────

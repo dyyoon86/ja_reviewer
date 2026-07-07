@@ -38,9 +38,53 @@ button.primary:hover,button.go:hover{filter:brightness(1.08)}
 button:disabled{opacity:.4;cursor:not-allowed;box-shadow:none}
 
 /* ── 레이아웃 ── */
-.layout{display:grid;grid-template-columns:1fr 396px;gap:16px;padding:16px;align-items:start;
-  max-width:1500px;margin:0 auto}
+.layout{display:grid;grid-template-columns:auto minmax(0,1fr) 396px;gap:16px;padding:16px;align-items:start;
+  max-width:1800px;margin:0 auto}
 .col{display:flex;flex-direction:column;gap:16px;min-width:0}
+
+/* ── 작업 큐 사이드바 ── */
+.qside{width:264px;transition:width .15s ease}
+.qside .qcard{padding:12px 12px;position:sticky;top:76px;max-height:calc(100vh - 92px);
+  display:flex;flex-direction:column}
+.qsec{border-bottom:1px solid var(--line);padding-bottom:9px;font-size:14px;gap:6px}
+.qsec .qtitle{white-space:nowrap}
+.qcollapse{margin-left:auto;height:24px;padding:0 8px;font-size:12px}
+.qbody{display:flex;flex-direction:column;gap:9px;margin-top:10px;min-height:0;flex:1}
+.qside.collapsed{width:46px}
+.qside.collapsed .qbody,.qside.collapsed .qtitle,.qside.collapsed #qCount{display:none}
+.qside.collapsed .qsec{border:none;padding:0;justify-content:center}
+.qpipe{display:flex;gap:6px 10px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--dim)}
+.qpipe label{display:inline-flex;align-items:center;gap:3px;cursor:pointer;white-space:nowrap}
+.qpipe input{height:auto;accent-color:var(--blue)}
+.qlanes{display:flex;gap:6px;align-items:center;font-size:12px}
+.qlanes input{width:46px;height:26px;padding:0 6px;font-size:12px}
+.qlist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;
+  overflow-y:auto;min-height:60px;flex:1}
+.qempty{padding:14px 6px;text-align:center;line-height:1.7}
+.q-item{border:1px solid var(--line);border-radius:9px;background:var(--panel2);
+  padding:8px 9px;cursor:pointer;transition:border-color .12s,background .12s}
+.q-item:hover{border-color:var(--line2);background:#23232c}
+.q-item.run{border-color:rgba(75,141,255,.5)}
+.q-item.rev{border-color:rgba(245,200,60,.55)}
+.q-item.err{border-color:rgba(240,71,107,.55)}
+.q-item.done{opacity:.65}
+.q-top{display:flex;align-items:center;gap:6px}
+.q-code{font-size:13px;letter-spacing:-.2px}
+.q-badge{margin-left:auto;font-size:11px;padding:1px 7px;border-radius:20px;
+  border:1px solid var(--line2);color:var(--dim);white-space:nowrap}
+.q-badge.run{color:#9cc0ff;border-color:rgba(75,141,255,.5)}
+.q-badge.rev{color:#f5d05c;border-color:rgba(245,200,60,.5)}
+.q-badge.done{color:var(--ok);border-color:rgba(47,206,118,.5)}
+.q-badge.err{color:var(--accent2);border-color:rgba(240,71,107,.5)}
+.q-badge.held,.q-badge.nc{color:var(--dim)}
+.q-name{font-size:11px;color:var(--dim2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
+.q-prog{height:5px;margin-top:6px}
+.q-stage{font-size:11px;color:var(--dim);margin-top:5px;line-height:1.4;word-break:break-all}
+.q-actions{display:flex;gap:4px;margin-top:7px}
+.q-actions:empty{display:none}
+.q-actions button{height:23px;padding:0 8px;font-size:11px;border-radius:6px}
+.qfoot{display:flex;gap:8px;align-items:center;margin-top:2px}
+.qfoot button{height:27px;padding:0 10px;font-size:12px;white-space:nowrap}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px 18px;
   box-shadow:var(--shadow)}
 .muted{color:var(--dim);font-size:12px}
