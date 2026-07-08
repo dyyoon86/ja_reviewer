@@ -162,6 +162,28 @@ def sanitize_segments(entries, min_dur=0.2):
     return [tuple(r) for r in rows]
 
 
+def clamp_durations(entries, sec_per_char=0.4, base=1.2, hard_cap=7.0, min_dur=0.8):
+    """자막이 글자 수에 비해 과하게 오래 떠 있는 것 방지 — end를 '읽을 만한 최대 시간'으로 컷.
+    Whisper가 신음/무음/음악 구간을 채우려 세그먼트 end를 길게 늘리는 문제를 잡는다.
+    (대사는 없는데 자막이 계속 유지되는 현상 → 이 클램프로 제거)
+    허용시간 = base + sec_per_char*글자수 (상한 hard_cap). 텍스트가 없으면 원본 유지."""
+    out = []
+    for e in entries:
+        a, b, *rest = e
+        a = float(a); b = float(b)
+        txt = (rest[0] if rest else "") or ""
+        n = len(txt.strip())
+        if n <= 0:
+            out.append((a, b, *rest)); continue
+        allow = min(hard_cap, base + sec_per_char * n)
+        allow = max(allow, min_dur)
+        nb = min(b, a + allow)
+        if nb <= a:
+            nb = a + min_dur
+        out.append((a, nb, *rest))
+    return out
+
+
 def write_srt(entries, path, maxlen=25):
     """SRT 출력. maxlen 글자 이하로 자동 분할(시간 비례 배분). maxlen=0이면 분할 안 함.
     출력 직전 항상 sanitize_segments 로 타임스탬프 역전/겹침을 정상화한다."""
@@ -320,7 +342,10 @@ def transcribe(video, model_name="large-v3", log=print, progress=None, initial_p
     if progress:
         progress(1.0)
     out = sanitize_segments(out)   # 타임스탬프 역전/겹침/순서 정상화
-    log(f"전사 완료: {len(out)} 세그먼트 (환청/무의미 {dropped}개 제거)")
+    before = out
+    out = clamp_durations(out)     # 글자수 대비 과길이 자막 컷(무음/신음 구간 끌림 제거)
+    trimmed = sum(1 for (a, b, *_), (a2, b2, *_2) in zip(before, out) if b - b2 > 0.3)
+    log(f"전사 완료: {len(out)} 세그먼트 (환청/무의미 {dropped}개 제거, 과길이 자막 {trimmed}개 단축)")
     return out
 
 
