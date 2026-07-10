@@ -149,6 +149,10 @@
               <option value="summary">짜집기 (요약형)</option>
               <option value="highlight">알파컷 (하이라이트형)</option>
             </select>
+            <select id="narStyle" title="내레이션 문체 — 3분휴지형은 원음 끄고 총평, 고몽·김시선형은 대사와 주고받음" style="width:190px">
+              <option value="3min" selected>3분휴지형 (담백한 총평)</option>
+              <option value="cinema">고몽·김시선형 (대사 주고받기)</option>
+            </select>
             <select id="segPos" title="묶음 리뷰에서 이 작품의 위치 — 전환 문구가 달라집니다. 자동=큐 순서로 판정" style="width:150px">
               <option value="auto" selected>자동 (큐 순서대로)</option>
               <option value="first">먼저 (첫 작품)</option>
@@ -235,8 +239,17 @@
       <div class="formrow" style="margin:6px 0">
         <label class="muted"><input type="checkbox" id="ttsAuto" style="height:auto;vertical-align:middle"> ② 리뷰 생성 후 자동으로 음성까지 생성 (보이스 선택 필요)</label>
       </div>
+      <div class="formrow">
+        <span class="fld"><span class="lbl">원음 처리</span>
+          <select id="ttsOrig" style="width:280px">
+            <option value="mute" selected>원음 끄기 (3분휴지형 — 해설만)</option>
+            <option value="duck">원음 살리고 해설 나올 때만 줄이기 (고몽·김시선형)</option>
+            <option value="keep">원음 그대로 + 해설 겹치기</option>
+          </select></span>
+      </div>
+      <div class="hint">내레이션 문체를 <b>고몽·김시선형</b>으로 뽑았다면 원음 처리를 <b>더킹</b>으로 두세요. 대사 원음이 들려야 해설이 대사를 받아치는 구성이 살아납니다. 3분휴지형은 원음을 끄고 해설만 갑니다.</div>
       <div class="actions">
-        <label class="muted"><input type="checkbox" id="ttsMux" style="height:auto;vertical-align:middle"> 영상에 입히기 (원음 음소거 → _final_voiced.mp4)</label>
+        <label class="muted"><input type="checkbox" id="ttsMux" style="height:auto;vertical-align:middle"> 영상에 입히기 (→ _final_voiced.mp4)</label>
         <button class="go spacer" id="btnTts">● 내레이션 음성 생성</button>
       </div>
       </div>

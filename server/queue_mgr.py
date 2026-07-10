@@ -283,7 +283,7 @@ class QueueManager:
             S.stage_ai(c, code, video, int(o.get("target_sec", c["target_sec"])),
                        o.get("llm", c["llm"]), o.get("mode", "summary"),
                        (o.get("hint") or "").strip(), em, gpu=self._lane("gpu"),
-                       pos=pos)
+                       pos=pos, style=o.get("style","3min"))
         elif stg == "subs":
             S.stage_subs(c, code, em)
         elif stg == "banner":
@@ -294,6 +294,7 @@ class QueueManager:
                 raise RuntimeError("TTS 보이스(profile) 미선택 — 큐 추가 전에 보이스를 고르세요.")
             S.stage_tts(c, code, o.get("tts_base") or c["tts_base"], profile,
                         o.get("tts_language", c["tts_language"]), o.get("tts_seed"),
-                        bool(o.get("tts_mux", True)), em)
+                        bool(o.get("tts_mux", True)), em,
+                        orig_audio=o.get("orig_audio", "mute"))
         elif stg == "burn":
             S.stage_burn(c, code, c.get("sub_styles") or S.P.STYLE_DEFAULT, em)

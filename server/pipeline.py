@@ -536,7 +536,81 @@ def _translate():
             "イク→갈게/간다, 締め→숨 막히는 쾌감). 같은 단어도 장면 맥락 따라 달라짐.")
 
 
-def _style():
+NARRATION_STYLES = {
+    "3min": "3분휴지형 (담백한 총평 리뷰 · 원음 끄고 해설만)",
+    "cinema": "고몽·김시선형 (대사와 주고받는 해설 · 원음 살림)",
+}
+
+
+def _style_cinema():
+    """영화 해설 채널(고몽·김시선) 문체. 실측 근거:
+      · 대사 삽입 빈도 — 고몽 15.1회/분(4.0초마다), 김시선 9.8회/분(6.1초마다)
+      · 종결 '~니다' 최다에 '~죠/~인데요/~네요/~예요' 혼용(해요체 섞인 합니다체)
+      · 고몽은 플롯 추진(하지만·그러자), 김시선은 해석·추정(보여주다·추정·같아요)
+    핵심은 '내레이션이 대사를 감싼다'는 것 — 설명하다 대사로 넘기고, 대사가 끝나면 받아친다."""
+    return (
+        "[캐릭터] 딸딸기튜브 해설자 '딸감별사'. 고몽·김시선 같은 영화 해설 채널 문체를 따른다. "
+        "[★어조] 현재형 서술로 장면을 중계하듯 쓴다. 종결은 '~습니다'를 기본으로 하되 "
+        "'~죠', '~인데요', '~네요', '~거예요'를 자연스럽게 섞어 말맛을 준다. "
+        "3분휴지처럼 딱딱한 총평체가 아니라, 옆에서 같이 보며 얘기해 주는 말투다. 느낌표·과장 감탄은 여전히 금지. "
+        "[★대사와 주고받기 — 이 스타일의 핵심] 내레이션은 실제 대사(dialogue)를 '감싸는' 형태로 쓴다.\n"
+        " · 대사 직전 내레이션: 상황을 세우고 대사로 넘긴다. 문장을 끝맺지 않고 이어지게 둘 수도 있다.\n"
+        "   (예: '남자가 원하는 건 단 하나였습니다.' → [대사] → '그 말에 여자는 아무 대답도 하지 못하죠.')\n"
+        " · 대사 직후 내레이션: 방금 나온 대사를 받아 해석하거나 다음으로 넘긴다.\n"
+        " · 같은 말을 반복하지 말 것. 대사가 이미 말한 내용을 내레이션이 또 설명하면 지루해진다.\n"
+        "[★타이밍 — 반드시 지킬 것] narration 항목은 dialogue 항목의 시간과 **절대 겹치지 않게** 배치한다. "
+        "대사가 흐르는 동안은 내레이션을 넣지 않는다(대사 원음이 들려야 한다). 대사와 대사 사이 빈 구간에만 넣는다. "
+        "대사가 촘촘하면 내레이션을 짧게 끊어 여러 항목으로 나눈다. "
+        "[리듬] 대사 사이 간격이 4~6초가 되도록 대사를 골라 배치하면 좋다. 내레이션만 길게 이어지는 구간을 만들지 말 것. "
+        "[해석] 장면의 의미·인물의 속내를 한 겹 더 짚어준다. 다만 화면을 못 봤으므로 자막에서 확인되는 범위 안에서만. "
+        "추측은 '~인 것 같습니다', '~라고 볼 수 있겠죠'처럼 추측임을 드러낸다. "
+        "[구성] 훅이 되는 장면·대사로 연다 → 인물과 관계 소개 → 갈등이 커지는 대목 → 전환점 → "
+        "여운 남기는 마무리. 총평·별점은 마지막에 짧게. "
+        "**[AI 문체 금지]** '~에 초점을 둔 구성', '~을 선사합니다', 형용사 3개 이상 나열, 같은 종결어미 3연속. "
+        "**[유튜브 안전]** 약물 직접 언급 금지 — '약 먹이다/약물/수면제/최음제/약 기운' → '몽롱물', '분위기가 달라지는데..', '몸 상태가 이상해지는데..'로 대체. "
+        "[대사] 자연스러운 한국어 구어체(번역투 금지), 신음류 제외/(신음). 각 대사에 speaker 지정 — '여'/'남'. "
+        "[자막 길이] 각 항목 25자 이내, 길면 의미 단위로 끊어 여러 항목. "
+        "[내레이션 유형] style 지정 — '기본'(장면 중계)/'강조'(훅·반전·총평)/'정보'(스펙·레이블·수치).\n"
+        + _translate())
+
+
+def _style(kind="3min"):
+    """내레이션 문체 선택. 3min=3분휴지형(총평 리뷰), cinema=고몽·김시선형(대사 주고받기)."""
+    return _style_cinema() if kind == "cinema" else _style_3min()
+
+
+def _must_have(kind="3min"):
+    """스타일별 '내레이션 필수 요소' + 자기점검. 두 스타일은 요구가 다르므로 섞으면 안 된다
+    (예: cinema에 '~작품이었습니다 총평'·'호불호 고지'를 강요하면 문체가 무너진다)."""
+    if kind == "cinema":
+        return (
+            "[내레이션 필수 요소 — 하나라도 빠지면 실패]\n"
+            " (a) 전환 한 문장 — 위 [묶음 리뷰] 지시대로 연다.\n"
+            " (b) 인물·관계 소개 — 자막에서 확인되는 범위 안에서.\n"
+            " (c) 대사와 주고받기 — narration 항목이 dialogue 항목 사이 빈 구간에만 놓이고,"
+            " 대사 직전/직후를 자연스럽게 받아야 한다. 대사가 이미 말한 내용을 되풀이하지 말 것.\n"
+            " (d) 장면 해석 최소 1회 — 인물의 속내나 상황의 의미를 한 겹 더 짚는다(추측은 추측으로 표시).\n"
+            " (e) 갈등이 커지는 대목과 전환점을 짚는다.\n"
+            " (f) 마무리 — 여운을 남기고 총평·별점(stars)은 짧게 한두 줄.\n"
+            "[자기점검] 출력 전에 확인: narration 시간이 dialogue 시간과 겹치지 않는가? "
+            "느낌표·과장 감탄이 없는가? 같은 종결어미를 3연속 쓰지 않았는가? "
+            "대사가 말한 내용을 내레이션이 다시 설명하고 있지 않은가? "
+            "첫 문장이 전환 문구로 시작하는가? 채널 인사·구독 요청을 넣지 않았는가?\n")
+    return (
+        "[내레이션 필수 요소 — 하나라도 빠지면 실패]\n"
+        " (a) 전환+소개 한 문장 — 위 [묶음 리뷰] 지시대로 열고, '~라는 내용의 작품입니다'로 설정을 요약.\n"
+        " (b) 설정·전개 포인트 — 반드시 위 자막에서 확인되는 내용만.\n"
+        " (c) 배우 필모 맥락 — 메타의 배우·레이블·발매일·인기지표를 근거로 '지금까지의 작품들 중에서',"
+        " '요즘 작품들이 아쉬웠는데' 같은 비교를 최소 1회.\n"
+        " (d) 단점·아쉬운 점 최소 1개 — 장점만 늘어놓으면 안 된다.\n"
+        " (e) 호불호 갈릴 요소 고지 — '호불호가 갈릴 수 있지만' 형태로 최소 1회.\n"
+        " (f) 총평 — '~작품이었습니다'로 닫고 별점(stars) 근거를 한 줄로.\n"
+        "[자기점검] 출력 전에 확인: 반말·느낌표·과장 감탄이 하나라도 있으면 다시 쓴다. "
+        "모든 문장이 '~입니다/~습니다'로 끝나는가? 단점을 짚었는가? 배우 맥락이 있는가? "
+        "첫 문장이 전환 문구로 시작하는가? 채널 인사·구독 요청을 넣지 않았는가?\n")
+
+
+def _style_3min():
     """내레이션 문체. 3분휴지 채널 실제 자막 3편(325문장) 분석에 근거해 작성.
     측정값: 정중체 100%(입니다 138·습니다 135), 반말/감탄사/느낌표 0회,
     문장 평균 45자, '굉장히' 32회, 종결 1위 '…작품입니다' 83회, '…작품이었습니다' 20회.
@@ -623,13 +697,13 @@ def _roundup_block(pos="mid", target_sec=60):
     return b
 
 
-def prompt_auto(meta, segs, target_sec=60, hint="", pos="mid"):
+def prompt_auto(meta, segs, target_sec=60, hint="", pos="mid", style="3min"):
     body = "\n".join(f"{k}\t{a:.2f}\t{b:.2f}\t{t}" for k, (a, b, t) in enumerate(segs, 1))
     return (f"너는 딸딸기튜브 AV 해설영상 작가다. 아래 작품의 일본어 자막을 보고 '스토리 핵심만' 골라 "
             f"**약 {target_sec}초 내외 하이라이트 영상**으로 압축하고, 한글 대사자막과 해설 내레이션을 만든다.\n"
             f"{_hint_block(hint)}"
             f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n"
-            f"{_roundup_block(pos, target_sec)}{_style()}\n"
+            f"{_roundup_block(pos, target_sec)}{_style(style)}\n"
             f"[규칙] (1)신음·짧은탄성·반복감탄·비스토리 섹스대사·무음/잡담·중복은 버린다. "
             f"(2)스토리(설정·관계·전환·갈등·결말)를 드러내는 핵심 구간만 keep으로 골라 **합쳐서 {target_sec}초 ±20% 목표**. "
             f"(3)도입~결말 흐름이 보이게 고루 분포. 시간은 원본 영상 기준 초.\n"
@@ -637,14 +711,14 @@ def prompt_auto(meta, segs, target_sec=60, hint="", pos="mid"):
             f"\"dialogue\":[{{\"start\":초,\"end\":초,\"ko\":\"\",\"speaker\":\"여|남\"}}],\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\",\"style\":\"기본|강조|정보\"}}]}}")
 
 
-def prompt_highlight(meta, segs, target_sec=60, hint="", pos="mid"):
+def prompt_highlight(meta, segs, target_sec=60, hint="", pos="mid", style="3min"):
     """AlphaCut식 하이라이트 추출 — '고루 분포' 대신 '가장 후킹되는 순간'만 골라 몰아 뽑는다."""
     body = "\n".join(f"{k}\t{a:.2f}\t{b:.2f}\t{t}" for k, (a, b, t) in enumerate(segs, 1))
     return (f"너는 딸딸기튜브 AV 하이라이트 편집자다. 아래 작품 자막에서 **가장 후킹되는(클릭·시청유지 유발) 순간**만 골라 "
             f"**약 {target_sec}초 내외 하이라이트**로 압축한다. 줄거리 요약이 아니라 '자극·반전·긴장·감정 절정'의 밀도 높은 컷.\n"
             f"{_hint_block(hint)}"
             f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n"
-            f"{_roundup_block(pos, target_sec)}{_style()}\n"
+            f"{_roundup_block(pos, target_sec)}{_style(style)}\n"
             f"[하이라이트 규칙] "
             f"(1)신음·잡담·무음·반복은 버린다. "
             f"(2)★고루 분포 금지★ — 앞·중간·뒤 균등이 아니라 **후킹 밀도가 가장 높은 순간에 집중**. "
@@ -658,27 +732,17 @@ def prompt_highlight(meta, segs, target_sec=60, hint="", pos="mid"):
             f"\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\",\"style\":\"기본|강조|정보\"}}]}}")
 
 
-def prompt_manual(meta, segs, target_sec=60, hint="", pos="mid"):
+def prompt_manual(meta, segs, target_sec=60, hint="", pos="mid", style="3min"):
     body = "\n".join(f"{k}\t{a:.2f}\t{b:.2f}\t{t}" for k, (a, b, t) in enumerate(segs, 1))
     return (f"너는 딸딸기튜브 AV 해설영상 작가다. 아래는 '정사장면을 이미 제거한' 영상의 일본어 자막이다. "
             f"여기서 **스토리 핵심만 골라 약 {target_sec}초 내외로 압축**하고, 한글 대사자막과 해설 내레이션을 만든다.\n"
             f"{_hint_block(hint)}"
             f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n"
-            f"{_roundup_block(pos, target_sec)}{_style()}\n"
+            f"{_roundup_block(pos, target_sec)}{_style(style)}\n"
             f"[규칙] (1)무음·잡담·반복·의미없는 짧은 라인은 버린다. "
             f"(2)스토리(설정·관계·전환·갈등·결말)를 드러내는 핵심 구간만 keep으로 골라 **합쳐서 {target_sec}초 ±20% 목표**. "
             f"(3)정사 선별은 하지 말 것(이미 제거됨). 시간은 이 자막 기준 초.\n"
-            f"[내레이션 필수 요소 — 하나라도 빠지면 실패]\n"
-            f" (a) 전환+소개 한 문장 — 위 [묶음 리뷰] 지시대로 열고, '~라는 내용의 작품입니다'로 설정을 요약.\n"
-            f" (b) 설정·전개 포인트 — 반드시 위 자막에서 확인되는 내용만.\n"
-            f" (c) 배우 필모 맥락 — 메타의 배우·레이블·발매일·인기지표를 근거로 '지금까지의 작품들 중에서',"
-            f" '요즘 작품들이 아쉬웠는데' 같은 비교를 최소 1회.\n"
-            f" (d) 단점·아쉬운 점 최소 1개 — 장점만 늘어놓으면 안 된다.\n"
-            f" (e) 호불호 갈릴 요소 고지 — '호불호가 갈릴 수 있지만' 형태로 최소 1회.\n"
-            f" (f) 총평 — '~작품이었습니다'로 닫고 별점(stars) 근거를 한 줄로.\n"
-            f"[자기점검] 출력 전에 확인: 반말·느낌표·과장 감탄이 하나라도 있으면 다시 쓴다. "
-            f"모든 문장이 '~입니다/~습니다'로 끝나는가? 단점을 짚었는가? 배우 맥락이 있는가? "
-            f"첫 문장이 전환 문구로 시작하는가? 채널 인사·구독 요청을 넣지 않았는가?\n"
+            f"{_must_have(style)}"
             f"[출력 JSON만] {{\"summary\":\"3~5줄\",\"stars\":1~5,\"keep\":[[시작,끝],...],"
             f"\"dialogue\":[{{\"start\":초,\"end\":초,\"ko\":\"\",\"speaker\":\"여|남\"}}],\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\",\"style\":\"기본|강조|정보\"}}]}}")
 
@@ -1060,14 +1124,42 @@ def build_narration_wav(clips, out_wav, log=print, video_sec=None,
     return out_wav
 
 
-def mux_narration(video, narration_wav, out_video, narration_gain=1.0, orig_gain=0.0, log=print):
-    """영상에 내레이션 WAV를 입힌다. orig_gain=0 이면 원음 음소거(내레이션만)."""
-    fc = (f"[0:a]volume={orig_gain}[oa];[1:a]volume={narration_gain}[na];"
-          f"[oa][na]amix=inputs=2:duration=first:normalize=0[a]")
+ORIG_AUDIO_MODES = {
+    "mute": "원음 끄기 (3분휴지형 — 해설만)",
+    "duck": "원음 살리고 해설 나올 때만 줄이기 (고몽·김시선형)",
+    "keep": "원음 그대로 + 해설 겹치기",
+}
+
+
+def mux_narration(video, narration_wav, out_video, narration_gain=1.0,
+                  orig_gain=None, mode="mute", log=print):
+    """영상에 내레이션 WAV를 입힌다.
+
+    mode='mute' : 원음 음소거 — 해설만 들린다(3분휴지형).
+    mode='duck' : 원음을 살리되 내레이션이 나오는 동안만 자동으로 낮춘다(사이드체인 더킹).
+                  대사 원음이 들려야 하는 고몽·김시선형에 필요하다.
+    mode='keep' : 원음 그대로 두고 내레이션을 겹친다.
+    orig_gain을 직접 주면 mode보다 우선한다(기존 호출부 호환).
+    """
+    if orig_gain is not None:
+        fc = (f"[0:a]volume={orig_gain}[oa];[1:a]volume={narration_gain}[na];"
+              f"[oa][na]amix=inputs=2:duration=first:normalize=0[a]")
+    elif mode == "duck":
+        # 내레이션을 둘로 복제 — 하나는 원음을 누르는 신호(sc), 하나는 실제로 들릴 소리(na).
+        fc = (f"[1:a]volume={narration_gain},asplit=2[na][sc];"
+              f"[0:a]volume=1.0[oa];"
+              f"[oa][sc]sidechaincompress=threshold=0.02:ratio=12:attack=15:release=350[ducked];"
+              f"[ducked][na]amix=inputs=2:duration=first:normalize=0[a]")
+    elif mode == "keep":
+        fc = (f"[0:a]volume=1.0[oa];[1:a]volume={narration_gain}[na];"
+              f"[oa][na]amix=inputs=2:duration=first:normalize=0[a]")
+    else:
+        fc = (f"[0:a]volume=0[oa];[1:a]volume={narration_gain}[na];"
+              f"[oa][na]amix=inputs=2:duration=first:normalize=0[a]")
     subprocess.run(["ffmpeg", "-y", "-i", str(video), "-i", str(narration_wav),
                     "-filter_complex", fc, "-map", "0:v", "-map", "[a]",
                     "-c:v", "copy", "-c:a", "aac", str(out_video)], check=True)
-    log(f"내레이션 입힌 영상: {out_video}")
+    log(f"내레이션 입힌 영상({ORIG_AUDIO_MODES.get(mode, mode)}): {out_video}")
     return out_video
 
 
