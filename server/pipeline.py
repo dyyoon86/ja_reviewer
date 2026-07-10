@@ -467,11 +467,22 @@ def call_llm(prompt, which="claude", log=print):
         exe = _cli_path("codex")
         with tempfile.TemporaryDirectory() as td:
             outf = Path(td) / "o.json"
-            subprocess.run([exe, "exec", "--ephemeral", "--skip-git-repo-check",
-                            "-c", 'model_reasoning_effort="high"', "-o", str(outf)],
-                           input=prompt, timeout=900, text=True, encoding="utf-8", errors="replace",
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # stderr를 버리면 인증실패(401)·레이트리밋을 '빈 응답'으로만 보게 된다 → 캡처한다
+            p = subprocess.run([exe, "exec", "--ephemeral", "--skip-git-repo-check",
+                                "-c", 'model_reasoning_effort="high"', "-o", str(outf)],
+                               input=prompt, timeout=900, text=True, encoding="utf-8",
+                               errors="replace", capture_output=True)
             txt = outf.read_text(encoding="utf-8") if outf.exists() else ""
+            if not txt.strip():
+                err = (p.stderr or p.stdout or "").strip()
+                low = err.lower()
+                if "401" in err or "unauthorized" in low or "bearer" in low or "auth" in low:
+                    raise RuntimeError("codex 로그인 안 됨 — 'codex login' 후 다시 시도하세요. "
+                                       f"(원문: {err[-200:]})")
+                if "429" in err or "rate limit" in low:
+                    raise RuntimeError(f"codex 레이트리밋/한도 — 잠시 후 재시도. (원문: {err[-200:]})")
+                if err:
+                    raise RuntimeError(f"codex 응답 없음: {err[-240:]}")
     else:
         exe = _cli_path("claude")
         p = subprocess.run([exe, "-p"], input=prompt, timeout=900, text=True,
@@ -479,7 +490,9 @@ def call_llm(prompt, which="claude", log=print):
         txt = p.stdout or ""
     s = txt.strip(); i = s.find("{")
     if i < 0:
-        raise RuntimeError("LLM JSON 응답 없음 (빈 응답/로그인 확인 — 헤드리스 거부 시 수동 모드 사용)")
+        # 거부 문구가 텍스트로 온 경우 그 내용을 그대로 보여준다(원인 파악 가능하게)
+        hint = f" 응답: {s[:200]}" if s else ""
+        raise RuntimeError(f"LLM JSON 응답 없음 (빈 응답/로그인/콘텐츠 거부 확인).{hint}")
     try:
         obj, _ = json.JSONDecoder().raw_decode(s, i)
         return obj
