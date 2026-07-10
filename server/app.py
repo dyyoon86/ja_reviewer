@@ -931,7 +931,7 @@ async def queue_add(req: Request):
 
 @app.post("/queue/item/{iid}")
 async def queue_item_action(iid: str, req: Request):
-    """{action: hold|resume|remove|set_code, code?}"""
+    """{action: hold|resume|remove|set_code|move, code?, delta?}"""
     body = await req.json()
     act = body.get("action")
     if act == "hold":
@@ -943,6 +943,10 @@ async def queue_item_action(iid: str, req: Request):
             raise HTTPException(409, "진행 중인 항목은 삭제할 수 없습니다(일시정지 후 현재 단계 종료를 기다리세요).")
     elif act == "set_code":
         QUEUE.set_code(iid, body.get("code") or "")
+    elif act == "move":
+        # 큐 순서 = 묶음 영상의 편집 순서 → 먼저/다음은/마지막으로 판정에 그대로 쓰인다
+        if not QUEUE.move(iid, int(body.get("delta", 0))):
+            raise HTTPException(409, "진행 중이거나 더 이동할 수 없는 항목입니다.")
     else:
         raise HTTPException(400, f"알 수 없는 action: {act}")
     return {"ok": True}

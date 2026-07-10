@@ -173,6 +173,27 @@ class QueueManager:
             return True
         return False
 
+    def move(self, iid, delta):
+        """큐 순서 변경 — 큐 순서가 곧 묶음 영상의 편집 순서(먼저/다음은/마지막으로)다.
+        delta=-1 위로, +1 아래로. running 중인 아이템은 옮기지 않는다(판정이 이미 끝났다)."""
+        it = self._find(iid)
+        if not it or it["status"] == "running":
+            return False
+        i = self.items.index(it)
+        j = max(0, min(len(self.items) - 1, i + int(delta)))
+        if i == j:
+            return False
+        self.items.insert(j, self.items.pop(i))
+        self._touch()
+        return True
+
+    def reorder(self, ids):
+        """전체 순서를 통째로 지정(드래그 정렬용). 목록에 없는 id는 무시, 빠진 건 뒤에 붙인다."""
+        pos = {x: n for n, x in enumerate(ids)}
+        self.items.sort(key=lambda it: pos.get(it["id"], len(pos)))
+        self._touch()
+        return True
+
     def clear_finished(self):
         self.items = [it for it in self.items
                       if it["status"] not in ("done", "review", "error")]

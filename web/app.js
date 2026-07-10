@@ -841,7 +841,7 @@ function renderQueue(snap){
   if(snap.lanes && $("#qLaneAi")!==document.activeElement) $("#qLaneAi").value=snap.lanes.ai;
   if(!items.length){ ul.innerHTML='<li class="qempty muted">비어 있음 — 영상을 추가하면<br>수작업하는 동안 자동 처리됩니다</li>'; qPrev={}; return; }
   ul.innerHTML="";
-  items.forEach(it=>{
+  items.forEach((it,i)=>{
     // 상태 전환 알림 (검수대기/오류/완료 도달 시 로그로)
     if(qPrev[it.id] && qPrev[it.id]!==it.status){
       if(it.status==="review") log(`✋ [큐] ${it.code} 검수대기 — 좌측 목록에서 클릭해 확인하세요`,"ok");
@@ -852,8 +852,13 @@ function renderQueue(snap){
     const [btxt,bcls]=Q_ST[it.status]||["?",""];
     const li=document.createElement("li"); li.className="q-item "+bcls;
     const pct=Math.round((it.progress||0)*100);
+    // 큐 순서 = 묶음 영상의 편집 순서 → 첫/마지막 꼭지는 전환 문구가 달라진다
+    const coded=items.filter(x=>(x.code||"").trim());
+    const ci=coded.indexOf(it), cn=coded.length;
+    const posTag = ci<0 ? "" : (cn===1||ci===0 ? "먼저" : (ci===cn-1 ? "마지막" : "다음은"));
     li.innerHTML =
       `<div class="q-top"><b class="q-code">${it.code||"(품번?)"}</b>`+
+      (posTag?`<span class="q-badge" title="묶음 리뷰에서 이 작품의 전환 문구(큐 순서로 자동 판정)">${ci+1}. ${posTag}</span>`:"")+
       `<span class="q-badge ${bcls}">${btxt}</span></div>`+
       `<div class="q-name" title="${it.video}">${it.name}</div>`+
       (it.status==="running"?`<div class="prog q-prog"><div class="prog-fill" style="width:${pct}%"></div></div>`:"")+
@@ -864,6 +869,8 @@ function renderQueue(snap){
       b.onclick=(e)=>{ e.stopPropagation(); fn(); }; acts.appendChild(b); };
     if(it.status==="needs_code")
       mk("품번 입력","품번을 입력해 큐 진행",()=>{ const c=prompt(`품번 입력 (${it.name})`); if(c) qAction(it.id,"set_code",{code:c}); });
+    if(it.status!=="running" && i>0)            mk("▲","위로 (영상에서 앞 순서로)",()=>qAction(it.id,"move",{delta:-1}));
+    if(it.status!=="running" && i<items.length-1) mk("▼","아래로 (영상에서 뒷 순서로)",()=>qAction(it.id,"move",{delta:1}));
     if(["queued","running"].includes(it.status)) mk("⏸","일시정지(현재 단계 후 중단)",()=>qAction(it.id,"hold"));
     if(["held","error","review","done"].includes(it.status)) mk("▶","이어서/다시 실행(완료 단계는 건너뜀)",()=>qAction(it.id,"resume"));
     if(it.status!=="running") mk("✕","목록에서 제거(파일은 유지)",()=>qAction(it.id,"remove"));
