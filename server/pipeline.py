@@ -17,6 +17,22 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
+# 서브프로세스 타임아웃(초) — 멈춘 ffmpeg가 워커를 영원히 막는 것 방지.
+FFPROBE_TIMEOUT = 60        # 프로브·인코더목록 등 짧은 조회
+FFMPEG_TIMEOUT = 3600       # 실제 인코딩(긴 영상도 1시간이면 충분)
+
+
+def _part_path(out_path):
+    """최종 경로 옆의 임시 경로(.part). 확장자 유지(ffmpeg가 컨테이너를 확장자로 판단)."""
+    p = Path(out_path)
+    return str(p.with_name(p.name + ".part" + p.suffix))
+
+
+def _finalize(tmp, out_path):
+    """성공한 임시 산출물을 최종 경로로 원자적 이동(같은 폴더 → os.replace는 원자적).
+    중간에 죽으면 .part만 남아 '완료(파일 존재)'로 오판되지 않는다."""
+    os.replace(tmp, str(out_path))
+
 # 리뷰 길이 선택지 (라벨 → 초). 기본 1분.
 TARGETS = {"1분": 60, "2분": 120, "5분": 300, "10분": 600}
 
@@ -199,7 +215,8 @@ def write_srt(entries, path, maxlen=25):
 def video_duration(path):
     try:
         out = subprocess.check_output(["ffprobe", "-v", "error", "-show_entries",
-                                       "format=duration", "-of", "csv=p=0", str(path)])
+                                       "format=duration", "-of", "csv=p=0", str(path)],
+                                      timeout=FFPROBE_TIMEOUT)
         return float(out.decode().strip())
     except Exception:
         return 0.0
@@ -922,7 +939,8 @@ def has_nvenc():
     if _NVENC is None:
         try:
             out = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"],
-                                 capture_output=True, text=True, encoding="utf-8", errors="replace")
+                                 capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                 timeout=FFPROBE_TIMEOUT)
             built = "h264_nvenc" in (out.stdout or "")
         except Exception:
             built = False
@@ -955,19 +973,23 @@ def cut_video(video, keep, out_path, log=print, progress=None):
     def run(cmd, base, dur):
         """base=이전까지 완료된 누적 초. 이 세그 out_time을 전체 진행률로 환산."""
         if progress is None:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, timeout=FFMPEG_TIMEOUT)
             return
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                 universal_newlines=True, encoding="utf-8", errors="replace")
-        for line in proc.stdout:
-            line = line.strip()
-            if line.startswith("out_time_us=") or line.startswith("out_time_ms="):
-                try:  # 둘 다 마이크로초로 출력되는 ffmpeg 빌드가 많음
-                    sec = min(dur, int(line.split("=", 1)[1]) / 1_000_000)
-                    progress(max(0.0, min(0.99, (base + sec) / total)))
-                except Exception:
-                    pass
-        proc.wait()
+        try:
+            for line in proc.stdout:
+                line = line.strip()
+                if line.startswith("out_time_us=") or line.startswith("out_time_ms="):
+                    try:  # 둘 다 마이크로초로 출력되는 ffmpeg 빌드가 많음
+                        sec = min(dur, int(line.split("=", 1)[1]) / 1_000_000)
+                        progress(max(0.0, min(0.99, (base + sec) / total)))
+                    except Exception:
+                        pass
+            proc.wait(timeout=FFMPEG_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            raise RuntimeError(f"ffmpeg 컷이 {FFMPEG_TIMEOUT}s를 넘겨 중단했습니다(멈춤 의심)")
         if proc.returncode != 0:
             raise subprocess.CalledProcessError(proc.returncode, cmd)
 
@@ -1006,8 +1028,10 @@ def cut_video(video, keep, out_path, log=print, progress=None):
         listf = td / "list.txt"
         listf.write_text("".join(f"file '{p.as_posix()}'\n" for p in segs), encoding="utf-8")
         log("  이어붙이기(무재인코딩 concat)...")
+        tmp = _part_path(out_path)
         subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(listf),
-                        "-c", "copy", str(out_path)], check=True)
+                        "-c", "copy", tmp], check=True, timeout=FFMPEG_TIMEOUT)
+        _finalize(tmp, out_path)
     if progress:
         progress(1.0)
     log(f"컷 완료: {out_path}")
@@ -1022,7 +1046,8 @@ def _kf_after(video, t, window=30.0):
             ["ffprobe", "-v", "error", "-select_streams", "v:0",
              "-show_entries", "packet=pts_time,flags", "-of", "csv=p=0",
              "-read_intervals", f"{a:.3f}%{t + w:.3f}", str(video)],
-            capture_output=True, text=True, encoding="utf-8", errors="replace")
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=FFPROBE_TIMEOUT)
         best = None
         for line in (r.stdout or "").splitlines():
             parts = line.strip().split(",")
@@ -1070,14 +1095,17 @@ def cut_video_copy(video, keep, out_path, log=print, progress=None):
                 ["ffmpeg", "-y", "-loglevel", "error",
                  "-ss", f"{a:.6f}", "-i", str(video), "-t", f"{b - a:.6f}",
                  "-c", "copy", "-avoid_negative_ts", "make_zero", str(seg)],
-                check=True)
+                check=True, timeout=FFMPEG_TIMEOUT)
             segs.append(seg)
             if progress:
                 progress(min(0.95, (i + 1) / (len(snapped) + 1)))
         listf = td / "list.txt"
         listf.write_text("".join(f"file '{p.as_posix()}'\n" for p in segs), encoding="utf-8")
+        tmp = _part_path(out_path)
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
-                        "-i", str(listf), "-c", "copy", str(out_path)], check=True)
+                        "-i", str(listf), "-c", "copy", tmp],
+                       check=True, timeout=FFMPEG_TIMEOUT)
+        _finalize(tmp, out_path)
     if progress:
         progress(1.0)
     log(f"무손실 컷 완료: {out_path}")
@@ -1174,7 +1202,8 @@ def tts_generate(base, text, profile_id, language, out_wav, seed=None, log=print
             raise RuntimeError(f"voicebox 응답에서 오디오를 못 찾음: keys={list(j.keys())}")
     # 표준 WAV(48k stereo)로 정규화
     subprocess.run(["ffmpeg", "-y", "-i", tmp, "-ar", "48000", "-ac", "2", out_wav],
-                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                   timeout=FFMPEG_TIMEOUT)
     if is_temp:
         try: Path(tmp).unlink()
         except Exception: pass
@@ -1186,7 +1215,7 @@ def audio_duration(path):
     try:
         out = subprocess.check_output(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-             "-of", "csv=p=0", str(path)])
+             "-of", "csv=p=0", str(path)], timeout=FFPROBE_TIMEOUT)
         return float(out.decode().strip())
     except Exception:
         return 0.0
@@ -1238,8 +1267,10 @@ def build_narration_wav(clips, out_wav, log=print, video_sec=None,
         chain += f"adelay={ms}|{ms}[a{i}];"
         filt.append(chain)
     mix = "".join(f"[a{i}]" for i in range(len(placed))) + f"amix=inputs={len(placed)}:normalize=0[a]"
+    _tmp = _part_path(out_wav)
     subprocess.run(["ffmpeg", "-y", *inputs, "-filter_complex", "".join(filt) + mix,
-                    "-map", "[a]", str(out_wav)], check=True)
+                    "-map", "[a]", _tmp], check=True, timeout=FFMPEG_TIMEOUT)
+    _finalize(_tmp, out_wav)
 
     end = cursor - min_gap
     msg = f"내레이션 WAV 합성 완료: {out_wav} ({len(placed)}문장, 끝 {end:.1f}s"
@@ -1337,9 +1368,12 @@ def mux_narration(video, narration_wav, out_video, narration_gain=1.0,
     else:
         fc = (f"[0:a]volume=0[oa];[1:a]volume={narration_gain}[na];"
               f"[oa][na]amix=inputs=2:duration=first:normalize=0[a]")
+    _tmp = _part_path(out_video)
     subprocess.run(["ffmpeg", "-y", "-i", str(video), "-i", str(narration_wav),
                     "-filter_complex", fc, "-map", "0:v", "-map", "[a]",
-                    "-c:v", "copy", "-c:a", "aac", str(out_video)], check=True)
+                    "-c:v", "copy", "-c:a", "aac", _tmp],
+                   check=True, timeout=FFMPEG_TIMEOUT)
+    _finalize(_tmp, out_video)
     extra = ""
     if mode == "duck":
         extra = f" · 해설 중 원음 {int(duck_level * 100)}%"
@@ -1351,7 +1385,8 @@ def mux_narration(video, narration_wav, out_video, narration_gain=1.0,
 def video_wh(path):
     try:
         out = subprocess.check_output(["ffprobe", "-v", "error", "-select_streams", "v:0",
-                                       "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", str(path)])
+                                       "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", str(path)],
+                                      timeout=FFPROBE_TIMEOUT)
         w, h = out.decode().strip().split("x")
         return int(w), int(h)
     except Exception:
@@ -1605,31 +1640,39 @@ def burn_subs(video, dialogue_srt, narration_srt, out_video, styles=None,
     # 원본 길이로 명시적으로 끊어준다.
     dur = video_duration(video) if fc else 0.0
 
+    tmp_out = _part_path(out_video)   # 중간에 죽어도 잘린 파일이 '완료'로 안 보이게
+
     def _cmd(use_gpu):
         enc = _vcodec_args(use_gpu)
         if fc:
             tail = (["-t", f"{dur:.3f}"] if dur > 0 else ["-shortest"])
             return ["ffmpeg", "-y", "-i", str(video)] + inputs + \
                    ["-filter_complex", fc, "-map", "[out]", "-map", "0:a?"] + enc + \
-                   ["-c:a", "copy"] + tail + [str(out_video)]
+                   ["-c:a", "copy"] + tail + [tmp_out]
         return ["ffmpeg", "-y", "-i", str(video), "-vf", f"ass={ass_path.name}"] + enc + \
-               ["-c:a", "copy", str(out_video)]
+               ["-c:a", "copy", tmp_out]
 
     gpu = has_nvenc()
     # libass 필터는 파일명만(작업폴더 cwd로) → 윈도우 드라이브 콜론 이스케이프 회피
     try:
         try:
-            subprocess.run(_cmd(gpu), cwd=str(ass_path.parent), check=True)
+            subprocess.run(_cmd(gpu), cwd=str(ass_path.parent), check=True, timeout=FFMPEG_TIMEOUT)
         except subprocess.CalledProcessError:
             if not gpu:
                 raise
             log("NVENC 실패 → libx264로 폴백")
-            subprocess.run(_cmd(False), cwd=str(ass_path.parent), check=True)
+            subprocess.run(_cmd(False), cwd=str(ass_path.parent), check=True, timeout=FFMPEG_TIMEOUT)
+        _finalize(tmp_out, out_video)
     finally:
         for tmp in ass_path.parent.glob("_bn_*.png"):   # 배너 중간 산출물 정리
             try:
                 tmp.unlink()
             except OSError:
                 pass
+        try:                                            # 실패로 남은 .part 제거
+            if Path(tmp_out).is_file() and str(tmp_out) != str(out_video):
+                Path(tmp_out).unlink()
+        except OSError:
+            pass
     log(f"자막 영상: {out_video}")
     return out_video

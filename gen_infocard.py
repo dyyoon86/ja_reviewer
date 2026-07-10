@@ -21,6 +21,9 @@ DB(jav_2026.db) 조회 → 인포카드 / 워터마크 / 액자프레임 오버�
 """
 import argparse, base64, colorsys, json, os, re, shutil, sqlite3, subprocess, sys, tempfile
 
+FFPROBE_TIMEOUT = 60      # 짧은 조회(인코더목록·프로브)
+FFMPEG_TIMEOUT = 1800     # 오버레이 인코딩(배너는 보통 짧음)
+
 HERE   = os.path.dirname(os.path.abspath(__file__))
 
 def _first_existing(*cands):
@@ -318,7 +321,7 @@ def pick_encoder(prefer=None):
     have = ""
     try:
         have = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"],
-                              capture_output=True, text=True).stdout
+                              capture_output=True, text=True, timeout=FFPROBE_TIMEOUT).stdout
     except Exception:
         pass
     # NVENC는 인코더 목록에 있어도 실제 GPU/드라이버 없으면 실패 → GPU 존재 확인
@@ -369,7 +372,7 @@ def compose(layers, out_mp4, video=None, hold=2.0, fade=0.5, demo_len=4.0,
                 "-r", "30", "-t", str(demo_len)] + enc_args + [out_mp4]
     log(f"[infocard] 인코더: {enc_name}")
     try:
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True, timeout=FFMPEG_TIMEOUT)
     except subprocess.CalledProcessError:
         # GPU 실패 시 CPU 폴백
         if enc_name.startswith("h264_nvenc"):
@@ -401,7 +404,8 @@ def probe_duration(path):
     try:
         out = subprocess.run(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-             "-of", "csv=p=0", str(path)], capture_output=True, text=True, check=True)
+             "-of", "csv=p=0", str(path)], capture_output=True, text=True, check=True,
+            timeout=FFPROBE_TIMEOUT)
         return float(out.stdout.strip())
     except Exception:
         return None
@@ -449,7 +453,7 @@ def compose_alpha(layers, out_path, duration=6.0, hold=2.0, fade=0.5, fps=30,
     cmd += ["-filter_complex", fc, "-map", "[out]",
             "-r", str(fps), "-t", str(dur)] + enc_args + [out_path]
     log(f"[infocard] 투명 오버레이 영상({enc_name}, {dur:.1f}s) 인코딩 중…")
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True, timeout=FFMPEG_TIMEOUT)
     return out_path
 
 # ────────────────────────────── 미리보기 스틸(PIL, 인코딩 없음) ──────────────────────────────
