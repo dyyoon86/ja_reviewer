@@ -46,11 +46,16 @@ if not (CHROME and os.path.exists(CHROME)):
     CHROME = None
 
 # ────────────────────────────── DB 조회 ──────────────────────────────
+class MetaNotFound(Exception):
+    """품번이 DB(works)에 없음. 라이브러리로 쓰이므로 SystemExit(BaseException)을 던지면
+    호출측의 except Exception 을 뚫고 나가 큐 워커까지 죽는다."""
+
+
 def fetch_meta(code: str) -> dict:
     db = sqlite3.connect(DB); db.row_factory = sqlite3.Row
     w = db.execute("SELECT * FROM works WHERE code=?", (code,)).fetchone()
     if not w:
-        raise SystemExit(f"[gen_infocard] '{code}' 를 works 테이블에서 찾지 못했습니다.")
+        raise MetaNotFound(f"[gen_infocard] '{code}' 를 works 테이블에서 찾지 못했습니다.")
     w = dict(w)
     a = None
     if w.get("actress_ja"):
@@ -545,7 +550,10 @@ def main():
     ap.add_argument("--fps", type=int, default=30, help="오버레이 영상 fps")
     args = ap.parse_args()
 
-    m = fetch_meta(args.code)
+    try:
+        m = fetch_meta(args.code)
+    except MetaNotFound as e:
+        raise SystemExit(str(e))     # CLI에서는 깔끔히 종료
     print(f"[gen_infocard] {m['code']} / {m['actress']} / {m['title']}")
 
     outdir = args.outdir or os.path.join(tempfile.gettempdir(), f"infocard_{args.code}")

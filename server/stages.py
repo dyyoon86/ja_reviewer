@@ -260,12 +260,17 @@ def stage_banner(c, code, em, hold=2.0, preview=True):
     """④' 배너 — 품번 → DB 조회 → 투명 PNG 3장(프레임·인포카드·워터마크) + 미리보기 스틸.
     인코딩 없음(수초). ⑤ 굽기가 이 레이어를 그대로 합성한다."""
     import sys
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    root = str(Path(__file__).resolve().parent.parent)
+    if root not in sys.path:
+        sys.path.insert(0, root)
     import gen_infocard as GIC
     icdir = Path(c["out_dir"]) / f"_infocard_{code}"
     em.step(1, 1, "배너 레이어 생성(인코딩 없음)")
-    r = GIC.generate(code, outdir=str(icdir), hold=hold, assets_only=True,
-                     preview_anim=preview, log=em.log)
+    try:
+        r = GIC.generate(code, outdir=str(icdir), hold=hold, assets_only=True,
+                         preview_anim=preview, log=em.log)
+    except GIC.MetaNotFound as e:
+        raise RuntimeError(f"배너 생성 불가 — {e}. DB(works)에 품번이 있어야 합니다.")
     a = r["assets"]
     em.file("프레임(상시)", a["frame"])
     em.file("인포카드", a["info"])
