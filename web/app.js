@@ -940,8 +940,18 @@ function pvApply(t){
   $("#pvClock").textContent = t.toFixed(2)+"s";
 }
 
+// 미리보기 자막 스타일 — ④에서 편집 중인 값을 우선 쓴다(저장 전에도 바로 확인).
+// UI가 아직 안 채워졌으면 서버가 준 값으로 폴백.
+function pvStyle(key){
+  try{
+    const live=allStyles();
+    if(live && live[key] && live[key].font) return live[key];
+  }catch(e){}
+  return (pvData.styles||{})[key] || {};
+}
+
 function pvSubHtml(s){
-  const st=(pvData.styles||{})[s.style] || {};
+  const st=pvStyle(s.style);
   const W=$("#pvWrap").clientWidth||960, k=W/1920;   // 1080p 기준 → 표시 배율
   const size=Math.max(10,(st.size||38)*k), mg=(st.margin||40)*k;
   const ol=Math.max(1,(st.outline||2)*k);
@@ -951,8 +961,11 @@ function pvSubHtml(s){
              : st.h==="left"  ? `left:${mg}px;text-align:left`
              : `left:0;right:0;text-align:center`;
   const shadow=`-${ol}px -${ol}px 0 ${oc}, ${ol}px -${ol}px 0 ${oc}, -${ol}px ${ol}px 0 ${oc}, ${ol}px ${ol}px 0 ${oc}`;
+  // 설정한 폰트를 그대로 쓴다(하드코딩 금지). 그 폰트가 없는 OS에서는 뒤 후보로 폴백.
+  // style="..." 안에 들어가므로 큰따옴표를 쓰면 속성이 끊긴다 → 작은따옴표로 감싼다.
+  const fam=`'${(st.font||'Malgun Gothic').replace(/['"\\]/g,'')}','Malgun Gothic','Noto Sans KR',sans-serif`;
   return `<div style="position:absolute;${vpos};${hpos};padding:0 ${mg}px;`+
-         `font-family:'Malgun Gothic',sans-serif;font-weight:${st.bold?700:400};`+
+         `font-family:${fam};font-weight:${st.bold?700:400};`+
          `font-size:${size}px;line-height:1.25;color:${col};text-shadow:${shadow};`+
          `white-space:pre-wrap">${(s.text||"").replace(/</g,"&lt;")}</div>`;
 }
@@ -990,4 +1003,19 @@ $("#btnPreview").onclick=()=>{
 ["pvShowBanner","pvShowWm","pvShowSubs","pvHold"].forEach(id=>{
   const el=document.getElementById(id);
   if(el) el.addEventListener("input",()=>{ const v=$("#pvVideo"); if(v) pvApply(v.currentTime); });
+});
+
+// ④ 자막 스타일(폰트·크기·색·외곽선·위치)을 만지면 미리보기에 즉시 반영
+// select/checkbox는 input이 안 뜨는 브라우저가 있어 change도 함께 건다.
+["dlg","dlm","nar","emp","inf"].forEach(p=>{
+  ["Font","Size","Bold","Color","OutColor","Outline","V","H","Margin"].forEach(f=>{
+    const el=document.getElementById(p+f);
+    if(!el) return;
+    const repaint=()=>{
+      const v=$("#pvVideo");
+      if(v && pvData && $("#pvStage").style.display!=="none") pvApply(v.currentTime);
+    };
+    el.addEventListener("input", repaint);
+    el.addEventListener("change", repaint);
+  });
 });
