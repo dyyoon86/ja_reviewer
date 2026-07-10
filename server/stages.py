@@ -231,8 +231,31 @@ def stage_tts(c, code, base, profile, language, seed, mux, em):
     return out
 
 
-def stage_burn(c, code, styles, em, source=None):
-    """⑤ 자막 굽기(하드섭) — voiced 우선 → final. {code}_final_subbed.mp4 생성."""
+def banner_layers(c, code, em=None, generate=True):
+    """배너 오버레이 PNG 3장 경로. 없으면 즉석 생성(인코딩 없음, 수초). 실패 시 None."""
+    icdir = Path(c["out_dir"]) / f"_infocard_{code}"
+    names = {"frame": f"{code}_프레임.png", "info": f"{code}_인포카드.png",
+             "wm": f"{code}_워터마크.png"}
+    if not all((icdir / n).is_file() for n in names.values()):
+        if not generate:
+            return None
+        try:
+            import sys
+            sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+            import gen_infocard as GIC
+            GIC.generate(code, outdir=str(icdir), assets_only=True, preview_anim=False,
+                         log=(em.log if em else print))
+        except Exception as e:
+            if em:
+                em.log(f"※ 배너 레이어 생성 실패({e}) → 자막만 굽습니다")
+            return None
+    out = {k: str(icdir / n) for k, n in names.items() if (icdir / n).is_file()}
+    return out or None
+
+
+def stage_burn(c, code, styles, em, source=None, banner=True):
+    """⑤ 자막 굽기(하드섭) — voiced 우선 → final. {code}_final_subbed.mp4 생성.
+    banner=True면 프레임·인포카드·워터마크를 같은 인코딩 1패스에서 함께 굽는다."""
     outdir = work_dir(c, code)
     voiced = outdir / f"{code}_final_voiced.mp4"
     final = outdir / f"{code}_final.mp4"
@@ -249,9 +272,11 @@ def stage_burn(c, code, styles, em, source=None):
     njson = outdir / f"{code}_내레이션.json"     # 유형(style) 포함 → 타입별 스타일
     djson = outdir / f"{code}_대사.json"          # 화자(speaker) 포함 → 여/남 색 구분
     out = str(outdir / f"{code}_final_subbed.mp4")
-    em.step(1, 1, "자막 굽기(ffmpeg)")
+    bl = banner_layers(c, code, em) if banner else None
+    em.step(1, 1, "자막 굽기(ffmpeg)" + (" + 배너·워터마크" if bl else ""))
     P.burn_subs(str(src), str(dsrt), str(nsrt), out, styles,
                 str(njson) if njson.is_file() else None,
-                str(djson) if djson.is_file() else None, em.log)
+                str(djson) if djson.is_file() else None, em.log,
+                banner=bl)
     em.file("자막 입힌 영상", out)
-    return {"mode": "burn", "subbed": out, "source": str(src)}
+    return {"mode": "burn", "subbed": out, "source": str(src), "banner": bool(bl)}

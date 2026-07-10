@@ -358,7 +358,11 @@
         </div>
       </details>
 
-      <div class="hint">템플릿만 골라도 바로 사용 가능. LLM이 내레이션을 <b>기본/강조/정보</b>로 분류 → 타입별 스타일 적용. _final_voiced(있으면)/_final.mp4에 박아 <code>_final_subbed.mp4</code> 생성. 폰트는 윈도우 설치명(맑은 고딕 = Malgun Gothic).</div>
+      <div class="formrow">
+        <label class="muted"><input type="checkbox" id="burnBanner" checked style="height:auto;vertical-align:middle"> <b>배너·워터마크도 같이 굽기</b> — 인포카드(흐림→선명→흐림) + 워터마크(슬라이드) 모션 포함</label>
+      </div>
+      <div class="hint">템플릿만 골라도 바로 사용 가능. LLM이 내레이션을 <b>기본/강조/정보</b>로 분류 → 타입별 스타일 적용. _final_voiced(있으면)/_final.mp4에 박아 <code>_final_subbed.mp4</code> 생성. 폰트는 윈도우 설치명(맑은 고딕 = Malgun Gothic).<br>
+      배너를 같이 구우면 <b>같은 인코딩 1패스</b>에서 합성돼 추가 비용이 적습니다(따로 굽는 2패스는 인코딩 2번). 타이밍은 <b>▶ 렌더 전 미리보기</b>와 동일 — 미리 확인하고 구우세요. 배너 레이어가 없으면 자동 생성.</div>
       <div class="actions">
         <button class="go spacer" id="btnBurn">● 자막 영상 만들기</button>
       </div>

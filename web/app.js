@@ -685,13 +685,14 @@ $("#btnTplSave").onclick=()=>{
 };
 $("#btnBurn").onclick=()=>{
   const code=curCode(); if(!code){ log("품번을 입력하세요","warn"); return; }
-  log("── 자막 입히기 시작 ──");
+  const banner=$("#burnBanner") ? $("#burnBanner").checked : true;
+  log("── 자막 입히기 시작 ──"+(banner?" (배너·워터마크 동시)":""));
   fetch("/burn",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    code, styles:allStyles()
+    code, styles:allStyles(), banner
   })}).then(r=>r.json()).then(j=>runJob(j.job,(r)=>{
     $("#resultCard").style.display="block";
-    $("#result").innerHTML=`<div class="ok">✔ 자막 입힌 영상</div><div>${r.subbed}</div>`;
-    log("✔ 자막 영상 완료","ok");
+    $("#result").innerHTML=`<div class="ok">✔ 자막${r.banner?"·배너":""} 입힌 영상</div><div>${r.subbed}</div>`;
+    log("✔ 자막 영상 완료"+(r.banner?" (배너 포함)":""),"ok");
     collapseAcc("#btnBurn");   // ④ 완료 → 접기
   }));
 };

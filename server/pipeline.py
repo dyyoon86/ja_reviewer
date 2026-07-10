@@ -11,6 +11,7 @@ log 콜백은 진행상황 출력용(기본 print). 서버에선 SSE 큐로 연�
 import os
 import re
 import json
+import shutil
 import subprocess
 import tempfile
 import urllib.request
@@ -641,15 +642,20 @@ def retime(entries, keep, snap=False, default_dur=4.0):
 _NVENC = None  # None=미확인, True/False=캐시
 
 def has_nvenc():
-    """ffmpeg에 h264_nvenc(NVIDIA GPU 인코더)가 있으면 True. 1회 확인 후 캐시."""
+    """h264_nvenc를 실제로 쓸 수 있으면 True. 1회 확인 후 캐시.
+    ffmpeg 빌드에 인코더가 있어도 NVIDIA 드라이버/GPU가 없으면 런타임에 실패하므로
+    GPU 존재까지 확인한다(GPU 없는 서버에서 헛된 시도·폴백 비용 방지)."""
     global _NVENC
     if _NVENC is None:
         try:
             out = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"],
                                  capture_output=True, text=True, encoding="utf-8", errors="replace")
-            _NVENC = "h264_nvenc" in (out.stdout or "")
+            built = "h264_nvenc" in (out.stdout or "")
         except Exception:
-            _NVENC = False
+            built = False
+        gpu = (os.path.exists("/proc/driver/nvidia") or shutil.which("nvidia-smi") is not None
+               or os.name == "nt")   # 윈도우(RTX 렌더 머신)는 시도해 본다
+        _NVENC = bool(built and gpu)
     return _NVENC
 
 
@@ -1023,8 +1029,94 @@ def build_ass(dialogue, narration, out_ass, width, height, styles=None):
     return out_ass
 
 
+"""배너 모션 기본값 — 브라우저 미리보기(/preview/data)와 반드시 같은 값을 쓴다."""
+BANNER_ANIM = {"hold": 2.0, "fade": 0.5, "blur": 16, "wm_start": 2.1, "wm_slide": 40}
+
+
+def _prep_banner_layers(banner, workdir, blur=16):
+    """레이어 PNG를 굽기용으로 준비 — 내용 크기로 crop(오버레이 비용↓) + 인포카드 블러본 1회 생성.
+    ffmpeg에서 gblur을 매 프레임 돌리면 수십 배 느려지므로 블러는 여기서 미리 굽는다.
+    반환: {키: (경로, x, y)}  x,y = 원본 캔버스에서의 위치"""
+    try:
+        from PIL import Image, ImageFilter
+    except Exception:
+        return {}
+    out = {}
+    pad = int(blur * 2.5)      # 블러가 가장자리에서 잘리지 않도록 여유
+    for k in ("frame", "info", "wm"):
+        p = banner.get(k)
+        if not p or not Path(p).is_file():
+            continue
+        im = Image.open(p).convert("RGBA")
+        bb = im.getbbox()
+        if not bb:
+            continue
+        if k == "info":        # 블러 번짐 여유를 두고 자른다
+            bb = (max(0, bb[0] - pad), max(0, bb[1] - pad),
+                  min(im.width, bb[2] + pad), min(im.height, bb[3] + pad))
+        crop = im.crop(bb)
+        cp = Path(workdir) / f"_bn_{k}.png"
+        crop.save(cp)
+        out[k] = (cp.name, bb[0], bb[1])
+        if k == "info":
+            bp = Path(workdir) / "_bn_info_blur.png"
+            crop.filter(ImageFilter.GaussianBlur(blur)).save(bp)
+            out["info_blur"] = (bp.name, bb[0], bb[1])
+    return out
+
+
+def _banner_filter(prep, anim):
+    """배너 오버레이 filter_complex 조각. 미리보기와 동일 타이밍.
+    인포카드: 페이드인(흐림→선명) → hold → 페이드아웃(선명→흐림)  워터마크: 페이드인+슬라이드.
+    · blend=all_expr(픽셀별 수식)은 매우 느려서, 미리 구운 블러본과의 크로스디졸브로 대체
+    · 애니메이션이 끝난 뒤엔 enable로 오버레이 자체를 꺼서 남은 구간 비용을 없앤다"""
+    hold, fade = float(anim.get("hold", 2.0)), float(anim.get("fade", 0.5))
+    wm_st, slide = float(anim.get("wm_start", 2.1)), float(anim.get("wm_slide", 40))
+    end = hold + fade + 0.1
+    inputs, fc, idx, last = [], "", 1, "0:v"
+    order = [k for k in ("frame", "info_blur", "info", "wm") if k in prep]
+    labels = {}
+    for k in order:
+        name, x, y = prep[k]
+        inputs += ["-loop", "1", "-i", name]
+        labels[k] = (idx, x, y)
+        idx += 1
+    # 레이어별 알파 애니메이션
+    if "info" in labels:
+        fc += (f"[{labels['info'][0]}]fade=t=in:st=0:d=0.4:alpha=1,"
+               f"fade=t=out:st={hold}:d={fade}:alpha=1[ic];")
+    if "info_blur" in labels:   # 등장 초반·퇴장 후반에만 겹쳐 흐림 효과를 만든다
+        fc += (f"[{labels['info_blur'][0]}]fade=t=out:st=0:d={fade}:alpha=1,"
+               f"fade=t=in:st={hold}:d={fade}:alpha=1,"
+               f"fade=t=out:st={hold + fade}:d=0.1:alpha=1[icb];")
+    if "wm" in labels:
+        fc += f"[{labels['wm'][0]}]fade=t=in:st={wm_st}:d={fade}:alpha=1[wm];"
+    # 합성 — 프레임 → 흐린 인포카드 → 선명 인포카드 → 워터마크
+    n = 0
+    if "frame" in labels:
+        _, x, y = labels["frame"]
+        n += 1
+        fc += f"[{last}][{labels['frame'][0]}]overlay={x}:{y}[b{n}];"; last = f"b{n}"
+    for key, lbl in (("info_blur", "icb"), ("info", "ic")):
+        if key in labels:
+            _, x, y = labels[key]
+            n += 1
+            fc += f"[{last}][{lbl}]overlay={x}:{y}:enable='lt(t,{end})'[b{n}];"; last = f"b{n}"
+    if "wm" in labels:
+        _, x, y = labels["wm"]
+        n += 1
+        sp = slide / max(fade, 0.01)     # 슬라이드 속도(px/s)
+        fc += (f"[{last}][wm]overlay=x={x}:"
+               f"y='{y}+min(0,-{slide}+(t-{wm_st})*{sp})'[b{n}];"); last = f"b{n}"
+    return inputs, fc, last
+
+
 def burn_subs(video, dialogue_srt, narration_srt, out_video, styles=None,
-              narration_json=None, dialogue_json=None, log=print):
+              narration_json=None, dialogue_json=None, log=print,
+              banner=None, banner_anim=None):
+    """자막(+선택: 배너·워터마크)을 영상에 굽는다.
+    banner={'frame':png,'info':png,'wm':png} 를 주면 자막과 같은 인코딩 1패스에서
+    함께 합성한다(따로 굽는 2패스 대비 인코딩 1회 절약)."""
     w, h = video_wh(video)
     if dialogue_json and Path(dialogue_json).is_file():        # 화자(speaker) 포함 대사
         dd = json.loads(Path(dialogue_json).read_text(encoding="utf-8"))
@@ -1041,8 +1133,47 @@ def burn_subs(video, dialogue_srt, narration_srt, out_video, styles=None,
     ass_path = Path(out_video).with_suffix(".ass")
     build_ass(dlg, nar, str(ass_path), w, h, styles)
     log(f"자막 굽기 (ffmpeg ass, {w}x{h}, 대사 {len(dlg)} · 내레이션 {len(nar)})...")
+
+    inputs, fc, last = [], "", "0:v"
+    if banner:
+        prep = _prep_banner_layers(banner, ass_path.parent, (banner_anim or {}).get("blur", BANNER_ANIM["blur"]))
+        if prep:
+            inputs, fc, last = _banner_filter(prep, banner_anim or BANNER_ANIM)
+            log(f"배너 동시 굽기: {', '.join(prep)} (재인코딩 1패스 — 추가 비용 적음)")
+
+    if fc:
+        # 자막(ass)은 배너 오버레이 뒤에 얹는다 — 배너가 자막을 가리지 않게
+        fc += f"[{last}]ass={ass_path.name}[out]"
+
+    # -loop 1 로 넣은 배너 PNG는 무한 스트림이라 원본이 끝나도 인코딩이 계속된다.
+    # 원본 길이로 명시적으로 끊어준다.
+    dur = video_duration(video) if fc else 0.0
+
+    def _cmd(use_gpu):
+        enc = _vcodec_args(use_gpu)
+        if fc:
+            tail = (["-t", f"{dur:.3f}"] if dur > 0 else ["-shortest"])
+            return ["ffmpeg", "-y", "-i", str(video)] + inputs + \
+                   ["-filter_complex", fc, "-map", "[out]", "-map", "0:a?"] + enc + \
+                   ["-c:a", "copy"] + tail + [str(out_video)]
+        return ["ffmpeg", "-y", "-i", str(video), "-vf", f"ass={ass_path.name}"] + enc + \
+               ["-c:a", "copy", str(out_video)]
+
+    gpu = has_nvenc()
     # libass 필터는 파일명만(작업폴더 cwd로) → 윈도우 드라이브 콜론 이스케이프 회피
-    subprocess.run(["ffmpeg", "-y", "-i", str(video), "-vf", f"ass={ass_path.name}",
-                    "-c:a", "copy", str(out_video)], cwd=str(ass_path.parent), check=True)
+    try:
+        try:
+            subprocess.run(_cmd(gpu), cwd=str(ass_path.parent), check=True)
+        except subprocess.CalledProcessError:
+            if not gpu:
+                raise
+            log("NVENC 실패 → libx264로 폴백")
+            subprocess.run(_cmd(False), cwd=str(ass_path.parent), check=True)
+    finally:
+        for tmp in ass_path.parent.glob("_bn_*.png"):   # 배너 중간 산출물 정리
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
     log(f"자막 영상: {out_video}")
     return out_video
