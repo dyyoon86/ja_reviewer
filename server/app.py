@@ -280,6 +280,16 @@ def image(path: str):
     return FileResponse(str(p), media_type=ctype)
 
 
+@app.get("/download")
+def download(path: str):
+    """임의 산출물 다운로드(첨부). 브라우저가 재생 못 하는 .mov 오버레이 등."""
+    p = Path(path)
+    if not p.is_file():
+        raise HTTPException(404, "파일 없음")
+    return FileResponse(str(p), media_type="application/octet-stream",
+                        filename=p.name)
+
+
 # ─── 메타 ────────────────────────────────────────────────────────────────────
 @app.get("/meta/{code}")
 def meta(code: str):
@@ -730,6 +740,11 @@ async def infocard(req: Request):
     # 기본: 인코딩 없이 오버레이 소스(PNG)+미리보기만. encode=True면 mp4까지(느림).
     do_encode = bool(body.get("encode", False))
     src = body.get("source") or None
+    # 가운데 투명 오버레이 영상(.mov) — 번인 대신 편집기 상위 트랙에 얹는 용도
+    do_alpha = bool(body.get("alpha", False))
+    alpha_format = (body.get("alpha_format") or "qtrle").strip()
+    alpha_fps = int(body.get("fps", 30) or 30)
+    alpha_dur = body.get("alpha_duration")
     outdir = Path(c["out_dir"])
 
     def work():
@@ -737,10 +752,14 @@ async def infocard(req: Request):
             outdir.mkdir(parents=True, exist_ok=True)
             jstep(jid, 1, 2, "오버레이 소스 생성(인코딩 없음)")
             out = str(outdir / (f"{code}_banner.mp4" if src else f"{code}_infocard_demo.mp4"))
+            # 오버레이 길이: 지정값 → 대상 영상 길이 → generate()의 기본(hold+4초)
+            dur = float(alpha_dur) if alpha_dur else (GIC.probe_duration(src) if src else None)
             r = GIC.generate(code, video=src if do_encode else None,
                              out=out if do_encode else None, hold=hold,
                              outdir=str(outdir / f"_infocard_{code}"),
                              assets_only=not do_encode,
+                             alpha=do_alpha, alpha_format=alpha_format,
+                             alpha_duration=dur, fps=alpha_fps,
                              log=lambda m: jlog(jid, m))
             jstep(jid, 2, 2, "완료")
             a = r["assets"]
@@ -751,11 +770,14 @@ async def infocard(req: Request):
             jfile(jid, "미리보기·워터마크", r["preview_wm"])
             if r.get("preview_anim"):
                 jfile(jid, "움직이는 미리보기(4초)", r["preview_anim"])
+            if r.get("overlay"):
+                jfile(jid, "투명 오버레이 영상(.mov)", r["overlay"])
             if r.get("out"):
                 jfile(jid, "인포배너 영상", r["out"])
             jdone(jid, {"mode": "infocard", "assets": a,
                         "preview_info": r["preview_info"], "preview_wm": r["preview_wm"],
                         "preview_anim": r.get("preview_anim") or "",
+                        "overlay": r.get("overlay") or "",
                         "out": r.get("out") or "", "encoded": do_encode,
                         "meta": {"code": r["meta"]["code"], "actress": r["meta"]["actress"],
                                  "title": r["meta"]["title"]}})

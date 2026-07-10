@@ -376,6 +376,18 @@
         <span class="fld"><span class="lbl">인포카드 노출(초)</span><input id="icHold" type="number" step="0.5" value="2" style="width:64px"></span>
       </div>
       <div class="formrow">
+        <label class="muted"><input type="checkbox" id="icAlpha" checked style="height:auto;vertical-align:middle"> <b>가운데 투명한 오버레이 영상(.mov) 생성</b> — 프리미어/캡컷 상위 트랙에 얹기(번인 불필요)</label>
+      </div>
+      <div class="formrow" id="icAlphaRow">
+        <span class="fld"><span class="lbl">코덱</span>
+          <select id="icAlphaFormat" style="width:210px">
+            <option value="qtrle" selected>QuickTime Animation (가벼움·권장)</option>
+            <option value="mov">ProRes 4444 (호환성↑·용량 큼)</option>
+          </select></span>
+        <span class="fld"><span class="lbl">길이(초)</span><input id="icAlphaDur" type="number" step="1" placeholder="대상 영상 길이" style="width:110px"></span>
+        <span class="fld"><span class="lbl">fps</span><input id="icAlphaFps" type="number" step="1" value="30" style="width:64px"></span>
+      </div>
+      <div class="formrow">
         <label class="muted"><input type="checkbox" id="icEncode" style="height:auto;vertical-align:middle"> 영상에 직접 굽기(재인코딩·느림) — 평소엔 끄세요</label>
       </div>
       <div class="formrow" id="icSrcRow" style="display:none">
@@ -383,7 +395,7 @@
           <input id="icSource" placeholder="비우면 _final_subbed→voiced→final 자동" style="width:100%"></span>
         <label class="muted"><input type="checkbox" id="icUseCur" checked style="height:auto;vertical-align:middle"> 현재 영상</label>
       </div>
-      <div class="hint">기본은 <b>인코딩 없이</b> 오버레이 <b>투명 PNG 3장</b>(프레임·인포카드·워터마크) + 미리보기만 생성 → 편집 프로그램 타임라인에 얹어 쓰세요(재인코딩 0초). DB에서 제목·배우·3사이즈·평점·조회수·발매일 자동 조회. 굳이 영상에 굽고 싶을 때만 위 체크(길면 오래 걸림 → 컷된 하이라이트에만 권장).</div>
+      <div class="hint">기본은 <b>인코딩 없이</b> 오버레이 <b>투명 PNG 3장</b>(프레임·인포카드·워터마크) + 미리보기 + <b>투명 오버레이 영상(.mov)</b> 생성 → 편집 프로그램 타임라인 <b>상위 트랙</b>에 얹어 쓰세요(원본 재인코딩 0초). 가운데가 투명이라 아래 영상이 그대로 비칩니다. 길이를 비우면 <b>대상 영상 길이</b>에 맞춰 뽑습니다(없으면 노출시간+4초). ⚠ .mov는 <b>폰·브라우저에서 재생 안 되는 게 정상</b>(편집용 코덱) — PC로 받아 편집기에서 여세요. DB에서 제목·배우·3사이즈·평점·조회수·발매일 자동 조회. 굳이 영상에 굽고 싶을 때만 아래 체크(길면 오래 걸림).</div>
       <div class="actions">
         <button class="go spacer" id="btnInfocard">● 인포배너 생성</button>
       </div>

@@ -709,9 +709,14 @@ $("#btnInfocard").onclick=()=>{
   const encode=$("#icEncode") && $("#icEncode").checked;
   const useCur=$("#icUseCur") && $("#icUseCur").checked;
   const source=($("#icSource").value||"").trim() || (useCur && videoPath ? videoPath : "");
-  log("── 인포배너 소스 생성 시작 ──"+(encode?(source?` (영상 오버레이 인코딩: ${source})`:" (데모 인코딩)"):" (PNG만·인코딩 없음)"));
+  const alpha=$("#icAlpha") && $("#icAlpha").checked;
+  const alpha_format=($("#icAlphaFormat") && $("#icAlphaFormat").value) || "qtrle";
+  const alpha_duration=parseFloat($("#icAlphaDur") && $("#icAlphaDur").value)||null;
+  const fps=parseInt($("#icAlphaFps") && $("#icAlphaFps").value)||30;
+  log("── 인포배너 소스 생성 시작 ──"+(encode?(source?` (영상 오버레이 인코딩: ${source})`:" (데모 인코딩)"):" (PNG만·인코딩 없음)")
+      +(alpha?` + 투명 오버레이 영상(${alpha_format})`:""));
   fetch("/infocard",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    code, hold, source, encode
+    code, hold, source, encode, alpha, alpha_format, alpha_duration, fps
   })}).then(r=>r.json()).then(j=>{
     if(!j.job){ log("✖ 시작 실패: "+(j.detail||JSON.stringify(j)),"warn"); return; }
     runJob(j.job,(r)=>{
@@ -734,10 +739,16 @@ $("#btnInfocard").onclick=()=>{
         `<div>· 프레임(상시): ${a.frame||''}</div>`+
         `<div>· 인포카드(앞 ${hold}초): ${a.info||''}</div>`+
         `<div>· 워터마크(상시): ${a.wm||''}</div>`;
+      if(r.overlay) html+=
+        `<div class="muted" style="margin:10px 0 2px">▼ 가운데 투명 오버레이 영상 — 편집기 <b>상위 트랙</b>에 얹으세요</div>`+
+        `<div>· ${r.overlay}</div>`+
+        `<div style="margin-top:4px"><a href="/download?path=${encodeURIComponent(r.overlay)}" download>⬇ 오버레이 .mov 다운로드</a></div>`+
+        `<div class="muted" style="margin-top:2px">※ 브라우저·폰에서 재생 안 되는 게 정상입니다(편집용 코덱). 프리미어/캡컷에서 여세요.</div>`;
       if(r.out) html+=`<div style="margin-top:6px">영상: ${r.out}</div>`+
         `<video src="/video/stream?path=${encodeURIComponent(r.out)}" controls autoplay muted loop style="width:100%;max-width:640px;border-radius:8px;margin-top:6px;background:#000"></video>`;
       $("#result").innerHTML=html;
-      log("✔ 완료 — PNG를 편집 타임라인에 얹으세요(재인코딩 없음)","ok");
+      log(r.overlay?"✔ 완료 — 투명 오버레이 .mov를 편집기 상위 트랙에 얹으세요(원본 재인코딩 없음)"
+                   :"✔ 완료 — PNG를 편집 타임라인에 얹으세요(재인코딩 없음)","ok");
       collapseAcc("#btnInfocard");   // ⑤ 완료 → 접기
     });
   }).catch(e=>log("✖ 오류: "+e,"warn"));
