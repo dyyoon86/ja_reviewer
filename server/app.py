@@ -747,6 +747,79 @@ async def burn(req: Request):
     return {"job": jid}
 
 
+# ─── 렌더 전 미리보기 (브라우저에서 실시간 합성 — 인코딩 0) ──────────────────
+# 배너·워터마크·자막을 <video> 위에 얹어 재생바로 스크럽하며 확인한다.
+# 굽기(burn_subs)와 같은 타이밍 규칙을 쓰므로 결과가 그대로 예측된다.
+PREVIEW_ANIM = {"hold": 2.0, "fade": 0.5, "blur": 16, "wm_start": 2.1, "wm_slide": 40}
+
+_NAR_STYLE_KEY = {"기본": "narration", "일반": "narration",
+                  "강조": "emphasis", "정보": "info",
+                  "normal": "narration", "emphasis": "emphasis", "info": "info"}
+
+
+@app.get("/preview/data")
+def preview_data(code: str, source: str = ""):
+    """미리보기에 필요한 것 한 번에: 영상·레이어 PNG·자막(시간+스타일키)·애니 파라미터."""
+    c = load_cfg()
+    code = (code or "").strip()
+    if not code:
+        raise HTTPException(400, "품번(code)이 필요합니다.")
+    outdir = Path(c["out_dir"]) / code
+    # 대상 영상: 지정 → 음성입힘 → 최종컷
+    src = Path(source) if source else None
+    if not (src and src.is_file()):
+        for cand in (outdir / f"{code}_final_voiced.mp4", outdir / f"{code}_final.mp4"):
+            if cand.is_file():
+                src = cand
+                break
+    if not (src and src.is_file()):
+        raise HTTPException(404, f"미리볼 영상이 없습니다({code}). 먼저 ②AI 처리로 컷을 만드세요.")
+
+    # 자막 — JSON(화자/유형 포함) 우선, 없으면 SRT
+    subs = []
+    djson, dsrt = outdir / f"{code}_대사.json", outdir / f"{code}_대사.srt"
+    njson, nsrt = outdir / f"{code}_내레이션.json", outdir / f"{code}_내레이션.srt"
+    if djson.is_file():
+        for d in json.loads(djson.read_text(encoding="utf-8")):
+            key = "dialogue_m" if d.get("speaker") == "남" else "dialogue"
+            subs.append({"start": float(d["start"]), "end": float(d["end"]),
+                         "text": d.get("text") or d.get("ko") or "", "style": key})
+    elif dsrt.is_file():
+        subs += [{"start": a, "end": b, "text": t, "style": "dialogue"}
+                 for a, b, t in P.srt_parse(dsrt)]
+    if njson.is_file():
+        for d in json.loads(njson.read_text(encoding="utf-8")):
+            key = _NAR_STYLE_KEY.get(d.get("style", "기본"), "narration")
+            subs.append({"start": float(d["start"]), "end": float(d["end"]),
+                         "text": d.get("text") or "", "style": key})
+    elif nsrt.is_file():
+        subs += [{"start": a, "end": b, "text": t, "style": "narration"}
+                 for a, b, t in P.srt_parse(nsrt)]
+    subs.sort(key=lambda x: x["start"])
+
+    # 배너 레이어 PNG — 없으면 즉석 생성(인코딩 없음, 수초)
+    layers = {}
+    if GIC is not None:
+        try:
+            icdir = Path(c["out_dir"]) / f"_infocard_{code}"
+            names = {"frame": f"{code}_프레임.png", "info": f"{code}_인포카드.png",
+                     "wm": f"{code}_워터마크.png"}
+            if not all((icdir / n).is_file() for n in names.values()):
+                GIC.generate(code, outdir=str(icdir), assets_only=True, preview_anim=False)
+            for k, n in names.items():
+                p = icdir / n
+                if p.is_file():
+                    layers[k] = str(p)
+        except Exception as e:
+            layers = {"error": str(e)}
+
+    return {"code": code, "video": str(src),
+            "duration": P.video_duration(str(src)),
+            "layers": layers, "subs": subs,
+            "styles": c.get("sub_styles") or P.STYLE_DEFAULT,
+            "anim": PREVIEW_ANIM}
+
+
 # ─── ⑥ 인포배너 (품번 → 인포카드/워터마크 자동 오버레이) ─────────────────────
 @app.post("/infocard")
 async def infocard(req: Request):

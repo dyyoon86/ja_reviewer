@@ -895,3 +895,98 @@ fetch("/config").then(r=>r.json()).then(c=>{
 }).catch(()=>{});
 loadSubTemplates();
 refreshSteps();
+
+// ── 렌더 전 미리보기 ────────────────────────────────────────────────────────
+// 굽기(burn_subs)와 동일한 타이밍 규칙을 브라우저에서 재현한다.
+// 인포카드: 0~0.4s 페이드인(블러→선명) · hold 후 fade 동안 페이드아웃(선명→블러)
+// 워터마크: wm_start 부터 fade 동안 페이드인 + 위에서 slide
+let pvData=null, pvRaf=0;
+
+const pvClamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+
+function pvApply(t){
+  if(!pvData) return;
+  const A=pvData.anim, hold=parseFloat($("#pvHold").value)||A.hold, fade=A.fade;
+  const showBanner=$("#pvShowBanner").checked, showWm=$("#pvShowWm").checked;
+  const showSubs=$("#pvShowSubs").checked;
+  const fr=$("#pvFrame"), ic=$("#pvInfo"), wm=$("#pvWm");
+
+  // 프레임 — 상시
+  fr.style.opacity = showBanner ? 1 : 0;
+
+  // 인포카드 — 등장/퇴장 시 흐려짐(blur)과 투명도 동시 적용
+  const inA  = pvClamp(t/0.4, 0, 1);                 // 0→1 등장
+  const outA = 1 - pvClamp((t-hold)/fade, 0, 1);     // 1→0 퇴장
+  const a = Math.min(inA, outA);
+  const blurIn  = (1-pvClamp(t/fade,0,1));           // 등장 초반 흐림
+  const blurOut = pvClamp((t-hold)/fade,0,1);        // 퇴장 후반 흐림
+  const blur = Math.min(1, blurIn + blurOut) * A.blur;
+  ic.style.opacity = showBanner ? a : 0;
+  ic.style.filter  = `blur(${(blur*0.25).toFixed(2)}px)`;   // px는 표시 배율 기준 축소
+
+  // 워터마크 — 페이드인 + 슬라이드
+  const wa = pvClamp((t-A.wm_start)/fade, 0, 1);
+  wm.style.opacity = showWm ? wa : 0;
+  wm.style.transform = `translateY(${(-A.wm_slide*(1-wa)*0.05).toFixed(2)}%)`;
+
+  // 자막 — 현재 시각에 걸린 것만
+  const box=$("#pvSubs");
+  box.style.display = showSubs ? "block" : "none";
+  if(showSubs){
+    const cur=(pvData.subs||[]).filter(s=>t>=s.start && t<=s.end);
+    box.innerHTML = cur.map(s=>pvSubHtml(s)).join("");
+  }
+  $("#pvClock").textContent = t.toFixed(2)+"s";
+}
+
+function pvSubHtml(s){
+  const st=(pvData.styles||{})[s.style] || {};
+  const W=$("#pvWrap").clientWidth||960, k=W/1920;   // 1080p 기준 → 표시 배율
+  const size=Math.max(10,(st.size||38)*k), mg=(st.margin||40)*k;
+  const ol=Math.max(1,(st.outline||2)*k);
+  const col=st.color||"#fff", oc=st.outline_color||"#000";
+  const vpos = st.v==="top" ? `top:${mg}px` : st.v==="middle" ? `top:50%;transform:translateY(-50%)` : `bottom:${mg}px`;
+  const hpos = st.h==="right" ? `right:${mg}px;text-align:right`
+             : st.h==="left"  ? `left:${mg}px;text-align:left`
+             : `left:0;right:0;text-align:center`;
+  const shadow=`-${ol}px -${ol}px 0 ${oc}, ${ol}px -${ol}px 0 ${oc}, -${ol}px ${ol}px 0 ${oc}, ${ol}px ${ol}px 0 ${oc}`;
+  return `<div style="position:absolute;${vpos};${hpos};padding:0 ${mg}px;`+
+         `font-family:'Malgun Gothic',sans-serif;font-weight:${st.bold?700:400};`+
+         `font-size:${size}px;line-height:1.25;color:${col};text-shadow:${shadow};`+
+         `white-space:pre-wrap">${(s.text||"").replace(/</g,"&lt;")}</div>`;
+}
+
+function pvLoop(){
+  const v=$("#pvVideo");
+  if(v && !v.paused && !v.ended) pvApply(v.currentTime);
+  pvRaf=requestAnimationFrame(pvLoop);
+}
+
+$("#btnPreview").onclick=()=>{
+  const code=($("#pvCode").value||curCode()||"").trim();
+  if(!code){ log("품번을 입력하세요","warn"); return; }
+  log("── 미리보기 준비 중(배너 레이어 없으면 자동 생성) ──");
+  fetch(`/preview/data?code=${encodeURIComponent(code)}`).then(r=>r.json()).then(j=>{
+    if(j.detail){ log("✖ "+j.detail,"warn"); return; }
+    pvData=j;
+    const L=j.layers||{};
+    const img=p=>`/image?path=${encodeURIComponent(p)}&t=${Date.now()}`;
+    const set=(el,p)=>{ if(p){ el.src=img(p); el.style.display="block"; } else el.style.display="none"; };
+    set($("#pvFrame"),L.frame); set($("#pvInfo"),L.info); set($("#pvWm"),L.wm);
+    if(L.error) log("※ 배너 레이어 생성 실패: "+L.error,"warn");
+    $("#pvVideo").src=`/video/stream?path=${encodeURIComponent(j.video)}`;
+    $("#pvStage").style.display="block";
+    log(`✔ 미리보기 — ${j.video} (${(j.duration||0).toFixed(1)}s, 자막 ${(j.subs||[]).length}줄)`,"ok");
+    if(!pvRaf) pvLoop();
+  }).catch(e=>log("✖ 오류: "+e,"warn"));
+};
+
+// 스크럽·일시정지 상태에서도 즉시 반영
+["seeking","seeked","timeupdate","pause","loadedmetadata"].forEach(ev=>{
+  const v=document.getElementById("pvVideo");
+  if(v) v.addEventListener(ev,()=>pvApply(v.currentTime));
+});
+["pvShowBanner","pvShowWm","pvShowSubs","pvHold"].forEach(id=>{
+  const el=document.getElementById(id);
+  if(el) el.addEventListener("input",()=>{ const v=$("#pvVideo"); if(v) pvApply(v.currentTime); });
+});

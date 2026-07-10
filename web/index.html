@@ -369,6 +369,37 @@
     <!-- ── 인포배너(품번 → 인포카드/워터마크 자동 오버레이) ── -->
     <div class="card">
       <details class="acc" open>
+      <summary class="sec"><span class="num">▶</span> 렌더 전 미리보기 <span class="muted">· 배너·워터마크·자막을 얹은 결과를 재생바로 확인 (인코딩 0초)</span></summary>
+      <div class="acc-body">
+      <div class="formrow" style="margin-top:10px">
+        <span class="fld"><span class="lbl">품번</span><input id="pvCode" placeholder="예: SNOS-152" style="width:150px"></span>
+        <button class="go" id="btnPreview">▶ 미리보기 열기</button>
+      </div>
+      <div class="hint">최종 컷 영상 위에 <b>프레임·인포카드·워터마크 PNG</b>와 <b>자막</b>을 브라우저가 실시간 합성합니다. 굽기(⑤)와 <b>같은 타이밍 규칙</b>이라 결과가 그대로 나옵니다. 재생바를 끌어 원하는 지점을 확인하세요. 배너 레이어가 없으면 자동 생성(인코딩 없음).</div>
+      <div id="pvStage" style="display:none;margin-top:10px">
+        <div id="pvWrap" style="position:relative;width:100%;max-width:960px;background:#000;border-radius:10px;overflow:hidden">
+          <video id="pvVideo" controls playsinline style="display:block;width:100%;height:auto"></video>
+          <div id="pvOverlay" style="position:absolute;inset:0;pointer-events:none">
+            <img id="pvFrame" style="position:absolute;inset:0;width:100%;height:100%;display:none">
+            <img id="pvInfo"  style="position:absolute;inset:0;width:100%;height:100%;display:none">
+            <img id="pvWm"    style="position:absolute;inset:0;width:100%;height:100%;display:none">
+            <div id="pvSubs" style="position:absolute;inset:0"></div>
+          </div>
+        </div>
+        <div class="formrow" style="margin-top:8px">
+          <label class="muted"><input type="checkbox" id="pvShowBanner" checked style="height:auto;vertical-align:middle"> 배너</label>
+          <label class="muted"><input type="checkbox" id="pvShowWm" checked style="height:auto;vertical-align:middle"> 워터마크</label>
+          <label class="muted"><input type="checkbox" id="pvShowSubs" checked style="height:auto;vertical-align:middle"> 자막</label>
+          <span class="fld"><span class="lbl">인포카드 노출(초)</span><input id="pvHold" type="number" step="0.5" value="2" style="width:64px"></span>
+          <span class="muted" id="pvClock" style="margin-left:8px">0.00s</span>
+        </div>
+      </div>
+      </div>
+      </details>
+    </div>
+
+    <div class="card">
+      <details class="acc" open>
       <summary class="sec"><span class="num">5</span> 인포배너 <span class="muted">· 품번만 넣으면 인포카드+워터마크 자동 생성·오버레이</span></summary>
       <div class="acc-body">
       <div class="formrow" style="margin-top:10px">
