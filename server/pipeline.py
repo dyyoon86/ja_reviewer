@@ -669,27 +669,39 @@ _BREATH = 0.85           # 전체 길이 중 실제 발화가 차지할 비율
 _SEC_PER_SENT = 5.4      # 3분휴지 실측 — 문장 개수 산정용
 
 
-def narration_budget(target_sec):
-    """목표 길이(초) → (문장 수 하한, 상한, 대략 글자수).
-    글자수는 TTS 발화속도 기준. 예: 60초 → 10~13문장·약 346자."""
-    n = max(4, round(float(target_sec) / _SEC_PER_SENT))
-    chars = int(float(target_sec) * _TTS_CHARS_PER_SEC * _BREATH)
+# cinema(고몽·김시선형)는 대사 원음이 흐르는 동안 내레이션이 빠지므로 발화 시간이 줄어든다.
+# 자동자막에는 화자 라벨이 없어(모든 전환이 '>>') 실제 내레이션/대사 비율은 측정 불가.
+# → 아래 값은 측정치가 아니라 설계 판단이다. 대사가 화면의 40% 안팎을 쓴다고 보고 잡았다.
+_CINEMA_SPEECH_RATIO = 0.6
+
+
+def narration_budget(target_sec, style="3min"):
+    """목표 길이(초) → (문장 수 하한, 상한, 대략 글자수). 글자수는 TTS 발화속도 기준.
+    3min : 내레이션이 영상을 거의 다 덮는다 → 60초 = 10~13문장·346자
+    cinema: 대사 구간에는 내레이션이 없다 → 60초 = 6~9문장·207자"""
+    ratio = _CINEMA_SPEECH_RATIO if style == "cinema" else 1.0
+    speak_sec = float(target_sec) * ratio
+    n = max(3, round(speak_sec / _SEC_PER_SENT))
+    chars = int(speak_sec * _TTS_CHARS_PER_SEC * _BREATH)
     return n - 1, n + 2, chars
 
 
-def _roundup_block(pos="mid", target_sec=60):
+def _roundup_block(pos="mid", target_sec=60, style="3min"):
     """묶음 리뷰(여러 작품을 한 영상에 이어붙임)의 '한 꼭지'로 쓰이는 내레이션 규칙.
     3분휴지 실측: 영상 1편에 작품 16~23개, 작품당 29~36초.
     첫 꼭지 '먼저 ~', 중간 '다음은 ~', 끝 '마지막으로 ~'. 인사·구독은 영상 맨 끝에 한 번만."""
     pos = pos if pos in ("first", "mid", "last") else "mid"
     opener = {"first": "먼저", "mid": "다음은", "last": "마지막으로"}[pos]
-    lo, hi, chars = narration_budget(target_sec)
+    lo, hi, chars = narration_budget(target_sec, style)
+    kind = "첫" if pos == "first" else ("마지막" if pos == "last" else "중간")
+    tail = (" 대사가 흐르는 구간에는 내레이션이 없으므로 문장 수가 적다.\n"
+            if style == "cinema" else "\n")
     b = ("[★묶음 리뷰의 한 꼭지] 이 내레이션은 여러 작품을 이어붙인 리뷰 영상의 "
-         f"'{'첫' if pos=='first' else '마지막' if pos=='last' else '중간'}' 꼭지다. 독립 영상이 아니다.\n"
+         f"'{kind}' 꼭지다. 독립 영상이 아니다.\n"
          f" · 첫 문장은 반드시 '{opener} OOO(배우)의 신작입니다.' 또는 '{opener} OOO의 작품입니다.'로 연다.\n"
          " · 채널 인사·자기소개·구독/좋아요 요청·'오늘은 ~을 준비했습니다' 금지. 바로 작품 얘기로 들어간다.\n"
          f" · 분량은 약 {int(target_sec)}초 — 내레이션 {lo}~{hi}문장, 합쳐 {chars}자 안팎. "
-         f"이보다 길게 늘이지도, 짧게 줄이지도 말 것.\n"
+         f"이보다 길게 늘이지도, 짧게 줄이지도 말 것." + tail +
          " · 마지막 문장은 '~작품이었습니다.'로 닫고 다음 꼭지로 넘어갈 수 있게 끝낸다.\n")
     if pos == "last":
         b += (" · 이 꼭지가 마지막이므로, 총평 뒤에 마무리 인사 한 줄을 덧붙인다"
@@ -703,7 +715,7 @@ def prompt_auto(meta, segs, target_sec=60, hint="", pos="mid", style="3min"):
             f"**약 {target_sec}초 내외 하이라이트 영상**으로 압축하고, 한글 대사자막과 해설 내레이션을 만든다.\n"
             f"{_hint_block(hint)}"
             f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n"
-            f"{_roundup_block(pos, target_sec)}{_style(style)}\n"
+            f"{_roundup_block(pos, target_sec, style)}{_style(style)}\n"
             f"[규칙] (1)신음·짧은탄성·반복감탄·비스토리 섹스대사·무음/잡담·중복은 버린다. "
             f"(2)스토리(설정·관계·전환·갈등·결말)를 드러내는 핵심 구간만 keep으로 골라 **합쳐서 {target_sec}초 ±20% 목표**. "
             f"(3)도입~결말 흐름이 보이게 고루 분포. 시간은 원본 영상 기준 초.\n"
@@ -718,7 +730,7 @@ def prompt_highlight(meta, segs, target_sec=60, hint="", pos="mid", style="3min"
             f"**약 {target_sec}초 내외 하이라이트**로 압축한다. 줄거리 요약이 아니라 '자극·반전·긴장·감정 절정'의 밀도 높은 컷.\n"
             f"{_hint_block(hint)}"
             f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n"
-            f"{_roundup_block(pos, target_sec)}{_style(style)}\n"
+            f"{_roundup_block(pos, target_sec, style)}{_style(style)}\n"
             f"[하이라이트 규칙] "
             f"(1)신음·잡담·무음·반복은 버린다. "
             f"(2)★고루 분포 금지★ — 앞·중간·뒤 균등이 아니라 **후킹 밀도가 가장 높은 순간에 집중**. "
@@ -738,7 +750,7 @@ def prompt_manual(meta, segs, target_sec=60, hint="", pos="mid", style="3min"):
             f"여기서 **스토리 핵심만 골라 약 {target_sec}초 내외로 압축**하고, 한글 대사자막과 해설 내레이션을 만든다.\n"
             f"{_hint_block(hint)}"
             f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n"
-            f"{_roundup_block(pos, target_sec)}{_style(style)}\n"
+            f"{_roundup_block(pos, target_sec, style)}{_style(style)}\n"
             f"[규칙] (1)무음·잡담·반복·의미없는 짧은 라인은 버린다. "
             f"(2)스토리(설정·관계·전환·갈등·결말)를 드러내는 핵심 구간만 keep으로 골라 **합쳐서 {target_sec}초 ±20% 목표**. "
             f"(3)정사 선별은 하지 말 것(이미 제거됨). 시간은 이 자막 기준 초.\n"
