@@ -295,6 +295,7 @@ class QueueManager:
             S.stage_tts(c, code, o.get("tts_base") or c["tts_base"], profile,
                         o.get("tts_language", c["tts_language"]), o.get("tts_seed"),
                         bool(o.get("tts_mux", True)), em,
-                        orig_audio=o.get("orig_audio", "mute"))
+                        orig_audio=o.get("orig_audio", "duck"),
+                        duck_level=float(o.get("duck_level", 0.3)))
         elif stg == "burn":
             S.stage_burn(c, code, c.get("sub_styles") or S.P.STYLE_DEFAULT, em)

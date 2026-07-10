@@ -1121,35 +1121,79 @@ def build_narration_wav(clips, out_wav, log=print, video_sec=None,
     if video_sec and end > video_sec + 0.5:
         log(f"  ※ 내레이션이 영상보다 {end - video_sec:.1f}s 깁니다 — "
             f"문장 수를 줄이거나 목표 길이를 늘리세요")
-    return out_wav
+
+    # 실제로 목소리가 나는 구간 — 원음 더킹을 이 구간에만 정확히 걸기 위해 돌려준다
+    spans = []
+    for (st, p, tempo), d in zip(placed, durs):
+        spans.append((st, st + (d / tempo if tempo > 0 else d)))
+    return out_wav, spans
+
+
+def merge_spans(spans, gap=0.25):
+    """가까운 구간은 하나로 합친다 — 더킹이 잘게 오르내리는 것(펌핑) 방지."""
+    if not spans:
+        return []
+    out = [list(spans[0])]
+    for s, e in spans[1:]:
+        if s <= out[-1][1] + gap:
+            out[-1][1] = max(out[-1][1], e)
+        else:
+            out.append([s, e])
+    return [(a, b) for a, b in out]
+
+
+def _duck_expr(spans, level=0.25, fade=0.18, release=0.40):
+    """내레이션 구간에서만 원음을 level(0~1)로 낮추는 volume 표현식.
+    구간 앞은 fade초 동안 내려가고, 뒤는 release초 동안 올라온다(딸깍 방지).
+    사이드체인 컴프레서와 달리 감쇄량이 신호 세기에 안 흔들리고 정확하다."""
+    spans = merge_spans(spans)
+    if not spans:
+        return None
+    ramps = []
+    for s, e in spans:
+        s0 = max(0.0, s - fade)
+        ramps.append(f"min(1,max(0,min((t-{s0:.3f})/{fade:.3f},({e + release:.3f}-t)/{release:.3f})))")
+    m = ramps[0]
+    for r in ramps[1:]:
+        m = f"max({m},{r})"
+    return f"1-{1 - level:.3f}*({m})"
 
 
 ORIG_AUDIO_MODES = {
-    "mute": "원음 끄기 (3분휴지형 — 해설만)",
-    "duck": "원음 살리고 해설 나올 때만 줄이기 (고몽·김시선형)",
-    "keep": "원음 그대로 + 해설 겹치기",
+    "duck": "현장음 살리고 해설 중에만 줄이기 (권장)",
+    "keep": "현장음 그대로 + 해설 겹치기",
+    "mute": "현장음 끄기 (해설만)",
 }
 
 
 def mux_narration(video, narration_wav, out_video, narration_gain=1.0,
-                  orig_gain=None, mode="mute", log=print):
+                  orig_gain=None, mode="duck", duck_level=0.3, duck_spans=None,
+                  log=print):
     """영상에 내레이션 WAV를 입힌다.
 
-    mode='mute' : 원음 음소거 — 해설만 들린다(3분휴지형).
-    mode='duck' : 원음을 살리되 내레이션이 나오는 동안만 자동으로 낮춘다(사이드체인 더킹).
-                  대사 원음이 들려야 하는 고몽·김시선형에 필요하다.
-    mode='keep' : 원음 그대로 두고 내레이션을 겹친다.
+    mode='duck'(기본) : 원음(현장음)을 살리고, 해설이 나오는 동안만 duck_level로 낮춘다.
+                        duck_spans(실제 발화 구간)를 주면 그 구간에만 정확히 건다.
+                        없으면 사이드체인 컴프레서로 근사한다.
+    mode='keep'       : 원음 그대로 + 해설 겹치기.
+    mode='mute'       : 원음 음소거 — 해설만.
     orig_gain을 직접 주면 mode보다 우선한다(기존 호출부 호환).
     """
     if orig_gain is not None:
         fc = (f"[0:a]volume={orig_gain}[oa];[1:a]volume={narration_gain}[na];"
               f"[oa][na]amix=inputs=2:duration=first:normalize=0[a]")
     elif mode == "duck":
-        # 내레이션을 둘로 복제 — 하나는 원음을 누르는 신호(sc), 하나는 실제로 들릴 소리(na).
-        fc = (f"[1:a]volume={narration_gain},asplit=2[na][sc];"
-              f"[0:a]volume=1.0[oa];"
-              f"[oa][sc]sidechaincompress=threshold=0.02:ratio=12:attack=15:release=350[ducked];"
-              f"[ducked][na]amix=inputs=2:duration=first:normalize=0[a]")
+        expr = _duck_expr(duck_spans, duck_level) if duck_spans else None
+        if expr:
+            # 발화 구간을 알고 있으므로 정확한 볼륨 자동화 — 감쇄량이 흔들리지 않는다
+            fc = (f"[0:a]volume=volume='{expr}':eval=frame[oa];"
+                  f"[1:a]volume={narration_gain}[na];"
+                  f"[oa][na]amix=inputs=2:duration=first:normalize=0[a]")
+        else:
+            # 구간을 모르면 내레이션을 사이드체인으로 써서 눌러준다(근사)
+            fc = (f"[1:a]volume={narration_gain},asplit=2[na][sc];"
+                  f"[0:a]volume=1.0[oa];"
+                  f"[oa][sc]sidechaincompress=threshold=0.02:ratio=12:attack=15:release=350[ducked];"
+                  f"[ducked][na]amix=inputs=2:duration=first:normalize=0[a]")
     elif mode == "keep":
         fc = (f"[0:a]volume=1.0[oa];[1:a]volume={narration_gain}[na];"
               f"[oa][na]amix=inputs=2:duration=first:normalize=0[a]")
@@ -1159,7 +1203,10 @@ def mux_narration(video, narration_wav, out_video, narration_gain=1.0,
     subprocess.run(["ffmpeg", "-y", "-i", str(video), "-i", str(narration_wav),
                     "-filter_complex", fc, "-map", "0:v", "-map", "[a]",
                     "-c:v", "copy", "-c:a", "aac", str(out_video)], check=True)
-    log(f"내레이션 입힌 영상({ORIG_AUDIO_MODES.get(mode, mode)}): {out_video}")
+    extra = ""
+    if mode == "duck":
+        extra = f" · 해설 중 원음 {int(duck_level * 100)}%"
+    log(f"내레이션 입힌 영상({ORIG_AUDIO_MODES.get(mode, mode)}{extra}): {out_video}")
     return out_video
 
 

@@ -635,7 +635,7 @@ function runTts(){
   fetch("/tts",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
     code, profile:$("#ttsProfile").value, tts_base:$("#ttsBase").value.trim()||undefined,
     seed:$("#ttsSeed").value!==""?+$("#ttsSeed").value:undefined, mux:$("#ttsMux").checked,
-    orig_audio:origAudio()
+    orig_audio:origAudio(), duck_level:duckLevel()
   })}).then(r=>r.json()).then(j=>runJob(j.job, (r)=>{
     $("#resultCard").style.display="block";
     $("#result").innerHTML = `<div class="ok">✔ 내레이션 음성 ${r.count}개 합성</div>`+
@@ -788,7 +788,8 @@ let qPrev = {};   // id → status (검수대기/오류 전환 알림용)
 
 function segPos(){ return $("#segPos") ? $("#segPos").value : "mid"; }
 function narStyle(){ return $("#narStyle") ? $("#narStyle").value : "3min"; }
-function origAudio(){ return $("#ttsOrig") ? $("#ttsOrig").value : "mute"; }
+function origAudio(){ return $("#ttsOrig") ? $("#ttsOrig").value : "duck"; }
+function duckLevel(){ return $("#ttsDuck") ? parseFloat($("#ttsDuck").value) : 0.3; }
 
 function qPipeline(){
   return { transcribe:$("#qpTranscribe").checked, ai:$("#qpAi").checked,
@@ -798,7 +799,7 @@ function qPipeline(){
 function qOpts(){
   const o = { model:$("#whisper").value, llm:$("#llm").value,
               target_sec:+$("#target").value, mode:($("#mode")?$("#mode").value:"summary"),
-              pos:segPos(), style:narStyle(), orig_audio:origAudio() };
+              pos:segPos(), style:narStyle(), orig_audio:origAudio(), duck_level:duckLevel() };
   if($("#qpTts").checked){
     o.tts_profile=$("#ttsProfile").value; o.tts_base=$("#ttsBase").value.trim()||undefined;
     o.tts_seed=$("#ttsSeed").value!==""?+$("#ttsSeed").value:undefined; o.tts_mux=true;

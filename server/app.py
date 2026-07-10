@@ -705,7 +705,8 @@ async def tts(req: Request):
         try:
             jdone(jid, stage_tts(c, code, base, profile, language, seed, mux,
                                  JobEmitter(jid),
-                                 orig_audio=body.get("orig_audio", "mute")))
+                                 orig_audio=body.get("orig_audio", "duck"),
+                                 duck_level=float(body.get("duck_level", 0.3))))
         except Exception as e:
             jerr(jid, e)
     run_bg(work)

@@ -240,14 +240,20 @@
         <label class="muted"><input type="checkbox" id="ttsAuto" style="height:auto;vertical-align:middle"> ② 리뷰 생성 후 자동으로 음성까지 생성 (보이스 선택 필요)</label>
       </div>
       <div class="formrow">
-        <span class="fld"><span class="lbl">원음 처리</span>
-          <select id="ttsOrig" style="width:280px">
-            <option value="mute" selected>원음 끄기 (3분휴지형 — 해설만)</option>
-            <option value="duck">원음 살리고 해설 나올 때만 줄이기 (고몽·김시선형)</option>
-            <option value="keep">원음 그대로 + 해설 겹치기</option>
+        <span class="fld"><span class="lbl">현장음</span>
+          <select id="ttsOrig" style="width:260px">
+            <option value="duck" selected>살리고 해설 중에만 줄이기 (권장)</option>
+            <option value="keep">그대로 + 해설 겹치기</option>
+            <option value="mute">끄기 (해설만)</option>
+          </select></span>
+        <span class="fld"><span class="lbl">해설 중 현장음</span>
+          <select id="ttsDuck" style="width:90px">
+            <option value="0.5">50%</option>
+            <option value="0.3" selected>30%</option>
+            <option value="0.15">15%</option>
           </select></span>
       </div>
-      <div class="hint">내레이션 문체를 <b>고몽·김시선형</b>으로 뽑았다면 원음 처리를 <b>더킹</b>으로 두세요. 대사 원음이 들려야 해설이 대사를 받아치는 구성이 살아납니다. 3분휴지형은 원음을 끄고 해설만 갑니다.</div>
+      <div class="hint">정사씬을 미리 잘라내 신음이 없으므로 <b>현장음을 살리는 것이 기본</b>입니다. 해설이 나오는 구간에서만 정확히 그 비율로 줄였다가 되돌립니다(발화 구간을 알고 있어 감쇄량이 흔들리지 않습니다). 대사 원음이 들려야 하는 <b>고몽·김시선형</b>엔 필수이고, 3분휴지형에서도 현장음이 배경으로 깔립니다.</div>
       <div class="actions">
         <label class="muted"><input type="checkbox" id="ttsMux" style="height:auto;vertical-align:middle"> 영상에 입히기 (→ _final_voiced.mp4)</label>
         <button class="go spacer" id="btnTts">● 내레이션 음성 생성</button>

@@ -199,7 +199,8 @@ def stage_subs(c, code, em):
             "summary": res.get("summary", ""), "stars": res.get("stars")}
 
 
-def stage_tts(c, code, base, profile, language, seed, mux, em, orig_audio="mute"):
+def stage_tts(c, code, base, profile, language, seed, mux, em,
+              orig_audio="duck", duck_level=0.3):
     """④ TTS — {code}_내레이션.srt → voicebox 합성 → {code}_내레이션.wav (+선택 mux)."""
     outdir = work_dir(c, code)
     srt = outdir / f"{code}_내레이션.srt"
@@ -220,8 +221,9 @@ def stage_tts(c, code, base, profile, language, seed, mux, em, orig_audio="mute"
     em.step(len(entries) + 1, total, "내레이션 트랙 합성")
     # 영상 길이를 알려주면 마지막 문장의 슬롯 계산과 '내레이션이 영상보다 김' 경고가 정확해진다
     fin = outdir / f"{code}_final.mp4"
-    P.build_narration_wav(clips, wav, em.log,
-                          video_sec=(P.video_duration(str(fin)) if fin.is_file() else None))
+    _, spans = P.build_narration_wav(
+        clips, wav, em.log,
+        video_sec=(P.video_duration(str(fin)) if fin.is_file() else None))
     em.file("내레이션 음성", wav)
     out = {"mode": "tts", "narration_wav": wav, "count": len(clips)}
     if mux:
@@ -229,7 +231,8 @@ def stage_tts(c, code, base, profile, language, seed, mux, em, orig_audio="mute"
         if final.is_file():
             voiced = str(outdir / f"{code}_final_voiced.mp4")
             em.step(total, total, "영상에 음성 입히기")
-            P.mux_narration(str(final), wav, voiced, mode=orig_audio, log=em.log)
+            P.mux_narration(str(final), wav, voiced, mode=orig_audio,
+                            duck_level=float(duck_level), duck_spans=spans, log=em.log)
             em.file("음성 입힌 영상", voiced)
             out["voiced"] = voiced
         else:
