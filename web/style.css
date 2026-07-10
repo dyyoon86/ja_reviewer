@@ -262,3 +262,10 @@ summary.sec:hover{opacity:.85}
 .mstep .mnum{display:inline-flex;width:20px;height:20px;align-items:center;justify-content:center;
   background:var(--panel2);border:1px solid var(--line);border-radius:6px;font-size:11px;color:var(--dim)}
 #manualModal .modal-box{width:min(720px,94vw)}
+
+/* 자막 편집기 */
+.subs-list{display:flex;flex-direction:column;gap:5px;max-height:340px;overflow-y:auto;padding-right:4px}
+.subs-row{display:flex;gap:6px;align-items:center}
+.subs-row input,.subs-row select{padding:5px 7px}
+button.mini{padding:4px 9px;font-size:12px}
+button.mini.x{background:transparent;border:1px solid #c44;color:#c44;line-height:1}

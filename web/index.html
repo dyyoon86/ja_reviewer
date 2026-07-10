@@ -453,6 +453,28 @@
     </div>
 
     <div class="card">
+      <details class="acc">
+      <summary class="sec"><span class="num">✎</span> 자막 편집 <span class="muted">· ③ 결과의 내레이션·대사를 직접 고치고 저장 → 다시 굽기</span></summary>
+      <div class="acc-body">
+      <div class="formrow" style="margin-top:10px">
+        <button class="go" id="btnSubsLoad">불러오기</button>
+        <button id="btnSubsSave" disabled>저장</button>
+        <span class="muted" id="subsStatus"></span>
+      </div>
+      <div id="subsEditor" style="display:none">
+        <div class="sec" style="margin:10px 0 4px;font-size:13px">내레이션</div>
+        <div id="subsNar" class="subs-list"></div>
+        <button id="btnAddNar" class="mini" style="margin-top:4px">+ 내레이션 줄 추가</button>
+        <div class="sec" style="margin:14px 0 4px;font-size:13px">대사</div>
+        <div id="subsDlg" class="subs-list"></div>
+        <button id="btnAddDlg" class="mini" style="margin-top:4px">+ 대사 줄 추가</button>
+      </div>
+      <div class="hint">시간(초)·텍스트·유형/화자를 고칠 수 있습니다. 이미 <b>최종 영상 타임라인</b> 기준이라 재타이밍 없이 그대로 저장됩니다. 저장 후 <b>⑤ 굽기</b>를 다시 하면 반영돼요(내레이션을 바꿨다면 <b>④ TTS도 재생성</b>). 빈 줄은 저장 시 자동 제외됩니다.</div>
+      </div>
+      </details>
+    </div>
+
+    <div class="card">
       <details class="acc" open>
       <summary class="sec"><span class="num">5</span> 인포배너 <span class="muted">· 품번만 넣으면 인포카드+워터마크 자동 생성·오버레이</span></summary>
       <div class="acc-body">

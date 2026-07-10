@@ -909,6 +909,39 @@ BANNER_CANVAS_W = 1920
 _NAR_STYLE_KEY = {"기본": "narration", "일반": "narration",
                   "강조": "emphasis", "정보": "info",
                   "normal": "narration", "emphasis": "emphasis", "info": "info"}
+_NAR_STYLES = ["기본", "강조", "정보"]
+
+
+# ─── 자막 편집 (③ 결과를 화면에서 고치고 다시 굽기) ─────────────────────────
+@app.get("/subs/{code}")
+def subs_get(code: str):
+    """편집용 대사/내레이션 로드 — 이미 최종 타임라인 형식(_대사.json/_내레이션.json)."""
+    outdir = work_dir(load_cfg(), code)
+    dj, nj = outdir / f"{code}_대사.json", outdir / f"{code}_내레이션.json"
+    if not dj.is_file() and not nj.is_file():
+        raise HTTPException(404, f"자막이 없습니다({code}). 먼저 ③ 자막을 생성하세요.")
+    return {"code": code,
+            "dialogue": [d for d in _load_json(dj) if isinstance(d, dict)],
+            "narration": [d for d in _load_json(nj) if isinstance(d, dict)],
+            "styles": _NAR_STYLES, "speakers": ["여", "남"]}
+
+
+@app.post("/subs/{code}")
+async def subs_save(code: str, req: Request):
+    """편집한 대사/내레이션을 그대로 저장(SRT+JSON) — 재타이밍 없이 최종 타임라인 그대로.
+    저장 후 ⑤ 굽기를 다시 하면 반영된다. 잘못된 항목은 방어 파싱으로 걸러낸다."""
+    body = await req.json()
+    outdir = work_dir(load_cfg(), code)
+    dlg = P.parse_lines(body.get("dialogue", []), ("text", "ko"), extra=[("speaker", "여")])
+    nar = P.parse_lines(body.get("narration", []), ("text", "ko"), extra=[("style", "기본")])
+    if not dlg and not nar:
+        raise HTTPException(400, "저장할 자막이 없습니다(모든 항목이 비었거나 형식 오류).")
+    if dlg:
+        write_dialogue(outdir, code, dlg)
+    if nar:
+        write_narration(outdir, code, nar)
+    return {"ok": True, "dialogue": len(dlg), "narration": len(nar),
+            "note": "저장됨 — ⑤ 굽기를 다시 하면 반영됩니다(TTS도 재생성 필요)."}
 
 
 @app.get("/preview/data")

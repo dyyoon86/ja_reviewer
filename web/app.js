@@ -1092,3 +1092,60 @@ $("#btnHealth").onclick=()=>{
     log("✖ 점검 실패: "+e,"warn");
   }).finally(()=>{ $("#btnHealth").disabled=false; });
 };
+
+// ── 자막 편집 (③ 결과를 고치고 저장) ────────────────────────────────────────
+let subsData=null;
+function subsRow(kind, it){
+  const isN = kind==="nar";
+  const sel = isN
+    ? `<select data-f="style">${(subsData.styles||["기본","강조","정보"]).map(s=>`<option ${((it.style||"기본")===s)?"selected":""}>${s}</option>`).join("")}</select>`
+    : `<select data-f="speaker">${(subsData.speakers||["여","남"]).map(s=>`<option ${((it.speaker||"여")===s)?"selected":""}>${s}</option>`).join("")}</select>`;
+  const d=document.createElement("div"); d.className="subs-row";
+  d.innerHTML =
+    `<input type="number" step="0.1" data-f="start" value="${(+it.start||0).toFixed(1)}" style="width:60px" title="시작초">`+
+    `<input type="number" step="0.1" data-f="end" value="${(+it.end||0).toFixed(1)}" style="width:60px" title="끝초">`+
+    sel+
+    `<input type="text" data-f="text" value="${(it.text||it.ko||"").replace(/"/g,'&quot;')}" style="flex:1" placeholder="자막 텍스트">`+
+    `<button class="mini x" title="줄 삭제">✕</button>`;
+  d.querySelector("button.x").onclick=()=>d.remove();
+  return d;
+}
+function subsRender(){
+  const n=$("#subsNar"), g=$("#subsDlg"); n.innerHTML=""; g.innerHTML="";
+  (subsData.narration||[]).forEach(it=>n.appendChild(subsRow("nar",it)));
+  (subsData.dialogue||[]).forEach(it=>g.appendChild(subsRow("dlg",it)));
+  $("#subsEditor").style.display="block"; $("#btnSubsSave").disabled=false;
+}
+function subsCollect(box, kind){
+  return [...box.querySelectorAll(".subs-row")].map(r=>{
+    const g=f=>r.querySelector(`[data-f="${f}"]`);
+    const o={start:parseFloat(g("start").value)||0, end:parseFloat(g("end").value)||0, text:g("text").value.trim()};
+    if(kind==="nar") o.style=g("style").value; else o.speaker=g("speaker").value;
+    return o;
+  }).filter(o=>o.text);
+}
+$("#btnSubsLoad").onclick=()=>{
+  const code=($("#code").value||curCode()||$("#pvCode").value||"").trim();
+  if(!code){ log("품번을 입력하세요","warn"); return; }
+  $("#subsStatus").textContent="불러오는 중…";
+  fetch(`/subs/${encodeURIComponent(code)}`).then(r=>r.json()).then(j=>{
+    if(j.detail){ $("#subsStatus").textContent=""; log("✖ "+j.detail,"warn"); return; }
+    subsData=j; subsRender();
+    $("#subsStatus").textContent=`내레이션 ${j.narration.length} · 대사 ${j.dialogue.length}`;
+    log(`✔ 자막 불러옴 (${code})`,"ok");
+  }).catch(e=>{ $("#subsStatus").textContent=""; log("✖ "+e,"warn"); });
+};
+$("#btnAddNar") && ($("#btnAddNar").onclick=()=>$("#subsNar").appendChild(subsRow("nar",{start:0,end:2,text:"",style:"기본"})));
+$("#btnAddDlg") && ($("#btnAddDlg").onclick=()=>$("#subsDlg").appendChild(subsRow("dlg",{start:0,end:2,text:"",speaker:"여"})));
+$("#btnSubsSave").onclick=()=>{
+  if(!subsData){ return; }
+  const code=subsData.code;
+  const payload={dialogue:subsCollect($("#subsDlg"),"dlg"), narration:subsCollect($("#subsNar"),"nar")};
+  $("#subsStatus").textContent="저장 중…";
+  fetch(`/subs/${encodeURIComponent(code)}`,{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+    .then(r=>r.json()).then(j=>{
+      if(j.detail){ log("✖ "+j.detail,"warn"); $("#subsStatus").textContent=""; return; }
+      $("#subsStatus").textContent=`저장됨 · 내레이션 ${j.narration} · 대사 ${j.dialogue}`;
+      log("✔ 자막 저장 — ⑤ 굽기를 다시 하면 반영됩니다(내레이션 바꿨으면 ④ TTS도 재생성)","ok");
+    }).catch(e=>{ $("#subsStatus").textContent=""; log("✖ "+e,"warn"); });
+};
