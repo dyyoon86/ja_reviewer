@@ -377,6 +377,76 @@ def compose(layers, out_mp4, video=None, hold=2.0, fade=0.5, demo_len=4.0,
         raise
     return out_mp4
 
+# ────────────────────────────── 투명 오버레이 영상(알파 채널) ──────────────────────────────
+CANVAS_W, CANVAS_H = 1920, 1080
+
+# 알파 보존 코덱 — 프리미어/캡컷에 얹어 쓰는 용도.
+# ※ libvpx-vp9(webm) 알파는 이 ffmpeg 빌드에서 조용히 알파가 빠지므로 쓰지 않는다.
+ALPHA_ENC = {
+    # ProRes 4444: 편집기 호환성 최고. 화질 무손실급이나 용량 큼(1080p 6초 ≈ 16MB)
+    "mov":   (["-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuva444p10le"],
+              "ProRes 4444"),
+    # QuickTime Animation(RLE): 무손실 + 알파. 단색·투명 위주 배너는 ProRes의 1/9 용량
+    "qtrle": (["-c:v", "qtrle", "-pix_fmt", "argb"], "QuickTime Animation(RLE)"),
+}
+
+
+def probe_duration(path):
+    """영상 길이(초). 실패 시 None."""
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "csv=p=0", str(path)], capture_output=True, text=True, check=True)
+        return float(out.stdout.strip())
+    except Exception:
+        return None
+
+
+def compose_alpha(layers, out_path, duration=6.0, hold=2.0, fade=0.5, fps=30,
+                  fmt="mov", log=print):
+    """가운데가 투명한 오버레이 '영상' 생성 — 원본 영상 없이 레이어만 렌더.
+    프리미어프로/캡컷 타임라인에 얹으면 아래 트랙 영상이 그대로 비친다(번인 불필요).
+
+    레이어 합성은 compose()와 동일한 타이밍:
+      frame(항상) + info(0초 등장 → hold 후 페이드아웃) + wm(info 사라질 즈음 등장 → 유지)
+    """
+    fmt = (fmt or "mov").lower()
+    if fmt not in ALPHA_ENC:
+        raise ValueError(f"지원하지 않는 알파 포맷: {fmt} (mov|webm)")
+    enc_args, enc_name = ALPHA_ENC[fmt]
+    dur = float(duration or 6.0)
+
+    # ffmpeg의 overlay 필터는 main을 '배경'으로 취급해 출력 알파를 항상 불투명으로 만든다.
+    # → 색상은 검은 배경 위 overlay로 합성하고, 알파는 각 레이어의 알파를 screen(=Porter-Duff
+    #   over 알파 공식 a+b-ab)으로 합집합해 따로 만든 뒤 alphamerge로 다시 붙인다.
+    #   검은 배경 위 합성색은 premultiplied 이므로 unpremultiply로 스트레이트 알파에 맞춘다.
+    cmd = ["ffmpeg", "-y", "-loglevel", "error",
+           "-f", "lavfi", "-i",
+           f"color=c=black:s={CANVAS_W}x{CANVAS_H}:r={fps}:d={dur}",
+           "-loop", "1", "-i", layers["frame"],
+           "-loop", "1", "-i", layers["info"],
+           "-loop", "1", "-i", layers["wm"]]
+    fc = (
+        # 레이어별 페이드(알파 포함) → 색/알파 두 갈래로 분기
+        "[1]split[c1][k1];"
+        f"[2]fade=t=in:st=0:d=0.4:alpha=1,"
+        f"fade=t=out:st={hold}:d={fade}:alpha=1,split[c2][k2];"
+        f"[3]fade=t=in:st={hold + fade * 0.2}:d={fade}:alpha=1,split[c3][k3];"
+        # 알파 합집합
+        "[k1]alphaextract[a1];[k2]alphaextract[a2];[k3]alphaextract[a3];"
+        "[a1][a2]blend=all_mode=screen[a12];[a12][a3]blend=all_mode=screen[av];"
+        # 색상 합성
+        "[0][c1]overlay=0:0[b1];[b1][c2]overlay=0:0[b2];"
+        "[b2][c3]overlay=0:0,format=gbrp[rgb];"
+        # 알파 재결합 + 스트레이트 알파 보정
+        "[rgb][av]alphamerge,unpremultiply=inplace=1[out]"
+    )
+    cmd += ["-filter_complex", fc, "-map", "[out]",
+            "-r", str(fps), "-t", str(dur)] + enc_args + [out_path]
+    log(f"[infocard] 투명 오버레이 영상({enc_name}, {dur:.1f}s) 인코딩 중…")
+    subprocess.run(cmd, check=True)
+    return out_path
+
 # ────────────────────────────── 미리보기 스틸(PIL, 인코딩 없음) ──────────────────────────────
 def _preview_still(layers, keys, out_png):
     """PNG 레이어들을 순서대로 알파합성해 스틸 1장 생성(ffmpeg 인코딩 없음)."""
@@ -389,11 +459,15 @@ def _preview_still(layers, keys, out_png):
 
 # ────────────────────────────── 재사용 API ──────────────────────────────
 def generate(code, video=None, out=None, hold=2.0, outdir=None, log=print,
-             assets_only=True, preview_anim=True):
+             assets_only=True, preview_anim=True,
+             alpha=False, alpha_format="qtrle", alpha_duration=None, fps=30):
     """품번 → 인포배너 오버레이 소스 생성.
     assets_only=True(기본): 인코딩 없이 오버레이 PNG(프레임/인포카드/워터마크) +
        미리보기 스틸 2장만 생성 → 편집 프로그램에 얹어 사용. (초 단위, 재인코딩 안 함)
-    assets_only=False: (옵션) 실제 mp4까지 합성(느림/재인코딩)."""
+    assets_only=False: (옵션) 실제 mp4까지 합성(느림/재인코딩).
+    alpha=True: 가운데 투명한 오버레이 '영상'({code}_오버레이.mov) 생성 →
+       프리미어프로/캡컷에 얹으면 아래 영상이 비침. 원본 재인코딩 없어 빠름.
+       alpha_duration 미지정 시 video 길이(있으면) → 없으면 hold+4초."""
     m = fetch_meta(code)
     log(f"[infocard] {m['code']} / {m['actress']} / {m['title']}")
     outdir = outdir or os.path.join(tempfile.gettempdir(), f"infocard_{code}")
@@ -427,7 +501,19 @@ def generate(code, video=None, out=None, hold=2.0, outdir=None, log=print,
             log(f"[infocard] 애니 미리보기 실패(무시): {e}")
 
     result = {"assets": assets, "preview_info": prev_info, "preview_wm": prev_wm,
-              "preview_anim": prev_anim, "layers": layers, "meta": m, "out": None}
+              "preview_anim": prev_anim, "layers": layers, "meta": m, "out": None,
+              "overlay": None}
+
+    # 투명 오버레이 영상(편집기에 얹는 용도) — 원본 영상 건드리지 않음
+    if alpha:
+        dur = alpha_duration or (probe_duration(video) if video else None) or (hold + 4.0)
+        ov = os.path.join(outdir, f"{code}_오버레이.mov")   # 두 코덱 모두 .mov 컨테이너
+        try:
+            compose_alpha(layers, ov, duration=dur, hold=hold, fps=fps,
+                          fmt=alpha_format, log=log)
+            result["overlay"] = ov
+        except Exception as e:
+            log(f"[infocard] 투명 오버레이 영상 실패: {e}")
 
     if not assets_only:
         out = out or (
@@ -449,6 +535,14 @@ def main():
     ap.add_argument("--hold", type=float, default=2.0, help="인포카드 노출 시간(초)")
     ap.add_argument("--outdir", default=None, help="레이어 PNG 저장 폴더")
     ap.add_argument("--layers-only", action="store_true", help="PNG만 생성하고 종료")
+    ap.add_argument("--alpha", action="store_true",
+                    help="가운데 투명한 오버레이 영상 생성(프리미어/캡컷에 얹는 용도)")
+    ap.add_argument("--alpha-format", default="qtrle", choices=["mov", "qtrle"],
+                    help="qtrle=QuickTime Animation(기본, 무손실+알파, 용량 1/9) | "
+                         "mov=ProRes4444(호환성 최고, 용량 큼)")
+    ap.add_argument("--duration", type=float, default=None,
+                    help="오버레이 영상 길이(초). 미지정 시 --video 길이 또는 hold+4초")
+    ap.add_argument("--fps", type=int, default=30, help="오버레이 영상 fps")
     args = ap.parse_args()
 
     m = fetch_meta(args.code)
@@ -459,6 +553,16 @@ def main():
     layers = render_layers(m, outdir)
     print("[gen_infocard] layers:", {k: os.path.basename(v) for k, v in layers.items()})
     if args.layers_only:
+        return
+
+    # 투명 오버레이 영상만 뽑고 종료 — 번인(재인코딩) 안 함
+    if args.alpha:
+        dur = args.duration or (probe_duration(args.video) if args.video else None) \
+              or (args.hold + 4.0)
+        ov = args.out or os.path.join(outdir, f"{args.code}_오버레이.mov")
+        compose_alpha(layers, ov, duration=dur, hold=args.hold, fps=args.fps,
+                      fmt=args.alpha_format)
+        print(f"[gen_infocard] done → {ov}  (투명 오버레이 — 편집기 상위 트랙에 얹으세요)")
         return
 
     out = args.out or (
