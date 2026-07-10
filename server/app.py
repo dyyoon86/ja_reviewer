@@ -342,7 +342,7 @@ async def analyze(req: Request):
             pf = P.prompt_highlight if mode == "highlight" else P.prompt_auto
             hb = heartbeat(jid, f"AI 분석({llm})")
             try:
-                res = P.call_llm(pf(m, segs, target, hint=hint), llm, lambda x: jlog(jid, x))
+                res = P.call_llm(pf(m, segs, target, hint=hint, pos=body.get("pos","mid")), llm, lambda x: jlog(jid, x))
             finally:
                 hb.set()
             res["_mode"] = mode
@@ -487,7 +487,7 @@ async def step_ai(req: Request):
     def work():
         try:
             jdone(jid, stage_ai(c, code, body.get("path"), target, llm, mode, hint,
-                                JobEmitter(jid)))
+                                JobEmitter(jid), pos=body.get("pos", "mid")))
         except Exception as e:
             jerr(jid, e)
     run_bg(work)
@@ -511,7 +511,7 @@ async def step_ai_prompt(req: Request):
     except Exception as e:
         raise HTTPException(502, f"메타 조회 실패: {e}")
     pf = P.prompt_highlight if mode == "highlight" else P.prompt_manual
-    return {"prompt": pf(m, segs, target, hint=hint)}
+    return {"prompt": pf(m, segs, target, hint=hint, pos=body.get("pos","mid"))}
 
 
 @app.post("/step/ai/manual")
@@ -590,7 +590,7 @@ async def review(req: Request):
             jstep(jid, 3, 4, f"AI 압축·번역·내레이션 ({llm} 추론, 보통 1~3분)")
             hb = heartbeat(jid, f"AI 처리({llm})")
             try:
-                res = P.call_llm(P.prompt_manual(m, segs, target, hint=hint), llm, lambda x: jlog(jid, x))
+                res = P.call_llm(P.prompt_manual(m, segs, target, hint=hint, pos=body.get("pos","mid")), llm, lambda x: jlog(jid, x))
             finally:
                 hb.set()
             keep = P.parse_keep(res.get("keep", []))

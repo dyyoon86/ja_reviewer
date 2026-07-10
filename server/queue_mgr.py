@@ -260,7 +260,8 @@ class QueueManager:
         elif stg == "ai":
             S.stage_ai(c, code, video, int(o.get("target_sec", c["target_sec"])),
                        o.get("llm", c["llm"]), o.get("mode", "summary"),
-                       (o.get("hint") or "").strip(), em, gpu=self._lane("gpu"))
+                       (o.get("hint") or "").strip(), em, gpu=self._lane("gpu"),
+                       pos=o.get("pos", "mid"))
         elif stg == "subs":
             S.stage_subs(c, code, em)
         elif stg == "banner":

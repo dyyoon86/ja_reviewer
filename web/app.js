@@ -342,7 +342,7 @@ $("#btnStepAi").onclick = () => {
   log(`── ② AI 처리 시작 (${mode==="highlight"?"하이라이트형·알파컷식":"요약형·짜집기"}) ──`); setBadge("badgeAi","run");
   fetch("/step/ai",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
     code, target_sec:+$("#target").value, llm:$("#llm").value,
-    mode, hint:($("#hint")?$("#hint").value.trim():"")
+    mode, hint:($("#hint")?$("#hint").value.trim():""), pos:segPos()
   })}).then(r=>r.json()).then(j=>runJob(j.job, (res)=>{
     setBadge("badgeAi","done"); showResult(res);
     log(`✔ AI 처리 완료 (최종 ${Math.round(res.final_sec||0)}초)`,"ok");
@@ -357,7 +357,7 @@ $("#btnAiPrompt").onclick = () => {
   $("#aiPromptOut").value="프롬프트 생성 중…";
   fetch("/step/ai/prompt",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
     code, target_sec:+$("#target").value,
-    mode:($("#mode")?$("#mode").value:"summary"), hint:($("#hint")?$("#hint").value.trim():"")
+    mode:($("#mode")?$("#mode").value:"summary"), hint:($("#hint")?$("#hint").value.trim():""), pos:segPos()
   })}).then(async r=>{
     const j=await r.json().catch(()=>({}));
     if(!r.ok){ $("#aiPromptOut").value=""; log("✖ 프롬프트 생성 실패: "+(j.detail||r.status)+" (① 전사 먼저 / 메타조회 확인)","warn"); return; }
@@ -785,6 +785,8 @@ const Q_ST = {  // status → [배지문구, css클래스]
 };
 let qPrev = {};   // id → status (검수대기/오류 전환 알림용)
 
+function segPos(){ return $("#segPos") ? $("#segPos").value : "mid"; }
+
 function qPipeline(){
   return { transcribe:$("#qpTranscribe").checked, ai:$("#qpAi").checked,
            subs:$("#qpSubs").checked, banner:$("#qpBanner").checked,
@@ -792,7 +794,8 @@ function qPipeline(){
 }
 function qOpts(){
   const o = { model:$("#whisper").value, llm:$("#llm").value,
-              target_sec:+$("#target").value, mode:($("#mode")?$("#mode").value:"summary") };
+              target_sec:+$("#target").value, mode:($("#mode")?$("#mode").value:"summary"),
+              pos:segPos() };
   if($("#qpTts").checked){
     o.tts_profile=$("#ttsProfile").value; o.tts_base=$("#ttsBase").value.trim()||undefined;
     o.tts_seed=$("#ttsSeed").value!==""?+$("#ttsSeed").value:undefined; o.tts_mux=true;

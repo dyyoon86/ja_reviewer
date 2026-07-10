@@ -131,7 +131,7 @@ def stage_transcribe(c, code, video, model, em, initial_prompt=None):
             "srt": str(outdir / f"{code}_전사.srt")}
 
 
-def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None):
+def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid"):
     """② AI 처리 — 저장된 전사 + 메타 → LLM 압축·번역·내레이션. plan.json 저장 + 컷.
     gpu: 컷(NVENC) 구간을 감쌀 세마포어(큐 병렬 시) — None이면 잠금 없음(기존 단독 동작)."""
     gpu = gpu or NullLock()
@@ -152,7 +152,7 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None):
     pf = P.prompt_highlight if mode == "highlight" else P.prompt_manual
     hb = heartbeat(em, f"AI 처리({llm})")
     try:
-        res = P.call_llm(pf(m, segs, target, hint=hint), llm, em.log)
+        res = P.call_llm(pf(m, segs, target, hint=hint, pos=pos), llm, em.log)
     finally:
         hb.set()
     keep = P.parse_keep(res.get("keep", []))

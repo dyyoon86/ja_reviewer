@@ -586,12 +586,31 @@ def _hint_block(hint):
     return f"[사용자 추가 지시 — 최우선 반영]\n{h}\n" if h else ""
 
 
-def prompt_auto(meta, segs, target_sec=60, hint=""):
+def _roundup_block(pos="mid"):
+    """묶음 리뷰(여러 작품을 한 영상에 이어붙임)의 '한 꼭지'로 쓰이는 내레이션 규칙.
+    3분휴지 실측: 영상 1편에 작품 16~23개, 작품당 29~36초.
+    첫 꼭지 '먼저 ~', 중간 '다음은 ~', 끝 '마지막으로 ~'. 인사·구독은 영상 맨 끝에 한 번만."""
+    pos = pos if pos in ("first", "mid", "last") else "mid"
+    opener = {"first": "먼저", "mid": "다음은", "last": "마지막으로"}[pos]
+    b = ("[★묶음 리뷰의 한 꼭지] 이 내레이션은 여러 작품을 이어붙인 리뷰 영상의 "
+         f"'{'첫' if pos=='first' else '마지막' if pos=='last' else '중간'}' 꼭지다. 독립 영상이 아니다.\n"
+         f" · 첫 문장은 반드시 '{opener} OOO(배우)의 신작입니다.' 또는 '{opener} OOO의 작품입니다.'로 연다.\n"
+         " · 채널 인사·자기소개·구독/좋아요 요청·'오늘은 ~을 준비했습니다' 금지. 바로 작품 얘기로 들어간다.\n"
+         " · 분량은 30~40초 분량(내레이션 6~9문장)으로 짧게. 길게 늘이지 말 것.\n"
+         " · 마지막 문장은 '~작품이었습니다.'로 닫고 다음 꼭지로 넘어갈 수 있게 끝낸다.\n")
+    if pos == "last":
+        b += (" · 이 꼭지가 마지막이므로, 총평 뒤에 마무리 인사 한 줄을 덧붙인다"
+              "('오늘도 이상한 영상을 시청해 주셔서 감사합니다. 지금까지 딸감별사였습니다.').\n")
+    return b
+
+
+def prompt_auto(meta, segs, target_sec=60, hint="", pos="mid"):
     body = "\n".join(f"{k}\t{a:.2f}\t{b:.2f}\t{t}" for k, (a, b, t) in enumerate(segs, 1))
     return (f"너는 딸딸기튜브 AV 해설영상 작가다. 아래 작품의 일본어 자막을 보고 '스토리 핵심만' 골라 "
             f"**약 {target_sec}초 내외 하이라이트 영상**으로 압축하고, 한글 대사자막과 해설 내레이션을 만든다.\n"
             f"{_hint_block(hint)}"
-            f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n{_style()}\n"
+            f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n"
+            f"{_roundup_block(pos)}{_style()}\n"
             f"[규칙] (1)신음·짧은탄성·반복감탄·비스토리 섹스대사·무음/잡담·중복은 버린다. "
             f"(2)스토리(설정·관계·전환·갈등·결말)를 드러내는 핵심 구간만 keep으로 골라 **합쳐서 {target_sec}초 ±20% 목표**. "
             f"(3)도입~결말 흐름이 보이게 고루 분포. 시간은 원본 영상 기준 초.\n"
@@ -599,13 +618,14 @@ def prompt_auto(meta, segs, target_sec=60, hint=""):
             f"\"dialogue\":[{{\"start\":초,\"end\":초,\"ko\":\"\",\"speaker\":\"여|남\"}}],\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\",\"style\":\"기본|강조|정보\"}}]}}")
 
 
-def prompt_highlight(meta, segs, target_sec=60, hint=""):
+def prompt_highlight(meta, segs, target_sec=60, hint="", pos="mid"):
     """AlphaCut식 하이라이트 추출 — '고루 분포' 대신 '가장 후킹되는 순간'만 골라 몰아 뽑는다."""
     body = "\n".join(f"{k}\t{a:.2f}\t{b:.2f}\t{t}" for k, (a, b, t) in enumerate(segs, 1))
     return (f"너는 딸딸기튜브 AV 하이라이트 편집자다. 아래 작품 자막에서 **가장 후킹되는(클릭·시청유지 유발) 순간**만 골라 "
             f"**약 {target_sec}초 내외 하이라이트**로 압축한다. 줄거리 요약이 아니라 '자극·반전·긴장·감정 절정'의 밀도 높은 컷.\n"
             f"{_hint_block(hint)}"
-            f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n{_style()}\n"
+            f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n"
+            f"{_roundup_block(pos)}{_style()}\n"
             f"[하이라이트 규칙] "
             f"(1)신음·잡담·무음·반복은 버린다. "
             f"(2)★고루 분포 금지★ — 앞·중간·뒤 균등이 아니라 **후킹 밀도가 가장 높은 순간에 집중**. "
@@ -619,17 +639,18 @@ def prompt_highlight(meta, segs, target_sec=60, hint=""):
             f"\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\",\"style\":\"기본|강조|정보\"}}]}}")
 
 
-def prompt_manual(meta, segs, target_sec=60, hint=""):
+def prompt_manual(meta, segs, target_sec=60, hint="", pos="mid"):
     body = "\n".join(f"{k}\t{a:.2f}\t{b:.2f}\t{t}" for k, (a, b, t) in enumerate(segs, 1))
     return (f"너는 딸딸기튜브 AV 해설영상 작가다. 아래는 '정사장면을 이미 제거한' 영상의 일본어 자막이다. "
             f"여기서 **스토리 핵심만 골라 약 {target_sec}초 내외로 압축**하고, 한글 대사자막과 해설 내레이션을 만든다.\n"
             f"{_hint_block(hint)}"
-            f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n{_style()}\n"
+            f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n"
+            f"{_roundup_block(pos)}{_style()}\n"
             f"[규칙] (1)무음·잡담·반복·의미없는 짧은 라인은 버린다. "
             f"(2)스토리(설정·관계·전환·갈등·결말)를 드러내는 핵심 구간만 keep으로 골라 **합쳐서 {target_sec}초 ±20% 목표**. "
             f"(3)정사 선별은 하지 말 것(이미 제거됨). 시간은 이 자막 기준 초.\n"
             f"[내레이션 필수 요소 — 하나라도 빠지면 실패]\n"
-            f" (a) 작품 소개 한 문장 — '~라는 내용의 작품입니다' 형태.\n"
+            f" (a) 전환+소개 한 문장 — 위 [묶음 리뷰] 지시대로 열고, '~라는 내용의 작품입니다'로 설정을 요약.\n"
             f" (b) 설정·전개 포인트 — 반드시 위 자막에서 확인되는 내용만.\n"
             f" (c) 배우 필모 맥락 — 메타의 배우·레이블·발매일·인기지표를 근거로 '지금까지의 작품들 중에서',"
             f" '요즘 작품들이 아쉬웠는데' 같은 비교를 최소 1회.\n"
@@ -637,7 +658,8 @@ def prompt_manual(meta, segs, target_sec=60, hint=""):
             f" (e) 호불호 갈릴 요소 고지 — '호불호가 갈릴 수 있지만' 형태로 최소 1회.\n"
             f" (f) 총평 — '~작품이었습니다'로 닫고 별점(stars) 근거를 한 줄로.\n"
             f"[자기점검] 출력 전에 확인: 반말·느낌표·과장 감탄이 하나라도 있으면 다시 쓴다. "
-            f"모든 문장이 '~입니다/~습니다'로 끝나는가? 단점을 짚었는가? 배우 맥락이 있는가?\n"
+            f"모든 문장이 '~입니다/~습니다'로 끝나는가? 단점을 짚었는가? 배우 맥락이 있는가? "
+            f"첫 문장이 전환 문구로 시작하는가? 채널 인사·구독 요청을 넣지 않았는가?\n"
             f"[출력 JSON만] {{\"summary\":\"3~5줄\",\"stars\":1~5,\"keep\":[[시작,끝],...],"
             f"\"dialogue\":[{{\"start\":초,\"end\":초,\"ko\":\"\",\"speaker\":\"여|남\"}}],\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\",\"style\":\"기본|강조|정보\"}}]}}")
 
