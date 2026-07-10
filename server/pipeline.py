@@ -377,7 +377,7 @@ def verify_transcript(segments, meta=None, which="claude", batch=40, log=print):
         chunk = segments[b0:b0 + batch]
         lines = "\n".join(f"{b0+k}\t{ja}" for k, (_s, _e, ja) in enumerate(chunk))
         prompt = (
-            "너는 일본 성인영상 자막 검수·번역 전문가다. 아래는 Whisper가 뽑은 일본어 전사(줄마다 '번호<TAB>일본어').\n"
+            "너는 일본 영상 자막 검수·번역 전문가다. 아래는 Whisper가 뽑은 일본어 전사(줄마다 '번호<TAB>일본어').\n"
             "각 줄을 판정하고 자연스러운 한국어로 번역하라.\n"
             "판정 type: dialogue(스토리 대사)/moan(신음·탄성)/noise(잡음·의미없음)/hallucination(무음인데 지어낸 가짜자막).\n"
             "keep: 스토리 요약에 쓸 실제 대사면 true, 신음/잡음/환청이면 false.\n"
@@ -538,7 +538,7 @@ def _meta_block(meta):
 # 번역 규칙 — jav-subtitle-translate 스킬(AVDBS Eddy_Wind / 사용자 노션 원안)에서 추출.
 # 자동 파이프라인(claude/codex CLI)은 스킬 파일을 못 읽으므로 핵심을 여기 직접 박는다.
 def _translate():
-    return ("[대사 번역 규칙 — 19금 현지화 전문가] "
+    return ("[대사 번역 규칙 — 성인 콘텐츠 현지화 전문가] "
             "P1 정확성: 의미·감정·어조·의도 100% 재현(오역/왜곡/누락 금지). "
             "P2 자연스러움: 번역투 전면 제거, 유창한 현대 한국어 구어체(일본식 한국어 금지). "
             "P3 현지화: 줄거리·장면·인물 맥락 종합해 가장 한국적인 어조/어휘로. "
@@ -737,12 +737,12 @@ def _roundup_block(pos="mid", target_sec=60, style="3min"):
 
 def prompt_auto(meta, segs, target_sec=60, hint="", pos="mid", style="3min"):
     body = "\n".join(f"{k}\t{a:.2f}\t{b:.2f}\t{t}" for k, (a, b, t) in enumerate(segs, 1))
-    return (f"너는 딸딸기튜브 AV 해설영상 작가다. 아래 작품의 일본어 자막을 보고 '스토리 핵심만' 골라 "
+    return (f"너는 일본 영상 리뷰어다. 아래 영상의 일본어 자막을 보고 '스토리 핵심만' 골라 "
             f"**약 {target_sec}초 내외 하이라이트 영상**으로 압축하고, 한글 대사자막과 해설 내레이션을 만든다.\n"
             f"{_hint_block(hint)}"
             f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n"
             f"{_roundup_block(pos, target_sec, style)}{_timeline_rule()}{_style(style)}\n"
-            f"[규칙] (1)신음·짧은탄성·반복감탄·비스토리 섹스대사·무음/잡담·중복은 버린다. "
+            f"[규칙] (1)무음·잡담·반복·비스토리 라인은 버린다. "
             f"(2)스토리(설정·관계·전환·갈등·결말)를 드러내는 핵심 구간만 keep으로 골라 **합쳐서 {target_sec}초 ±20% 목표**. "
             f"(3)도입~결말 흐름이 보이게 고루 분포. 시간은 원본 영상 기준 초.\n"
             f"[출력 JSON만] {{\"summary\":\"3~5줄\",\"stars\":1~5,\"keep\":[[시작,끝],...],"
@@ -752,13 +752,13 @@ def prompt_auto(meta, segs, target_sec=60, hint="", pos="mid", style="3min"):
 def prompt_highlight(meta, segs, target_sec=60, hint="", pos="mid", style="3min"):
     """AlphaCut식 하이라이트 추출 — '고루 분포' 대신 '가장 후킹되는 순간'만 골라 몰아 뽑는다."""
     body = "\n".join(f"{k}\t{a:.2f}\t{b:.2f}\t{t}" for k, (a, b, t) in enumerate(segs, 1))
-    return (f"너는 딸딸기튜브 AV 하이라이트 편집자다. 아래 작품 자막에서 **가장 후킹되는(클릭·시청유지 유발) 순간**만 골라 "
-            f"**약 {target_sec}초 내외 하이라이트**로 압축한다. 줄거리 요약이 아니라 '자극·반전·긴장·감정 절정'의 밀도 높은 컷.\n"
+    return (f"너는 일본 영상 리뷰어다. 아래 영상 자막에서 **가장 후킹되는(클릭·시청유지 유발) 순간**만 골라 "
+            f"**약 {target_sec}초 내외 하이라이트**로 압축한다. 줄거리 요약이 아니라 '반전·긴장·감정 절정'의 밀도 높은 컷.\n"
             f"{_hint_block(hint)}"
             f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n"
             f"{_roundup_block(pos, target_sec, style)}{_timeline_rule()}{_style(style)}\n"
             f"[하이라이트 규칙] "
-            f"(1)신음·잡담·무음·반복은 버린다. "
+            f"(1)잡담·무음·반복은 버린다. "
             f"(2)★고루 분포 금지★ — 앞·중간·뒤 균등이 아니라 **후킹 밀도가 가장 높은 순간에 집중**. "
             f"(3)각 컷마다 hook(후킹점수 1~5, 5=최고)과 reason(왜 후킹인지 한 줄)을 매긴다. "
             f"(4)점수 높은 컷들로 합쳐서 {target_sec}초 ±20% 채운다(부족하면 낮은 점수도 채택, 넘치면 상위만). "
@@ -772,7 +772,7 @@ def prompt_highlight(meta, segs, target_sec=60, hint="", pos="mid", style="3min"
 
 def prompt_manual(meta, segs, target_sec=60, hint="", pos="mid", style="3min"):
     body = "\n".join(f"{k}\t{a:.2f}\t{b:.2f}\t{t}" for k, (a, b, t) in enumerate(segs, 1))
-    return (f"너는 딸딸기튜브 AV 해설영상 작가다. 아래는 '정사장면을 이미 제거한' 영상의 일본어 자막이다. "
+    return (f"너는 일본 영상 리뷰어다. 아래는 '정사장면을 이미 제거한' 영상의 일본어 자막이다. "
             f"여기서 **스토리 핵심만 골라 약 {target_sec}초 내외로 압축**하고, 한글 대사자막과 해설 내레이션을 만든다.\n"
             f"{_hint_block(hint)}"
             f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n"
