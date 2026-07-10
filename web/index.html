@@ -38,6 +38,7 @@
           동시 실행 · GPU <input id="qLaneGpu" type="number" min="1" max="4" value="1">
           AI <input id="qLaneAi" type="number" min="1" max="6" value="2">
         </div>
+        <div class="hint" style="margin:6px 0 0">묶음 리뷰 위치(먼저/다음은/마지막으로)는 <b>큐 순서대로 자동 판정</b>됩니다. 편집 순서대로 <b>한 번에 추가</b>하세요 — 도중에 추가·삭제하면 순서가 바뀝니다.</div>
         <ul id="qlist" class="qlist"><li class="qempty muted">비어 있음 — 영상을 추가하면<br>수작업하는 동안 자동 처리됩니다</li></ul>
         <div class="qfoot">
           <span class="hint" style="margin:0;flex:1">✋검수대기 항목 클릭 → 우측에서 이어서 작업</span>
@@ -148,9 +149,10 @@
               <option value="summary">짜집기 (요약형)</option>
               <option value="highlight">알파컷 (하이라이트형)</option>
             </select>
-            <select id="segPos" title="묶음 리뷰에서 이 작품의 위치 — 전환 문구가 달라집니다" style="width:130px">
+            <select id="segPos" title="묶음 리뷰에서 이 작품의 위치 — 전환 문구가 달라집니다. 자동=큐 순서로 판정" style="width:150px">
+              <option value="auto" selected>자동 (큐 순서대로)</option>
               <option value="first">먼저 (첫 작품)</option>
-              <option value="mid" selected>다음은 (중간)</option>
+              <option value="mid">다음은 (중간)</option>
               <option value="last">마지막으로</option>
             </select>
             <button class="go" id="btnStepAi">실행</button>

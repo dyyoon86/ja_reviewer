@@ -244,6 +244,27 @@ class QueueManager:
             self._workers.release()
             self._touch()
 
+    def _resolve_pos(self, it, pos, em=None):
+        """묶음 리뷰에서 이 작품이 첫/중간/마지막 꼭지인지 결정.
+        pos='auto'면 큐에 담긴 순서(추가순)로 판단한다 — 큐가 곧 영상의 편집 순서.
+        아이템이 하나뿐이면 'first'(전환 문구만 붙고 아웃트로는 없음).
+        수동 지정(first/mid/last)이면 그대로 존중.
+
+        ※ 판정은 ② AI 처리가 '실행되는 시점'의 큐 상태 기준이다. 따라서
+          · 도중에 아이템을 추가/삭제하거나 '완료 정리'를 누르면 순서가 바뀔 수 있다.
+          · 10개를 한 번에 넣고 돌리는 게 안전하다. 나눠 넣을 거면 수동 지정을 쓸 것."""
+        if pos in ("first", "mid", "last"):
+            return pos
+        ids = [x["id"] for x in self.items if (x.get("code") or "").strip()]
+        if it["id"] not in ids:
+            return "mid"
+        i, n = ids.index(it["id"]), len(ids)
+        out = "first" if i == 0 else ("last" if i == n - 1 else "mid")
+        if em:
+            label = {"first": "먼저", "mid": "다음은", "last": "마지막으로"}[out]
+            em.log(f"묶음 위치 자동판정: {i + 1}/{n}번째 → '{label} …' ({out})")
+        return out
+
     def _exec_stage(self, c, it, stg, em):
         code, video = it["code"], it["video"]
         o = it.get("opts") or {}
@@ -258,10 +279,11 @@ class QueueManager:
             S.stage_transcribe(c, code, video, o.get("model", c["whisper_model"]), em,
                                initial_prompt=init)
         elif stg == "ai":
+            pos = self._resolve_pos(it, o.get("pos", "auto"), em)
             S.stage_ai(c, code, video, int(o.get("target_sec", c["target_sec"])),
                        o.get("llm", c["llm"]), o.get("mode", "summary"),
                        (o.get("hint") or "").strip(), em, gpu=self._lane("gpu"),
-                       pos=o.get("pos", "mid"))
+                       pos=pos)
         elif stg == "subs":
             S.stage_subs(c, code, em)
         elif stg == "banner":
