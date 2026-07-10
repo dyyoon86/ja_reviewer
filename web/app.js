@@ -1058,3 +1058,37 @@ $("#btnPvRender").onclick=()=>{
     });
   }).catch(e=>log("✖ 오류: "+e,"warn"));
 };
+
+// ── 실행 전 통합 점검 ───────────────────────────────────────────────────────
+// 필수 항목이 하나라도 실패하면 파이프라인이 그 단계에서 멈춘다. 선택 항목은 건너뛰면 됨.
+$("#btnHealth").onclick=()=>{
+  const deep=$("#healthDeep") ? $("#healthDeep").checked : true;
+  const ul=$("#healthList");
+  ul.innerHTML=`<li><span class="st-badge run">…</span><span class="st-label">점검 중`+
+               (deep?` (LLM 응답·chromium 실행 확인 — 수십 초 걸릴 수 있습니다)`:``)+`</span></li>`;
+  $("#btnHealth").disabled=true;
+  log("── 실행 전 점검 시작 ──");
+  fetch(`/health?deep=${deep?"true":"false"}`).then(r=>r.json()).then(j=>{
+    ul.innerHTML="";
+    Object.entries(j.items).forEach(([k,v])=>{
+      const li=document.createElement("li");
+      const badge = v.ok ? `<span class="st-badge done">OK</span>`
+                         : `<span class="st-badge ${v.required?"warn":""}">${v.required?"필수":"선택"}</span>`;
+      li.innerHTML = badge +
+        `<span class="st-label"><b>${v.label}</b> `+
+        `<span class="muted">${v.msg}</span>`+
+        (v.ok?``:`<div class="muted" style="margin-top:2px">→ 막히는 단계: ${v.blocks}</div>`)+
+        `</span>`;
+      if(!v.ok) li.style.opacity="1";
+      ul.appendChild(li);
+    });
+    if(j.ok){
+      log(`✔ 점검 완료 — 필수 항목 모두 정상 (${j.checked}개 검사, 선택 실패 ${j.fail})`,"ok");
+    }else{
+      log(`✖ 점검 완료 — 필수 항목 ${j.blocking}개 실패. 아래 목록을 확인하세요`,"warn");
+    }
+  }).catch(e=>{
+    ul.innerHTML=`<li><span class="st-badge warn">✖</span><span class="st-label">점검 실패: ${e}</span></li>`;
+    log("✖ 점검 실패: "+e,"warn");
+  }).finally(()=>{ $("#btnHealth").disabled=false; });
+};

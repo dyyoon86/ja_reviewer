@@ -80,6 +80,20 @@
   <!-- 우: 작업 -->
   <div class="col">
     <div class="card">
+      <details class="acc" open>
+      <summary class="sec"><span class="num">✓</span> 실행 전 점검 <span class="muted">· voicebox · LLM · DB · GPU 한 번에 확인</span></summary>
+      <div class="acc-body">
+      <div class="formrow" style="margin-top:10px">
+        <button class="go" id="btnHealth">● 연결 상태 점검</button>
+        <label class="muted"><input type="checkbox" id="healthDeep" checked style="height:auto;vertical-align:middle"> 느린 검사 포함 (LLM 응답·chromium 실행)</label>
+      </div>
+      <ul class="steps" id="healthList"></ul>
+      <div class="hint">돌리기 전에 한 번 눌러보세요. <b>필수</b> 항목이 하나라도 빨간색이면 파이프라인이 그 단계에서 멈춥니다. <b>선택</b> 항목(DB·TTS·chromium)은 실패해도 해당 단계만 건너뛰면 됩니다. 느린 검사는 LLM에 실제로 한 번 물어보고 chromium을 띄워보므로 수십 초 걸릴 수 있어요.</div>
+      </div>
+      </details>
+    </div>
+
+    <div class="card">
       <div class="tabs">
         <div class="t active" data-pane="manual">직접 컷 편집</div>
         <div class="t" data-pane="auto">자동 (AI 분석)</div>

@@ -170,6 +170,145 @@ def llm_check():
     return out
 
 
+# ─── 실행 전 통합 점검 (돌리기 전에 뭐가 죽어 있는지 한 번에) ────────────────
+def _chk_ffmpeg():
+    import shutil as _sh
+    miss = [b for b in ("ffmpeg", "ffprobe") if not _sh.which(b)]
+    if miss:
+        return False, f"없음: {', '.join(miss)} — PATH에 설치하세요"
+    return True, ("GPU 인코더(NVENC) 사용 가능" if P.has_nvenc()
+                  else "CPU 인코딩(libx264) — GPU 없음/드라이버 미설치")
+
+
+def _chk_whisper():
+    try:
+        import faster_whisper  # noqa: F401
+    except Exception as e:
+        return False, f"faster-whisper 임포트 실패: {str(e)[:80]}"
+    return True, "faster-whisper 설치됨"
+
+
+def _chk_meta(c):
+    """메타 API — /work/{code} 규격이라 존재하지 않을 법한 코드로 왕복만 확인."""
+    api = (c.get("meta_api") or "").rstrip("/")
+    if not api:
+        return False, "meta_api 설정 없음"
+    try:
+        import urllib.request
+        with urllib.request.urlopen(f"{api}/work/__healthcheck__", timeout=6) as r:
+            r.read(64)
+        return True, f"응답함 ({api})"
+    except Exception as e:
+        # 404/에러 JSON도 '서버는 살아있음'으로 본다
+        msg = str(e)
+        if "HTTP Error" in msg:
+            return True, f"응답함 ({api})"
+        return False, f"연결 실패 ({api}): {msg[:70]}"
+
+
+def _chk_tts(c):
+    base = c.get("tts_base") or ""
+    try:
+        pr = P.tts_profiles(base)
+        n = len(pr) if isinstance(pr, (list, tuple)) else len(pr or {})
+        if not n:
+            return False, f"연결됐지만 보이스가 0개 ({base})"
+        cur = c.get("tts_profile") or ""
+        return True, f"보이스 {n}개" + (f" · 선택됨: {cur}" if cur else " · 보이스 미선택")
+    except Exception as e:
+        return False, f"voicebox 연결 실패 ({base}): {str(e)[:70]}"
+
+
+def _chk_db():
+    if GIC is None:
+        return False, "gen_infocard 모듈 로드 실패"
+    try:
+        import sqlite3
+        if not Path(GIC.DB).is_file():
+            return False, f"DB 파일 없음: {GIC.DB}"
+        con = sqlite3.connect(GIC.DB)
+        n = con.execute("SELECT COUNT(*) FROM works").fetchone()[0]
+        con.close()
+        return True, f"작품 {n:,}건 ({GIC.DB})"
+    except Exception as e:
+        return False, f"DB 조회 실패: {str(e)[:80]}"
+
+
+def _chk_playwright():
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception:
+        return False, "playwright 미설치 — pip install playwright"
+    try:
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            b.close()
+        return True, "chromium 실행 가능"
+    except Exception as e:
+        return False, f"chromium 실행 실패: {str(e)[:70]} (playwright install chromium)"
+
+
+def _chk_outdir(c):
+    d = Path(c.get("out_dir") or "")
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        t = d / ".write_test"
+        t.write_text("ok", encoding="utf-8")
+        t.unlink()
+        return True, str(d)
+    except Exception as e:
+        return False, f"쓰기 불가 ({d}): {str(e)[:60]}"
+
+
+def _chk_llm(c):
+    name = c.get("llm") or "claude"
+    ok, msg = P.llm_ping(name)
+    return ok, f"{name}: {msg}"
+
+
+@app.get("/health")
+def health(deep: bool = True):
+    """돌리기 전에 외부 의존성을 한 번에 점검. deep=false면 느린 검사(LLM·chromium) 생략.
+    각 항목에 '어느 단계가 막히는지'를 붙여, 실패해도 무엇을 포기하면 되는지 알 수 있게 한다."""
+    c = load_cfg()
+    # (키, 라벨, 함수, 막히는 단계, 필수여부)
+    specs = [
+        ("ffmpeg", "ffmpeg / GPU", _chk_ffmpeg, "① 전사 · ② 컷 · ⑥ 굽기", True),
+        ("whisper", "faster-whisper", _chk_whisper, "① 전사", True),
+        ("outdir", "출력 폴더", lambda: _chk_outdir(c), "전 단계", True),
+        ("meta", "메타 API", lambda: _chk_meta(c), "② AI 처리(메타 조회)", True),
+        ("db", "작품 DB", _chk_db, "④ 배너", False),
+        ("tts", "voicebox TTS", lambda: _chk_tts(c), "⑤ TTS", False),
+    ]
+    if deep:
+        specs.append(("llm", "LLM CLI", lambda: _chk_llm(c), "② AI 처리", True))
+        specs.append(("chromium", "playwright chromium", _chk_playwright, "④ 배너", False))
+
+    results = {}
+
+    def run(key, label, fn, blocks, required):
+        try:
+            ok, msg = fn()
+        except Exception as e:
+            ok, msg = False, f"점검 중 오류: {str(e)[:80]}"
+        results[key] = {"label": label, "ok": bool(ok), "msg": msg,
+                        "blocks": blocks, "required": required}
+
+    ts = [threading.Thread(target=run, args=s, daemon=True) for s in specs]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(timeout=90)
+    # 병렬이라 완료 순서가 뒤섞인다 → 파이프라인 순서로 다시 정렬(화면이 매번 달라지지 않게)
+    results = {k: results[k] for k, *_ in specs if k in results}
+
+    fails = [v for v in results.values() if not v["ok"]]
+    blocking = [v for v in fails if v["required"]]
+    return {"ok": not blocking, "checked": len(results),
+            "fail": len(fails), "blocking": len(blocking),
+            "items": results}
+
+
 # ─── 설정 ────────────────────────────────────────────────────────────────────
 @app.get("/config")
 def get_config():
