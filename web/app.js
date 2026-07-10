@@ -723,6 +723,9 @@ $("#btnInfocard").onclick=()=>{
       $("#resultCard").style.display="block";
       const m=r.meta||{}, a=r.assets||{};
       const img=p=>`/image?path=${encodeURIComponent(p)}&t=${Date.now()}`;
+      // 산출물 1줄 — 경로 + 다운로드 링크
+      const dl=(label,p)=>p?`<div>· ${label}: ${p} `+
+        `<a href="/download?path=${encodeURIComponent(p)}" download style="margin-left:4px">⬇ 받기</a></div>`:"";
       let html=
         `<div class="ok">✔ 인포배너 오버레이 소스 (인코딩 없음)</div>`+
         (m.title?`<div class="muted">${m.code} · ${m.actress} · ${m.title}</div>`:'')+
@@ -736,9 +739,13 @@ $("#btnInfocard").onclick=()=>{
           `<img src="${img(r.preview_wm)}" style="width:100%;max-width:420px;border-radius:8px">`+
         `</div>`+
         `<div class="muted" style="margin:8px 0 2px">▼ 편집 프로그램에 얹을 투명 PNG</div>`+
-        `<div>· 프레임(상시): ${a.frame||''}</div>`+
-        `<div>· 인포카드(앞 ${hold}초): ${a.info||''}</div>`+
-        `<div>· 워터마크(상시): ${a.wm||''}</div>`;
+        dl("프레임(상시)", a.frame)+
+        dl(`인포카드(앞 ${hold}초)`, a.info)+
+        dl("워터마크(상시)", a.wm)+
+        (a.frame&&a.info&&a.wm?
+          `<div style="margin-top:4px"><a href="/download/zip?paths=`+
+          encodeURIComponent([a.frame,a.info,a.wm].join("|"))+
+          `&name=${encodeURIComponent((m.code||'infocard')+'_투명PNG.zip')}" download>⬇ PNG 3장 한번에 (zip)</a></div>`:"");
       if(r.overlay) html+=
         `<div class="muted" style="margin:10px 0 2px">▼ 가운데 투명 오버레이 영상 — 편집기 <b>상위 트랙</b>에 얹으세요</div>`+
         `<div>· ${r.overlay}</div>`+

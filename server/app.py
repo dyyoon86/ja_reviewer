@@ -290,6 +290,26 @@ def download(path: str):
                         filename=p.name)
 
 
+@app.get("/download/zip")
+def download_zip(paths: str, name: str = "assets.zip"):
+    """여러 산출물을 zip 하나로. paths는 '|' 로 구분(투명 PNG 3장 한번에 받기용)."""
+    import io, zipfile
+    files = [Path(x) for x in paths.split("|") if x.strip()]
+    files = [p for p in files if p.is_file()]
+    if not files:
+        raise HTTPException(404, "파일 없음")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for p in files:
+            z.write(str(p), arcname=p.name)
+    buf.seek(0)
+    # 한글 파일명 — HTTP 헤더는 latin-1만 허용하므로 RFC 5987(filename*)로 실어보낸다.
+    from urllib.parse import quote
+    disp = f"attachment; filename=\"assets.zip\"; filename*=UTF-8''{quote(name)}"
+    return StreamingResponse(buf, media_type="application/zip",
+                             headers={"Content-Disposition": disp})
+
+
 # ─── 메타 ────────────────────────────────────────────────────────────────────
 @app.get("/meta/{code}")
 def meta(code: str):
