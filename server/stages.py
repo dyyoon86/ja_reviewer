@@ -191,7 +191,11 @@ def stage_subs(c, code, em):
     em.step(2, 2, "내레이션 자막 생성")
     nar = [(float(d["start"]), float(d["end"]), d["text"], d.get("style", "기본"))
            for d in res.get("narration", [])]
-    write_narration(outdir, code, P.retime(nar, keep, snap=True))
+    outside = [n for n in nar if not any(a - 0.05 <= n[0] < b + 0.05 for a, b in keep)]
+    if outside:
+        em.log(f"※ 내레이션 {len(outside)}/{len(nar)}개가 컷(keep) 구간 밖에 있습니다 "
+               f"— 컷 안으로 재배치합니다. 프롬프트 시간 규칙 위반이니 결과를 확인하세요.")
+    write_narration(outdir, code, P.retime(nar, keep, snap=True, log=em.log))
     em.file("내레이션 자막", outdir / f"{code}_내레이션.srt")
     return {"step": "subs", "code": code,
             "srt_dialogue": str(outdir / f"{code}_대사.srt"),

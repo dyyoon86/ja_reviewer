@@ -566,7 +566,7 @@ def _style_cinema():
         "추측은 '~인 것 같습니다', '~라고 볼 수 있겠죠'처럼 추측임을 드러낸다. "
         "[구성] 훅이 되는 장면·대사로 연다 → 인물과 관계 소개 → 갈등이 커지는 대목 → 전환점 → "
         "여운 남기는 마무리. 총평·별점은 마지막에 짧게. "
-        "**[AI 문체 금지]** '~에 초점을 둔 구성', '~을 선사합니다', 형용사 3개 이상 나열, 같은 종결어미 3연속. "
+        "**[AI 문체 금지]** '~에 초점을 둔 구성', '~을 선사합니다', 형용사 3개 이상 나열, 같은 종결어미 3연속. **자막·대사를 메타적으로 지칭하지 말 것** — '자막을 보면', '자막에서', '~라는 대사에서'는 금지. "
         "**[유튜브 안전]** 약물 직접 언급 금지 — '약 먹이다/약물/수면제/최음제/약 기운' → '몽롱물', '분위기가 달라지는데..', '몸 상태가 이상해지는데..'로 대체. "
         "[대사] 자연스러운 한국어 구어체(번역투 금지), 신음류 제외/(신음). 각 대사에 speaker 지정 — '여'/'남'. "
         "[자막 길이] 각 항목 25자 이내, 길면 의미 단위로 끊어 여러 항목. "
@@ -635,7 +635,7 @@ def _style_3min():
         "[★신뢰성 — 창작 절제] 영상을 못 봤으므로 '카메라 워크가 터진다'처럼 화면을 본 척하는 구체 평가는 금지. "
         "평가 근거는 시놉/설정/전개(자막) + 인기지표(좋아요·싫어요) + 배우스펙/레이블(메타)뿐. "
         "추측은 '설정상 ~할 겁니다','~라 기대됩니다'처럼 추측임을 드러낸다. "
-        "**[AI 문체 금지]** '~에 초점을 둔 구성', '~의 훅이 작동합니다', '~을 선사합니다', 형용사 3개 이상 나열. "
+        "**[AI 문체 금지]** '~에 초점을 둔 구성', '~의 훅이 작동합니다', '~을 선사합니다', 형용사 3개 이상 나열. **자막·대사를 메타적으로 지칭하지 말 것** — '자막을 보면', '자막에서', '~라는 대사에서', '~라는 대사가'는 금지. 시청자는 그 장면을 보고 있다. 내용을 바로 서술하라. "
         "(단, '~작품입니다'·'~내용입니다' 종결은 이 채널의 기본 어투이므로 적극 사용한다.) "
         "**[유튜브 안전]** 약물 직접 언급 금지 — '약 먹이다/약물/수면제/최음제/약 기운' → '몽롱물', '분위기가 달라지는데..', '몸 상태가 이상해지는데..'로 대체. "
         "섹스 스킵 구간은 브릿지('이후 장면은 생략하고…'). "
@@ -658,6 +658,19 @@ def _style_3min():
 def _hint_block(hint):
     h = (hint or "").strip()
     return f"[사용자 추가 지시 — 최우선 반영]\n{h}\n" if h else ""
+
+
+def _timeline_rule():
+    """narration/dialogue 시간이 keep 밖으로 나가면 안 되는 이유:
+    최종 영상은 keep 구간만 이어붙인 것이라, 밖의 항목은 retime에서 끝점으로 밀려
+    길이 0으로 뭉친다(총평·별점이 통째로 사라진다). 실제 LLM 출력에서 재현됨."""
+    return (
+        "[★시간 규칙 — 어기면 결과물이 깨진다]\n"
+        " · narration과 dialogue의 start/end는 **반드시 keep 구간 안**에 있어야 한다. "
+        "최종 영상은 keep만 이어붙인 것이라, 밖에 있는 항목은 잘려 사라진다.\n"
+        " · 특히 마지막 총평·별점을 keep 밖(영상이 끝난 뒤)에 두지 말 것. "
+        "keep의 마지막 구간 안에서 끝내라.\n"
+        " · 내레이션 전체 발화 길이가 keep 구간 길이의 합을 넘지 않게 한다.\n")
 
 
 # 3분휴지 실측(3편·55작품·1746초·14965자): 문장당 5.4초, 발화 8.6자/초, 문장 평균 45자.
@@ -715,7 +728,7 @@ def prompt_auto(meta, segs, target_sec=60, hint="", pos="mid", style="3min"):
             f"**약 {target_sec}초 내외 하이라이트 영상**으로 압축하고, 한글 대사자막과 해설 내레이션을 만든다.\n"
             f"{_hint_block(hint)}"
             f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n"
-            f"{_roundup_block(pos, target_sec, style)}{_style(style)}\n"
+            f"{_roundup_block(pos, target_sec, style)}{_timeline_rule()}{_style(style)}\n"
             f"[규칙] (1)신음·짧은탄성·반복감탄·비스토리 섹스대사·무음/잡담·중복은 버린다. "
             f"(2)스토리(설정·관계·전환·갈등·결말)를 드러내는 핵심 구간만 keep으로 골라 **합쳐서 {target_sec}초 ±20% 목표**. "
             f"(3)도입~결말 흐름이 보이게 고루 분포. 시간은 원본 영상 기준 초.\n"
@@ -730,7 +743,7 @@ def prompt_highlight(meta, segs, target_sec=60, hint="", pos="mid", style="3min"
             f"**약 {target_sec}초 내외 하이라이트**로 압축한다. 줄거리 요약이 아니라 '자극·반전·긴장·감정 절정'의 밀도 높은 컷.\n"
             f"{_hint_block(hint)}"
             f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n"
-            f"{_roundup_block(pos, target_sec, style)}{_style(style)}\n"
+            f"{_roundup_block(pos, target_sec, style)}{_timeline_rule()}{_style(style)}\n"
             f"[하이라이트 규칙] "
             f"(1)신음·잡담·무음·반복은 버린다. "
             f"(2)★고루 분포 금지★ — 앞·중간·뒤 균등이 아니라 **후킹 밀도가 가장 높은 순간에 집중**. "
@@ -750,7 +763,7 @@ def prompt_manual(meta, segs, target_sec=60, hint="", pos="mid", style="3min"):
             f"여기서 **스토리 핵심만 골라 약 {target_sec}초 내외로 압축**하고, 한글 대사자막과 해설 내레이션을 만든다.\n"
             f"{_hint_block(hint)}"
             f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n"
-            f"{_roundup_block(pos, target_sec, style)}{_style(style)}\n"
+            f"{_roundup_block(pos, target_sec, style)}{_timeline_rule()}{_style(style)}\n"
             f"[규칙] (1)무음·잡담·반복·의미없는 짧은 라인은 버린다. "
             f"(2)스토리(설정·관계·전환·갈등·결말)를 드러내는 핵심 구간만 keep으로 골라 **합쳐서 {target_sec}초 ±20% 목표**. "
             f"(3)정사 선별은 하지 말 것(이미 제거됨). 시간은 이 자막 기준 초.\n"
@@ -760,7 +773,44 @@ def prompt_manual(meta, segs, target_sec=60, hint="", pos="mid", style="3min"):
 
 
 # ─── ④ 컷 / 재타이밍 ─────────────────────────────────────────────────────────
-def retime(entries, keep, snap=False, default_dur=4.0):
+def _fit_tail(rows, total, min_dur=0.8, log=None):
+    """영상 끝으로 밀려 길이 0으로 뭉친 항목을 살린다.
+
+    LLM이 keep 밖에 내레이션을 두면(실측에서 11개 중 4개가 그랬다) snap 처리에서
+    전부 total 지점에 길이 0으로 쌓여 총평·별점이 통째로 사라진다.
+    끝에서부터 최소 길이를 확보하며 앞으로 밀어 넣는다 — 프롬프트 위반의 안전망.
+    """
+    if not rows or total <= 0:
+        return rows
+    rows = [list(r) for r in sorted(rows, key=lambda x: (x[0], x[1]))]
+    fixed, limit = 0, float(total)
+    for i in range(len(rows) - 1, -1, -1):
+        s, e = float(rows[i][0]), float(rows[i][1])
+        dur = max(min_dur, e - s)
+        if e > limit + 1e-6 or (e - s) < min_dur * 0.5:
+            e = min(limit, max(e, s + min_dur))
+            s = max(0.0, e - dur)
+            rows[i][0], rows[i][1] = s, e
+            fixed += 1
+        limit = min(limit, float(rows[i][0]))
+    # 길이 0은 조용히 사라진다 → 최소 길이를 보장한다. 이때 앞 항목과 겹칠 수 있는데,
+    # 겹침은 build_narration_wav가 가속/밀어내기로 처리한다(무음보다 낫다).
+    for r in rows:
+        if r[1] - r[0] < min_dur:
+            if r[0] <= 1e-6:                 # 맨 앞이면 앞으로 못 미니 뒤로 늘린다
+                r[1] = min(float(total), r[0] + min_dur)
+            else:
+                r[0] = max(0.0, r[1] - min_dur)
+    if fixed and log:
+        log(f"※ 내레이션 {fixed}개 시간 재배치(컷 밖으로 나간 항목을 끝에서부터 밀어 넣음)")
+        need = sum(len(str(r[2])) for r in rows if len(r) > 2) / 6.8
+        if need > total * 1.05:
+            log(f"※ 내레이션 발화가 {need:.0f}초로 영상({total:.0f}초)보다 깁니다 — "
+                f"문장 수를 줄이거나 목표 길이를 늘리세요(그대로 두면 뒷부분이 빨라지거나 잘립니다)")
+    return [tuple(r) for r in rows]
+
+
+def retime(entries, keep, snap=False, default_dur=4.0, log=None):
     """원본 시간 entries[(s,e,text)] → 컷(keep 이어붙임) 새 타임라인.
     keep 밖: snap=False(대사) 버림 / snap=True(내레이션) 컷 경계로 당김."""
     keep = sorted(keep); offs, acc = [], 0.0
@@ -788,7 +838,10 @@ def retime(entries, keep, snap=False, default_dur=4.0):
         if ne <= ns:
             ne = min(total, ns + default_dur)
         out.append((ns, ne, *rest))
-    out.sort(key=lambda x: x[0]); return out
+    out.sort(key=lambda x: x[0])
+    if snap:                       # keep 밖으로 나가 끝에 뭉친 항목 구조
+        out = _fit_tail(out, total, log=log)
+    return out
 
 
 _NVENC = None  # None=미확인, True/False=캐시
