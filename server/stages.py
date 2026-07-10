@@ -155,22 +155,25 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
         res = P.call_llm(pf(m, segs, target, hint=hint, pos=pos, style=style), llm, em.log)
     finally:
         hb.set()
-    keep = P.parse_keep(res.get("keep", []))
+    keep = P.parse_keep(res.get("keep", []), total=P.video_duration(video))
     if not keep:
         raise RuntimeError("LLM이 keep 구간을 못 골랐습니다(빈 응답 — 헤드리스 거부 가능. 아래 수동 모드 사용).")
-    (outdir / f"{code}_plan.json").write_text(
-        json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
+    # ★ 컷을 먼저 하고 성공한 뒤에 plan.json을 쓴다.
+    #   완료 판정이 plan.json 존재로 되므로, 컷 도중 죽으면 plan.json이 없어 재실행된다
+    #   (반대 순서면 컷이 실패해도 'AI 완료'로 오판되어 final.mp4 없이 다음 단계로 넘어감).
     final = str(outdir / f"{code}_final.mp4")
     em.step(3, 3, "핵심 구간 컷")
     with gpu:
         P.cut_video(video, keep, final, em.log, lambda fr: em.prog(fr, "컷"))
+    (outdir / f"{code}_plan.json").write_text(
+        json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
     save_state(outdir, code, target=target, llm=llm,
-               summary=res.get("summary", ""), stars=res.get("stars"))
+               summary=res.get("summary", ""), stars=P.clamp_stars(res.get("stars")))
     em.file("AI 결과(plan)", outdir / f"{code}_plan.json")
     em.file("최종 영상", final)
     return {"step": "ai", "code": code, "final": final,
             "final_sec": P.video_duration(final),
-            "summary": res.get("summary", ""), "stars": res.get("stars")}
+            "summary": res.get("summary", ""), "stars": P.clamp_stars(res.get("stars"))}
 
 
 def stage_subs(c, code, em):
@@ -184,13 +187,13 @@ def stage_subs(c, code, em):
     if not keep:
         raise RuntimeError("plan에 keep 구간이 없습니다.")
     em.step(1, 2, "대사 자막(한글) 생성")
-    dlg = [(float(d["start"]), float(d["end"]), d["ko"], d.get("speaker", "여"))
-           for d in res.get("dialogue", [])]
+    dlg = P.parse_lines(res.get("dialogue", []), ("ko", "text"),
+                        extra=[("speaker", "여")], log=em.log)
     write_dialogue(outdir, code, P.retime(dlg, keep, snap=False))
     em.file("대사 자막", outdir / f"{code}_대사.srt")
     em.step(2, 2, "내레이션 자막 생성")
-    nar = [(float(d["start"]), float(d["end"]), d["text"], d.get("style", "기본"))
-           for d in res.get("narration", [])]
+    nar = P.parse_lines(res.get("narration", []), ("text", "ko"),
+                        extra=[("style", "기본")], log=em.log)
     outside = [n for n in nar if not any(a - 0.05 <= n[0] < b + 0.05 for a, b in keep)]
     if outside:
         em.log(f"※ 내레이션 {len(outside)}/{len(nar)}개가 컷(keep) 구간 밖에 있습니다 "
@@ -200,7 +203,7 @@ def stage_subs(c, code, em):
     return {"step": "subs", "code": code,
             "srt_dialogue": str(outdir / f"{code}_대사.srt"),
             "srt_narration": str(outdir / f"{code}_내레이션.srt"),
-            "summary": res.get("summary", ""), "stars": res.get("stars")}
+            "summary": res.get("summary", ""), "stars": P.clamp_stars(res.get("stars"))}
 
 
 def stage_tts(c, code, base, profile, language, seed, mux, em,

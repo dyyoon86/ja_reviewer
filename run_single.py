@@ -93,10 +93,8 @@ def main(code: str):
     # ── ④ SRT 생성 ───────────────────────────────────────────────────────────
     log("[④] 대사·내레이션 SRT 생성...")
 
-    dlg  = [(d["start"], d["end"], d["ko"], d.get("speaker", "여"))
-            for d in plan.get("dialogue", [])]
-    nar  = [(n["start"], n["end"], n["text"], n.get("style", "기본"))
-            for n in plan.get("narration", [])]
+    dlg  = P.parse_lines(plan.get("dialogue", []), ("ko", "text"), extra=[("speaker", "여")], log=log)
+    nar  = P.parse_lines(plan.get("narration", []), ("text", "ko"), extra=[("style", "기본")], log=log)
 
     if dlg:
         P.write_srt([(s, e, t) for s, e, t, *_ in dlg], folder / f"{code}_대사.srt")
@@ -117,7 +115,7 @@ def main(code: str):
         log(f"  내레이션: {len(nar)}개")
 
     log(f"\n[완료] {code}")
-    log(f"  별점: {'★'*plan.get('stars',0)}")
+    log(f"  별점: {'★'*P.clamp_stars(plan.get('stars'))}")
     log(f"  요약: {(plan.get('summary','')[:100])}")
     log("\n[내레이션]")
     for n in plan.get("narration", []):

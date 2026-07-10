@@ -205,8 +205,11 @@ def video_duration(path):
         return 0.0
 
 
-def parse_keep(raw):
-    """LLM/사용자 keep 파싱 — [a,b] 또는 [a,b,'라벨'](3개+) 모두 허용. 앞 2개만 사용."""
+def parse_keep(raw, total=None):
+    """LLM/사용자 keep 파싱 — [a,b] 또는 [a,b,'라벨'](3개+) 모두 허용. 앞 2개만 사용.
+    total(영상 길이)을 주면 [0, total]로 클램프해 LLM이 범위를 넘겨도 안전하게 만든다.
+    NaN/inf는 유한값이 아니므로 버린다."""
+    import math
     out = []
     for item in (raw or []):
         try:
@@ -214,10 +217,57 @@ def parse_keep(raw):
                 a = float(item.get("start")); b = float(item.get("end"))
             else:
                 a = float(item[0]); b = float(item[1])
+            if not (math.isfinite(a) and math.isfinite(b)):
+                continue
+            if total and total > 0:                 # 영상 밖으로 나간 구간 잘라내기
+                a = max(0.0, min(a, total)); b = max(0.0, min(b, total))
             if b > a:
                 out.append((a, b))
         except Exception:
             continue
+    return out
+
+
+def clamp_stars(v, lo=0, hi=5):
+    """별점을 0~5 정수로. None·NaN·문자열·범위밖 모두 안전 처리('★'*stars 크래시 방지)."""
+    try:
+        n = int(round(float(v)))
+    except (TypeError, ValueError):
+        return 0
+    return max(lo, min(hi, n))
+
+
+def parse_lines(raw, text_keys, extra=None, log=None):
+    """LLM의 dialogue/narration 배열을 방어적으로 파싱.
+    항목 하나가 키 누락/NaN/타입오류여도 그 항목만 건너뛰고 나머지는 살린다
+    (기존엔 float(d['start']) 하드접근이라 한 항목만 깨져도 단계 전체가 크래시).
+    text_keys: 텍스트를 담은 키 후보(먼저 맞는 것 사용). extra: (키, 기본값) 추가 필드.
+    반환: [(start, end, text, *extra_values)]  — 시간순 정렬."""
+    import math
+    out, dropped = [], 0
+    for d in (raw or []):
+        try:
+            if not isinstance(d, dict):
+                dropped += 1; continue
+            s = float(d.get("start")); e = float(d.get("end"))
+            if not (math.isfinite(s) and math.isfinite(e)):
+                dropped += 1; continue
+            if e <= s:                       # 역전/0길이 → 최소 길이 부여
+                e = s + 0.5
+            txt = ""
+            for k in text_keys:
+                v = d.get(k)
+                if v not in (None, ""):
+                    txt = str(v); break
+            if not txt.strip():
+                dropped += 1; continue
+            vals = [d.get(k, dv) for k, dv in (extra or [])]
+            out.append((s, e, txt, *vals))
+        except (TypeError, ValueError):
+            dropped += 1; continue
+    out.sort(key=lambda x: x[0])
+    if dropped and log:
+        log(f"※ LLM 항목 {dropped}개가 형식 오류(키 누락·NaN·타입)로 제외됐습니다")
     return out
 
 
@@ -705,8 +755,13 @@ def narration_budget(target_sec, style="3min"):
     """목표 길이(초) → (문장 수 하한, 상한, 대략 글자수). 글자수는 TTS 발화속도 기준.
     3min : 내레이션이 영상을 거의 다 덮는다 → 60초 = 10~13문장·346자
     cinema: 대사 구간에는 내레이션이 없다 → 60초 = 6~9문장·207자"""
+    try:
+        target_sec = float(target_sec)
+    except (TypeError, ValueError):
+        target_sec = 60.0
+    target_sec = max(10.0, min(1800.0, target_sec))    # 10초~30분 안으로
     ratio = _CINEMA_SPEECH_RATIO if style == "cinema" else 1.0
-    speak_sec = float(target_sec) * ratio
+    speak_sec = target_sec * ratio
     n = max(3, round(speak_sec / _SEC_PER_SENT))
     chars = int(speak_sec * _TTS_CHARS_PER_SEC * _BREATH)
     return n - 1, n + 2, chars
@@ -1256,6 +1311,10 @@ def mux_narration(video, narration_wav, out_video, narration_gain=1.0,
     mode='mute'       : 원음 음소거 — 해설만.
     orig_gain을 직접 주면 mode보다 우선한다(기존 호출부 호환).
     """
+    try:
+        duck_level = max(0.0, min(1.0, float(duck_level)))   # ffmpeg 볼륨식에 넣기 전 0~1로
+    except (TypeError, ValueError):
+        duck_level = 0.3
     if orig_gain is not None:
         fc = (f"[0:a]volume={orig_gain}[oa];[1:a]volume={narration_gain}[na];"
               f"[oa][na]amix=inputs=2:duration=first:normalize=0[a]")

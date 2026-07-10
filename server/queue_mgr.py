@@ -61,6 +61,9 @@ class QueueManager:
         self.items = []
         self.version = 0
         self.cond = threading.Condition()
+        # 여러 워커 스레드 + 디스패처 + HTTP 요청 스레드가 items/_lanes/_running_ids를
+        # 동시에 건드린다. 이 락으로 구조 변경과 직렬화를 보호한다(경쟁·직렬화중변경 방지).
+        self._lock = threading.RLock()
         self._lanes = {}          # name -> (size, Semaphore)
         self._workers = threading.Semaphore(MAX_ITEM_WORKERS)
         self._running_ids = set()
@@ -86,8 +89,10 @@ class QueueManager:
 
     def _save(self):
         try:
-            self._qfile().write_text(
-                json.dumps(self.items, ensure_ascii=False, indent=1), encoding="utf-8")
+            # 직렬화 중 다른 스레드가 items/log를 바꾸면 "changed size" → 락 안에서 스냅샷
+            with self._lock:
+                snap = json.dumps(self.items, ensure_ascii=False, indent=1)
+            self._qfile().write_text(snap, encoding="utf-8")
         except Exception:
             pass
 
@@ -104,17 +109,22 @@ class QueueManager:
             return S.NullLock()
         c = self.load_cfg()
         size = max(1, int(c.get(f"queue_{name}", {"gpu": 1, "ai": 2, "tts": 1}.get(name, 1))))
-        cur = self._lanes.get(name)
-        if not cur or cur[0] != size:
-            self._lanes[name] = (size, threading.BoundedSemaphore(size))
-        return self._lanes[name][1]
+        # 락 없이 두면 워커 둘이 동시에 세마포어를 새로 만들어 GPU=1 제한이 깨진다
+        with self._lock:
+            cur = self._lanes.get(name)
+            if not cur or cur[0] != size:
+                self._lanes[name] = (size, threading.BoundedSemaphore(size))
+            return self._lanes[name][1]
 
     # ── 공개 API ────────────────────────────────────────────────────────────
     def snapshot(self):
         c = self.load_cfg()
+        # 다른 스레드가 item을 바꾸는 중에 FastAPI가 직렬화하면 깨진다 → 락 안에서 깊은 복사
+        with self._lock:
+            items = json.loads(json.dumps(self.items, ensure_ascii=False))
         return {"version": self.version,
                 "lanes": {"gpu": int(c.get("queue_gpu", 1)), "ai": int(c.get("queue_ai", 2))},
-                "items": self.items}
+                "items": items}
 
     def add(self, videos, pipeline, opts):
         """videos: [{path, code}] — code 없으면 파일명에서 추출 실패한 것(needs_code)."""
@@ -131,7 +141,8 @@ class QueueManager:
                   "progress": 0, "error": None, "log": [],
                   "pipeline": {k: bool(pipeline.get(k)) for k in STAGE_ORDER},
                   "opts": dict(opts or {}), "added": time.time()}
-            self.items.append(it)
+            with self._lock:
+                self.items.append(it)
             added.append(it["id"])
         self._touch()
         return added
@@ -166,37 +177,42 @@ class QueueManager:
             self._touch()
 
     def remove(self, iid):
-        it = self._find(iid)
-        if it and it["status"] != "running":
-            self.items.remove(it)
-            self._touch()
-            return True
-        return False
+        with self._lock:
+            it = self._find(iid)
+            if it and it["status"] != "running":
+                self.items.remove(it)
+            else:
+                return False
+        self._touch()
+        return True
 
     def move(self, iid, delta):
         """큐 순서 변경 — 큐 순서가 곧 묶음 영상의 편집 순서(먼저/다음은/마지막으로)다.
         delta=-1 위로, +1 아래로. running 중인 아이템은 옮기지 않는다(판정이 이미 끝났다)."""
-        it = self._find(iid)
-        if not it or it["status"] == "running":
-            return False
-        i = self.items.index(it)
-        j = max(0, min(len(self.items) - 1, i + int(delta)))
-        if i == j:
-            return False
-        self.items.insert(j, self.items.pop(i))
+        with self._lock:
+            it = self._find(iid)
+            if not it or it["status"] == "running":
+                return False
+            i = self.items.index(it)
+            j = max(0, min(len(self.items) - 1, i + int(delta)))
+            if i == j:
+                return False
+            self.items.insert(j, self.items.pop(i))
         self._touch()
         return True
 
     def reorder(self, ids):
         """전체 순서를 통째로 지정(드래그 정렬용). 목록에 없는 id는 무시, 빠진 건 뒤에 붙인다."""
         pos = {x: n for n, x in enumerate(ids)}
-        self.items.sort(key=lambda it: pos.get(it["id"], len(pos)))
+        with self._lock:
+            self.items.sort(key=lambda it: pos.get(it["id"], len(pos)))
         self._touch()
         return True
 
     def clear_finished(self):
-        self.items = [it for it in self.items
-                      if it["status"] not in ("done", "review", "error")]
+        with self._lock:
+            self.items = [it for it in self.items
+                          if it["status"] not in ("done", "review", "error")]
         self._touch()
 
     def wait_version(self, since, timeout=25.0):
@@ -210,11 +226,16 @@ class QueueManager:
     def _dispatch_loop(self):
         while True:
             try:
-                for it in list(self.items):
-                    if it["status"] == "queued" and it["id"] not in self._running_ids:
-                        if self._workers.acquire(blocking=False):
+                with self._lock:
+                    pending = [it for it in self.items
+                               if it["status"] == "queued" and it["id"] not in self._running_ids]
+                for it in pending:
+                    if self._workers.acquire(blocking=False):
+                        with self._lock:
+                            if it["id"] in self._running_ids or it["status"] != "queued":
+                                self._workers.release(); continue   # 그새 다른 스레드가 집어감
                             self._running_ids.add(it["id"])
-                            threading.Thread(target=self._run_item, args=(it,), daemon=True).start()
+                        threading.Thread(target=self._run_item, args=(it,), daemon=True).start()
             except Exception:
                 pass
             time.sleep(0.5)
@@ -261,7 +282,8 @@ class QueueManager:
             it["stage_label"] = f"✗ 오류: {str(e)[:60]}"
             em.log(f"✖ 오류: {e}")
         finally:
-            self._running_ids.discard(it["id"])
+            with self._lock:
+                self._running_ids.discard(it["id"])
             self._workers.release()
             self._touch()
 

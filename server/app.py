@@ -63,6 +63,14 @@ app = FastAPI(title="ja_reviewer")
 JOBS = {}  # job_id -> {"q": Queue, "result": ..., "error": ...}
 
 
+def _load_json(path, default=None):
+    """깨진/없는 JSON을 예외 없이 읽는다(손으로 편집한 자막 파일 대비)."""
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception:
+        return [] if default is None else default
+
+
 def load_cfg():
     c = dict(DEFAULTS)
     if CFG_PATH.exists():
@@ -682,7 +690,7 @@ async def step_ai_manual(req: Request):
             jstep(jid, 1, 1, "핵심 구간 컷")
             P.cut_video(video, keep, final, lambda mm: jlog(jid, mm),
                         lambda fr: jprog(jid, fr, "컷"))
-            save_state(outdir, code, summary=res.get("summary", ""), stars=res.get("stars"))
+            save_state(outdir, code, summary=res.get("summary", ""), stars=P.clamp_stars(res.get("stars")))
             jfile(jid, "AI 결과(plan)", outdir / f"{code}_plan.json")
             jfile(jid, "최종 영상", final)
             jdone(jid, {"step": "ai", "code": code, "final": final,
@@ -740,8 +748,8 @@ async def review(req: Request):
             jstep(jid, 4, 4, "핵심 구간 컷 + 자막")
             P.cut_video(path, keep, final, lambda m: jlog(jid, m))
             jfile(jid, "최종 영상", final)
-            dlg = [(float(d["start"]), float(d["end"]), d["ko"], d.get("speaker", "여")) for d in res.get("dialogue", [])]
-            nar = [(float(d["start"]), float(d["end"]), d["text"], d.get("style", "기본")) for d in res.get("narration", [])]
+            dlg = P.parse_lines(res.get("dialogue", []), ("ko", "text"), extra=[("speaker", "여")], log=lambda m: jlog(jid, m))
+            nar = P.parse_lines(res.get("narration", []), ("text", "ko"), extra=[("style", "기본")], log=lambda m: jlog(jid, m))
             write_dialogue(outdir, code, P.retime(dlg, keep, snap=False))
             jfile(jid, "대사 자막", outdir / f"{code}_대사.srt")
             write_narration(outdir, code, P.retime(nar, keep, snap=True))
@@ -749,7 +757,7 @@ async def review(req: Request):
             jdone(jid, {"mode": "manual", "final": final,
                         "srt_dialogue": str(outdir / f"{code}_대사.srt"),
                         "srt_narration": str(outdir / f"{code}_내레이션.srt"),
-                        "summary": res.get("summary", ""), "stars": res.get("stars"),
+                        "summary": res.get("summary", ""), "stars": P.clamp_stars(res.get("stars")),
                         "final_sec": P.video_duration(final), "target": target})
         except Exception as e:
             jerr(jid, e)
@@ -775,8 +783,8 @@ async def render(req: Request):
             P.cut_video(path, keep, final, lambda m: jlog(jid, m))
             jfile(jid, "최종 영상", final)
             jstep(jid, 2, 2, "자막 생성")
-            dlg = [(float(d["start"]), float(d["end"]), d["ko"], d.get("speaker", "여")) for d in res.get("dialogue", [])]
-            nar = [(float(d["start"]), float(d["end"]), d["text"], d.get("style", "기본")) for d in res.get("narration", [])]
+            dlg = P.parse_lines(res.get("dialogue", []), ("ko", "text"), extra=[("speaker", "여")], log=lambda m: jlog(jid, m))
+            nar = P.parse_lines(res.get("narration", []), ("text", "ko"), extra=[("style", "기본")], log=lambda m: jlog(jid, m))
             write_dialogue(outdir, code, P.retime(dlg, keep, snap=False))
             jfile(jid, "대사 자막", outdir / f"{code}_대사.srt")
             write_narration(outdir, code, P.retime(nar, keep, snap=True))
@@ -926,18 +934,18 @@ def preview_data(code: str, source: str = ""):
     djson, dsrt = outdir / f"{code}_대사.json", outdir / f"{code}_대사.srt"
     njson, nsrt = outdir / f"{code}_내레이션.json", outdir / f"{code}_내레이션.srt"
     if djson.is_file():
-        for d in json.loads(djson.read_text(encoding="utf-8")):
-            key = "dialogue_m" if d.get("speaker") == "남" else "dialogue"
-            subs.append({"start": float(d["start"]), "end": float(d["end"]),
-                         "text": d.get("text") or d.get("ko") or "", "style": key})
+        for s, e, t, spk in P.parse_lines(_load_json(djson), ("ko", "text"),
+                                          extra=[("speaker", "여")]):
+            subs.append({"start": s, "end": e, "text": t,
+                         "style": "dialogue_m" if spk == "남" else "dialogue"})
     elif dsrt.is_file():
         subs += [{"start": a, "end": b, "text": t, "style": "dialogue"}
                  for a, b, t in P.srt_parse(dsrt)]
     if njson.is_file():
-        for d in json.loads(njson.read_text(encoding="utf-8")):
-            key = _NAR_STYLE_KEY.get(d.get("style", "기본"), "narration")
-            subs.append({"start": float(d["start"]), "end": float(d["end"]),
-                         "text": d.get("text") or "", "style": key})
+        for s, e, t, stl in P.parse_lines(_load_json(njson), ("text", "ko"),
+                                          extra=[("style", "기본")]):
+            subs.append({"start": s, "end": e, "text": t,
+                         "style": _NAR_STYLE_KEY.get(stl, "narration")})
     elif nsrt.is_file():
         subs += [{"start": a, "end": b, "text": t, "style": "narration"}
                  for a, b, t in P.srt_parse(nsrt)]
