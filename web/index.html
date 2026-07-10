@@ -258,6 +258,7 @@
                 <span class="fld"><span class="lbl">폰트</span><input id="dlgFont" style="width:128px"></span>
                 <span class="fld"><span class="lbl">크기</span><input id="dlgSize" type="number" style="width:58px"></span>
                 <label class="muted"><input type="checkbox" id="dlgBold" style="height:auto;vertical-align:middle"> 굵게</label>
+                <span class="fld"><span class="lbl">등장효과</span><select id="dlgAnim" style="width:118px"><option value="none" selected>없음</option><option value="fade">페이드</option><option value="pop">팝(휙)</option><option value="punch">펀치(강하게)</option><option value="slide">슬라이드</option></select></span>
               </div>
               <div class="formrow">
                 <span class="fld"><span class="lbl">색</span><input id="dlgColor" type="color" style="width:40px;padding:2px"></span>
@@ -279,6 +280,7 @@
                 <span class="fld"><span class="lbl">폰트</span><input id="dlmFont" style="width:128px"></span>
                 <span class="fld"><span class="lbl">크기</span><input id="dlmSize" type="number" style="width:58px"></span>
                 <label class="muted"><input type="checkbox" id="dlmBold" style="height:auto;vertical-align:middle"> 굵게</label>
+                <span class="fld"><span class="lbl">등장효과</span><select id="dlmAnim" style="width:118px"><option value="none" selected>없음</option><option value="fade">페이드</option><option value="pop">팝(휙)</option><option value="punch">펀치(강하게)</option><option value="slide">슬라이드</option></select></span>
               </div>
               <div class="formrow">
                 <span class="fld"><span class="lbl">색</span><input id="dlmColor" type="color" style="width:40px;padding:2px"></span>
@@ -300,6 +302,7 @@
                 <span class="fld"><span class="lbl">폰트</span><input id="narFont" style="width:128px"></span>
                 <span class="fld"><span class="lbl">크기</span><input id="narSize" type="number" style="width:58px"></span>
                 <label class="muted"><input type="checkbox" id="narBold" style="height:auto;vertical-align:middle"> 굵게</label>
+                <span class="fld"><span class="lbl">등장효과</span><select id="narAnim" style="width:118px"><option value="none">없음</option><option value="fade">페이드</option><option value="pop" selected>팝(휙)</option><option value="punch">펀치(강하게)</option><option value="slide">슬라이드</option></select></span>
               </div>
               <div class="formrow">
                 <span class="fld"><span class="lbl">색</span><input id="narColor" type="color" style="width:40px;padding:2px"></span>
@@ -321,6 +324,7 @@
                 <span class="fld"><span class="lbl">폰트</span><input id="empFont" style="width:128px"></span>
                 <span class="fld"><span class="lbl">크기</span><input id="empSize" type="number" style="width:58px"></span>
                 <label class="muted"><input type="checkbox" id="empBold" style="height:auto;vertical-align:middle"> 굵게</label>
+                <span class="fld"><span class="lbl">등장효과</span><select id="empAnim" style="width:118px"><option value="none">없음</option><option value="fade">페이드</option><option value="pop">팝(휙)</option><option value="punch" selected>펀치(강하게)</option><option value="slide">슬라이드</option></select></span>
               </div>
               <div class="formrow">
                 <span class="fld"><span class="lbl">색</span><input id="empColor" type="color" style="width:40px;padding:2px"></span>
@@ -342,6 +346,7 @@
                 <span class="fld"><span class="lbl">폰트</span><input id="infFont" style="width:128px"></span>
                 <span class="fld"><span class="lbl">크기</span><input id="infSize" type="number" style="width:58px"></span>
                 <label class="muted"><input type="checkbox" id="infBold" style="height:auto;vertical-align:middle"> 굵게</label>
+                <span class="fld"><span class="lbl">등장효과</span><select id="infAnim" style="width:118px"><option value="none">없음</option><option value="fade">페이드</option><option value="pop">팝(휙)</option><option value="punch">펀치(강하게)</option><option value="slide" selected>슬라이드</option></select></span>
               </div>
               <div class="formrow">
                 <span class="fld"><span class="lbl">색</span><input id="infColor" type="color" style="width:40px;padding:2px"></span>
@@ -398,6 +403,10 @@
           <span class="fld"><span class="lbl">인포카드 노출(초)</span><input id="pvHold" type="number" step="0.5" value="2" style="width:64px"></span>
           <span class="muted" id="pvClock" style="margin-left:8px">0.00s</span>
         </div>
+        <div class="actions" style="margin-top:6px">
+          <button class="go spacer" id="btnPvRender">● 체크한 것만 렌더</button>
+        </div>
+        <div class="hint">위에서 <b>켜둔 요소만</b> 영상에 굽습니다(배너=프레임+인포카드, 워터마크, 자막). 자막 <b>등장효과</b>는 ④ 세부 스타일에서 없음/페이드/팝/펀치/슬라이드 중 고르세요 — 미리보기에도 바로 반영됩니다.</div>
       </div>
       </div>
       </details>

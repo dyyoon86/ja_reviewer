@@ -966,17 +966,24 @@ _ALIGN = {("bottom", "left"): 1, ("bottom", "center"): 2, ("bottom", "right"): 3
           ("top", "left"): 7, ("top", "center"): 8, ("top", "right"): 9}
 
 # 기본 스타일 — 대사(하단 흰), 내레이션=기본(상단 노랑), 강조(중앙 큰 빨강), 정보(우상단 작은 하늘)
+# anim: 등장 효과 — none | fade | pop | punch | slide  (_ass_anim 참고)
+# 대사는 차분하게(none), 내레이션·강조·정보는 튀어나오게 → 리듬감
 STYLE_DEFAULT = {
     "dialogue":  {"font": "Malgun Gothic", "size": 42, "color": "#FFFFFF", "outline_color": "#000000",
-                  "outline": 2.2, "shadow": 0.4, "bold": True, "v": "bottom", "h": "center", "margin": 46},
+                  "outline": 2.2, "shadow": 0.4, "bold": True, "v": "bottom", "h": "center", "margin": 46,
+                  "anim": "none"},
     "dialogue_m": {"font": "Malgun Gothic", "size": 42, "color": "#7FD0FF", "outline_color": "#000000",
-                   "outline": 2.2, "shadow": 0.4, "bold": True, "v": "bottom", "h": "center", "margin": 46},
+                   "outline": 2.2, "shadow": 0.4, "bold": True, "v": "bottom", "h": "center", "margin": 46,
+                   "anim": "none"},
     "narration": {"font": "Malgun Gothic", "size": 38, "color": "#FFD400", "outline_color": "#000000",
-                  "outline": 2.2, "shadow": 0.4, "bold": True, "v": "top", "h": "center", "margin": 40},
+                  "outline": 2.2, "shadow": 0.4, "bold": True, "v": "top", "h": "center", "margin": 40,
+                  "anim": "pop"},
     "emphasis":  {"font": "Malgun Gothic", "size": 52, "color": "#FF3B3B", "outline_color": "#000000",
-                  "outline": 2.8, "shadow": 0.6, "bold": True, "v": "middle", "h": "center", "margin": 60},
+                  "outline": 2.8, "shadow": 0.6, "bold": True, "v": "middle", "h": "center", "margin": 60,
+                  "anim": "punch"},
     "info":      {"font": "Malgun Gothic", "size": 32, "color": "#8FE3FF", "outline_color": "#00243A",
-                  "outline": 2.0, "shadow": 0.3, "bold": True, "v": "top", "h": "right", "margin": 30},
+                  "outline": 2.0, "shadow": 0.3, "bold": True, "v": "top", "h": "right", "margin": 30,
+                  "anim": "slide"},
 }
 
 # LLM이 붙이는 내레이션 유형 → ASS 스타일명
@@ -997,10 +1004,37 @@ def _style_line(name, st):
             f"{st.get('outline',2)},{st.get('shadow',0)},{align},40,40,{int(st.get('margin',40))},1")
 
 
+def _ass_anim(kind, dur_ms):
+    """자막 등장 효과 → ASS 인라인 오버라이드 태그. \\t(t1,t2,...)의 시각은 이벤트 시작 기준(ms).
+    none  : 없음(그냥 뜸)
+    pop   : 작게 나타나 살짝 커졌다가(오버슈트) 제자리 — '휙' 튀어나오는 느낌
+    punch : pop보다 강하게. 강조 문구용
+    fade  : 부드럽게 페이드
+    slide : 아래에서 살짝 밀려 올라옴
+    """
+    if kind == "pop":
+        return r"{\fad(0,120)\fscx70\fscy70\t(0,110,\fscx108\fscy108)\t(110,190,\fscx100\fscy100)}"
+    if kind == "punch":
+        return (r"{\fad(0,140)\fscx40\fscy40\t(0,90,\fscx118\fscy118)"
+                r"\t(90,170,\fscx94\fscy94)\t(170,240,\fscx100\fscy100)}")
+    if kind == "fade":
+        return r"{\fad(180,180)}"
+    if kind == "slide":
+        # 아래에서 위로 24px — \move는 절대좌표라 여기선 원점 이동(\org) 대신 fad+scaleY로 대체
+        return r"{\fad(0,120)\fscy60\t(0,150,\fscy105)\t(150,230,\fscy100)}"
+    return ""
+
+
 def build_ass(dialogue, narration, out_ass, width, height, styles=None):
     styles = styles or {}
     S = {k: {**STYLE_DEFAULT[k], **(styles.get(k) or {})}
          for k in ("dialogue", "dialogue_m", "narration", "emphasis", "info")}
+    # 스타일 태그명 → 애니 종류
+    ANIM = {"Dialogue": S["dialogue"].get("anim", "none"),
+            "DialogueM": S["dialogue_m"].get("anim", "none"),
+            "Narration": S["narration"].get("anim", "none"),
+            "Emphasis": S["emphasis"].get("anim", "none"),
+            "Info": S["info"].get("anim", "none")}
     L = ["[Script Info]", "ScriptType: v4.00+", f"PlayResX: {width}", f"PlayResY: {height}",
          "WrapStyle: 2", "ScaledBorderAndShadow: yes", "",
          "[V4+ Styles]",
@@ -1024,7 +1058,8 @@ def build_ass(dialogue, narration, out_ass, width, height, styles=None):
     evs.sort(key=lambda x: x[0])
     for s, e, style, t in evs:
         txt = str(t).replace("\n", "\\N")
-        L.append(f"Dialogue: 0,{_ass_time(s)},{_ass_time(e)},{style},,0,0,0,,{txt}")
+        tag = _ass_anim(ANIM.get(style, "none"), int((e - s) * 1000))
+        L.append(f"Dialogue: 0,{_ass_time(s)},{_ass_time(e)},{style},,0,0,0,,{tag}{txt}")
     Path(out_ass).write_text("\n".join(L) + "\n", encoding="utf-8")
     return out_ass
 
@@ -1113,10 +1148,12 @@ def _banner_filter(prep, anim):
 
 def burn_subs(video, dialogue_srt, narration_srt, out_video, styles=None,
               narration_json=None, dialogue_json=None, log=print,
-              banner=None, banner_anim=None):
+              banner=None, banner_anim=None, subs=True):
     """자막(+선택: 배너·워터마크)을 영상에 굽는다.
     banner={'frame':png,'info':png,'wm':png} 를 주면 자막과 같은 인코딩 1패스에서
-    함께 합성한다(따로 굽는 2패스 대비 인코딩 1회 절약)."""
+    함께 합성한다(따로 굽는 2패스 대비 인코딩 1회 절약).
+    banner에서 키를 빼면 그 레이어는 빠진다(미리보기 체크 그대로 굽기).
+    subs=False면 자막 없이 배너만 굽는다."""
     w, h = video_wh(video)
     if dialogue_json and Path(dialogue_json).is_file():        # 화자(speaker) 포함 대사
         dd = json.loads(Path(dialogue_json).read_text(encoding="utf-8"))
@@ -1128,11 +1165,17 @@ def burn_subs(video, dialogue_srt, narration_srt, out_video, styles=None,
         nar = [(float(d["start"]), float(d["end"]), d["text"], d.get("style", "기본")) for d in data]
     else:
         nar = srt_parse(narration_srt) if narration_srt and Path(narration_srt).is_file() else []
-    if not dlg and not nar:
+    if subs and not dlg and not nar:
         raise RuntimeError("입힐 자막(SRT)이 없습니다.")
+    if not subs and not banner:
+        raise RuntimeError("자막·배너 둘 다 꺼져 있어 구울 게 없습니다.")
     ass_path = Path(out_video).with_suffix(".ass")
-    build_ass(dlg, nar, str(ass_path), w, h, styles)
-    log(f"자막 굽기 (ffmpeg ass, {w}x{h}, 대사 {len(dlg)} · 내레이션 {len(nar)})...")
+    if subs:
+        build_ass(dlg, nar, str(ass_path), w, h, styles)
+        log(f"자막 굽기 (ffmpeg ass, {w}x{h}, 대사 {len(dlg)} · 내레이션 {len(nar)})...")
+    else:
+        ass_path.parent.mkdir(parents=True, exist_ok=True)
+        log(f"자막 없이 배너만 굽기 ({w}x{h})...")
 
     inputs, fc, last = [], "", "0:v"
     if banner:
@@ -1143,7 +1186,8 @@ def burn_subs(video, dialogue_srt, narration_srt, out_video, styles=None,
 
     if fc:
         # 자막(ass)은 배너 오버레이 뒤에 얹는다 — 배너가 자막을 가리지 않게
-        fc += f"[{last}]ass={ass_path.name}[out]"
+        fc += (f"[{last}]ass={ass_path.name}[out]" if subs
+               else f"[{last}]null[out]")
 
     # -loop 1 로 넣은 배너 PNG는 무한 스트림이라 원본이 끝나도 인코딩이 계속된다.
     # 원본 길이로 명시적으로 끊어준다.

@@ -280,9 +280,10 @@ def stage_banner(c, code, em, hold=2.0, preview=True):
             "meta": {k: r["meta"][k] for k in ("code", "actress", "title")}}
 
 
-def stage_burn(c, code, styles, em, source=None, banner=True):
-    """⑤ 자막 굽기(하드섭) — voiced 우선 → final. {code}_final_subbed.mp4 생성.
-    banner=True면 프레임·인포카드·워터마크를 같은 인코딩 1패스에서 함께 굽는다."""
+def stage_burn(c, code, styles, em, source=None, banner=True, parts=None):
+    """⑥ 굽기(하드섭) — voiced 우선 → final. {code}_final_subbed.mp4 생성.
+    banner=True면 프레임·인포카드·워터마크를 같은 인코딩 1패스에서 함께 굽는다.
+    parts={'frame','info','wm','subs': bool} 로 구울 요소를 고른다(미리보기 체크 그대로)."""
     outdir = work_dir(c, code)
     voiced = outdir / f"{code}_final_voiced.mp4"
     final = outdir / f"{code}_final.mp4"
@@ -299,11 +300,20 @@ def stage_burn(c, code, styles, em, source=None, banner=True):
     njson = outdir / f"{code}_내레이션.json"     # 유형(style) 포함 → 타입별 스타일
     djson = outdir / f"{code}_대사.json"          # 화자(speaker) 포함 → 여/남 색 구분
     out = str(outdir / f"{code}_final_subbed.mp4")
+    # parts로 레이어를 골라 굽는다(미리보기에서 체크한 것만) — 미지정이면 전부
+    parts = parts or {}
+    want_subs = bool(parts.get("subs", True))
     bl = banner_layers(c, code, em) if banner else None
-    em.step(1, 1, "자막 굽기(ffmpeg)" + (" + 배너·워터마크" if bl else ""))
+    if bl:
+        bl = {k: v for k, v in bl.items() if parts.get(k, True)}
+        bl = bl or None
+    picked = ([k for k in ("frame", "info", "wm") if bl and k in bl]
+              + (["자막"] if want_subs else []))
+    em.step(1, 1, "굽기(ffmpeg) — " + (", ".join(picked) or "없음"))
     P.burn_subs(str(src), str(dsrt), str(nsrt), out, styles,
                 str(njson) if njson.is_file() else None,
                 str(djson) if djson.is_file() else None, em.log,
-                banner=bl)
-    em.file("자막 입힌 영상", out)
-    return {"mode": "burn", "subbed": out, "source": str(src), "banner": bool(bl)}
+                banner=bl, subs=want_subs)
+    em.file("완성 영상", out)
+    return {"mode": "burn", "subbed": out, "source": str(src),
+            "banner": bool(bl), "parts": picked}

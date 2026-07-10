@@ -651,7 +651,8 @@ function collectStyle(p){
   return { font:$("#"+p+"Font").value||"Malgun Gothic", size:+$("#"+p+"Size").value||40,
     bold:$("#"+p+"Bold").checked, color:$("#"+p+"Color").value, outline_color:$("#"+p+"OutColor").value,
     outline:parseFloat($("#"+p+"Outline").value)||0, v:$("#"+p+"V").value, h:$("#"+p+"H").value,
-    margin:+$("#"+p+"Margin").value||0 };
+    margin:+$("#"+p+"Margin").value||0,
+    anim:($("#"+p+"Anim") ? $("#"+p+"Anim").value : "none") };
 }
 function applyStyle(p, st){
   if(!st) return;
@@ -664,6 +665,7 @@ function applyStyle(p, st){
   $("#"+p+"V").value=st.v||"bottom";
   $("#"+p+"H").value=st.h||"center";
   $("#"+p+"Margin").value=st.margin!=null?st.margin:40;
+  if($("#"+p+"Anim")) $("#"+p+"Anim").value=st.anim||"none";
 }
 let SUBTPL={};
 function loadSubTemplates(pick){
@@ -1009,7 +1011,7 @@ $("#btnPreview").onclick=()=>{
 // ④ 자막 스타일(폰트·크기·색·외곽선·위치)을 만지면 미리보기에 즉시 반영
 // select/checkbox는 input이 안 뜨는 브라우저가 있어 change도 함께 건다.
 ["dlg","dlm","nar","emp","inf"].forEach(p=>{
-  ["Font","Size","Bold","Color","OutColor","Outline","V","H","Margin"].forEach(f=>{
+  ["Font","Size","Bold","Color","OutColor","Outline","V","H","Margin","Anim"].forEach(f=>{
     const el=document.getElementById(p+f);
     if(!el) return;
     const repaint=()=>{
@@ -1020,3 +1022,25 @@ $("#btnPreview").onclick=()=>{
     el.addEventListener("change", repaint);
   });
 });
+
+// 미리보기에서 체크한 요소만 굽기 — 배너=프레임+인포카드, 워터마크, 자막
+$("#btnPvRender").onclick=()=>{
+  const code=($("#pvCode").value||curCode()||"").trim();
+  if(!code){ log("품번을 입력하세요","warn"); return; }
+  const b=$("#pvShowBanner").checked, w=$("#pvShowWm").checked, s=$("#pvShowSubs").checked;
+  if(!b && !w && !s){ log("구울 요소가 없습니다 — 하나 이상 체크하세요","warn"); return; }
+  const parts={frame:b, info:b, wm:w, subs:s};
+  const picked=[b?"배너":null, w?"워터마크":null, s?"자막":null].filter(Boolean).join(", ");
+  log(`── 렌더 시작 (${picked}) ──`);
+  fetch("/burn",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    code, styles:allStyles(), banner:(b||w), parts
+  })}).then(r=>r.json()).then(j=>{
+    if(!j.job){ log("✖ 시작 실패: "+(j.detail||JSON.stringify(j)),"warn"); return; }
+    runJob(j.job,(r)=>{
+      $("#resultCard").style.display="block";
+      $("#result").innerHTML=`<div class="ok">✔ 렌더 완료 (${(r.parts||[]).join(", ")||picked})</div>`+
+        `<div>${r.subbed}</div>`;
+      log("✔ 렌더 완료 — "+r.subbed,"ok");
+    });
+  }).catch(e=>log("✖ 오류: "+e,"warn"));
+};

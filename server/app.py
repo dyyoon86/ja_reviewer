@@ -739,7 +739,8 @@ async def burn(req: Request):
     def work():
         try:
             r = stage_burn(c, code, styles, JobEmitter(jid), source=body.get("source"),
-                           banner=bool(body.get("banner", True)))
+                           banner=bool(body.get("banner", True)),
+                           parts=body.get("parts"))
             c["sub_styles"] = styles; save_cfg(c)   # 마지막 사용 스타일 기억
             jdone(jid, r)
         except Exception as e:
