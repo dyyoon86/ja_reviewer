@@ -785,7 +785,8 @@ let qPrev = {};   // id → status (검수대기/오류 전환 알림용)
 
 function qPipeline(){
   return { transcribe:$("#qpTranscribe").checked, ai:$("#qpAi").checked,
-           subs:$("#qpSubs").checked, tts:$("#qpTts").checked, burn:$("#qpBurn").checked };
+           subs:$("#qpSubs").checked, banner:$("#qpBanner").checked,
+           tts:$("#qpTts").checked, burn:$("#qpBurn").checked };
 }
 function qOpts(){
   const o = { model:$("#whisper").value, llm:$("#llm").value,

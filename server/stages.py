@@ -58,9 +58,12 @@ def save_state(outdir, code, **fields):
 def steps_status(outdir, code):
     """단계 완료 여부는 '결과 파일 존재'로 판정 → 서버 재시작/수동삭제에도 견고."""
     o = Path(outdir)
+    # 배너 레이어는 작업폴더가 아니라 {out_dir}/_infocard_{code}/ 에 모인다
+    ic = o.parent / f"_infocard_{code}"
     return {"transcribe": (o / f"{code}_전사.json").is_file(),
             "ai": (o / f"{code}_plan.json").is_file(),
             "subs": (o / f"{code}_대사.srt").is_file(),
+            "banner": (ic / f"{code}_워터마크.png").is_file(),
             "tts": (o / f"{code}_내레이션.wav").is_file(),
             "burn": (o / f"{code}_final_subbed.mp4").is_file()}
 
@@ -251,6 +254,30 @@ def banner_layers(c, code, em=None, generate=True):
             return None
     out = {k: str(icdir / n) for k, n in names.items() if (icdir / n).is_file()}
     return out or None
+
+
+def stage_banner(c, code, em, hold=2.0, preview=True):
+    """④' 배너 — 품번 → DB 조회 → 투명 PNG 3장(프레임·인포카드·워터마크) + 미리보기 스틸.
+    인코딩 없음(수초). ⑤ 굽기가 이 레이어를 그대로 합성한다."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    import gen_infocard as GIC
+    icdir = Path(c["out_dir"]) / f"_infocard_{code}"
+    em.step(1, 1, "배너 레이어 생성(인코딩 없음)")
+    r = GIC.generate(code, outdir=str(icdir), hold=hold, assets_only=True,
+                     preview_anim=preview, log=em.log)
+    a = r["assets"]
+    em.file("프레임(상시)", a["frame"])
+    em.file("인포카드", a["info"])
+    em.file("워터마크(상시)", a["wm"])
+    em.file("미리보기·인포카드", r["preview_info"])
+    em.file("미리보기·워터마크", r["preview_wm"])
+    if r.get("preview_anim"):
+        em.file("움직이는 미리보기(4초)", r["preview_anim"])
+    return {"step": "banner", "code": code, "assets": a,
+            "preview_info": r["preview_info"], "preview_wm": r["preview_wm"],
+            "preview_anim": r.get("preview_anim") or "",
+            "meta": {k: r["meta"][k] for k in ("code", "actress", "title")}}
 
 
 def stage_burn(c, code, styles, em, source=None, banner=True):

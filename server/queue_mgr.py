@@ -19,11 +19,13 @@ from pathlib import Path
 
 from . import stages as S
 
-STAGE_ORDER = ["transcribe", "ai", "subs", "tts", "burn"]
+STAGE_ORDER = ["transcribe", "ai", "subs", "banner", "tts", "burn"]
 STAGE_LABEL = {"transcribe": "① 전사", "ai": "② AI 처리", "subs": "③ 자막",
-               "tts": "④ TTS", "burn": "⑤ 자막번인"}
+               "banner": "④ 배너", "tts": "⑤ TTS", "burn": "⑥ 자막번인"}
 # 스테이지 → 리소스 레인 (ai는 LLM 호출이 주업이라 ai 레인, 내부 컷만 gpu 세마포어로 감쌈)
-STAGE_LANE = {"transcribe": "gpu", "ai": "ai", "subs": None, "tts": "tts", "burn": "gpu"}
+# banner는 HTML→PNG 렌더라 인코딩이 없어 레인 불필요
+STAGE_LANE = {"transcribe": "gpu", "ai": "ai", "subs": None, "banner": None,
+              "tts": "tts", "burn": "gpu"}
 LOG_KEEP = 40      # 아이템별 로그 보관 줄 수
 MAX_ITEM_WORKERS = 4
 
@@ -261,6 +263,8 @@ class QueueManager:
                        (o.get("hint") or "").strip(), em, gpu=self._lane("gpu"))
         elif stg == "subs":
             S.stage_subs(c, code, em)
+        elif stg == "banner":
+            S.stage_banner(c, code, em, float(o.get("hold", 2.0)))
         elif stg == "tts":
             profile = o.get("tts_profile") or c.get("tts_profile")
             if not profile:
