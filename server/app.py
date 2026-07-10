@@ -750,8 +750,10 @@ async def burn(req: Request):
 
 # ─── 렌더 전 미리보기 (브라우저에서 실시간 합성 — 인코딩 0) ──────────────────
 # 배너·워터마크·자막을 <video> 위에 얹어 재생바로 스크럽하며 확인한다.
-# 굽기(burn_subs)와 같은 타이밍 규칙을 쓰므로 결과가 그대로 예측된다.
-PREVIEW_ANIM = {"hold": 2.0, "fade": 0.5, "blur": 16, "wm_start": 2.1, "wm_slide": 40}
+# 애니 파라미터는 굽기(pipeline.BANNER_ANIM)를 그대로 쓴다 — 값이 갈라지면
+# 미리보기와 결과물이 달라지므로 절대 여기서 따로 정의하지 않는다.
+# 레이어 PNG는 1920x1080 기준이므로 프론트는 표시 배율(width/1920)로 blur·slide를 환산한다.
+BANNER_CANVAS_W = 1920
 
 _NAR_STYLE_KEY = {"기본": "narration", "일반": "narration",
                   "강조": "emphasis", "정보": "info",
@@ -818,7 +820,7 @@ def preview_data(code: str, source: str = ""):
             "duration": P.video_duration(str(src)),
             "layers": layers, "subs": subs,
             "styles": c.get("sub_styles") or P.STYLE_DEFAULT,
-            "anim": PREVIEW_ANIM}
+            "anim": P.BANNER_ANIM, "canvas_w": BANNER_CANVAS_W}
 
 
 # ─── ⑥ 인포배너 (품번 → 인포카드/워터마크 자동 오버레이) ─────────────────────

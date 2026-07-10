@@ -911,24 +911,24 @@ function pvApply(t){
   const showBanner=$("#pvShowBanner").checked, showWm=$("#pvShowWm").checked;
   const showSubs=$("#pvShowSubs").checked;
   const fr=$("#pvFrame"), ic=$("#pvInfo"), wm=$("#pvWm");
+  // 레이어는 1920 기준으로 그려졌다 → 표시 크기에 맞춰 blur·slide를 같은 비율로 환산
+  const k = ($("#pvWrap").clientWidth || 960) / (pvData.canvas_w || 1920);
 
   // 프레임 — 상시
   fr.style.opacity = showBanner ? 1 : 0;
 
-  // 인포카드 — 등장/퇴장 시 흐려짐(blur)과 투명도 동시 적용
-  const inA  = pvClamp(t/0.4, 0, 1);                 // 0→1 등장
-  const outA = 1 - pvClamp((t-hold)/fade, 0, 1);     // 1→0 퇴장
-  const a = Math.min(inA, outA);
-  const blurIn  = (1-pvClamp(t/fade,0,1));           // 등장 초반 흐림
-  const blurOut = pvClamp((t-hold)/fade,0,1);        // 퇴장 후반 흐림
-  const blur = Math.min(1, blurIn + blurOut) * A.blur;
+  // 인포카드 — 굽기(_banner_filter)와 동일: fade 필터는 알파를 곱한다
+  //   선명본 알파 = fadein(0,0.4) × fadeout(hold,fade)
+  const a = pvClamp(t/0.4, 0, 1) * (1 - pvClamp((t-hold)/fade, 0, 1));
+  //   흐린본 알파 = fadeout(0,fade) 와 fadein(hold,fade) 중 큰 값 → 체감 블러량
+  const blurW = Math.max(1 - pvClamp(t/fade, 0, 1), pvClamp((t-hold)/fade, 0, 1));
   ic.style.opacity = showBanner ? a : 0;
-  ic.style.filter  = `blur(${(blur*0.25).toFixed(2)}px)`;   // px는 표시 배율 기준 축소
+  ic.style.filter  = `blur(${(blurW * A.blur * k).toFixed(2)}px)`;
 
-  // 워터마크 — 페이드인 + 슬라이드
+  // 워터마크 — 페이드인 + 위에서 슬라이드(굽기의 y 오프셋과 동일 픽셀량)
   const wa = pvClamp((t-A.wm_start)/fade, 0, 1);
   wm.style.opacity = showWm ? wa : 0;
-  wm.style.transform = `translateY(${(-A.wm_slide*(1-wa)*0.05).toFixed(2)}%)`;
+  wm.style.transform = `translateY(${(-A.wm_slide * (1-wa) * k).toFixed(2)}px)`;
 
   // 자막 — 현재 시각에 걸린 것만
   const box=$("#pvSubs");
