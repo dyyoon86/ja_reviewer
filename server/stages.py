@@ -218,7 +218,10 @@ def stage_tts(c, code, base, profile, language, seed, mux, em):
         clips.append((st, w))
     wav = str(outdir / f"{code}_내레이션.wav")
     em.step(len(entries) + 1, total, "내레이션 트랙 합성")
-    P.build_narration_wav(clips, wav, em.log)
+    # 영상 길이를 알려주면 마지막 문장의 슬롯 계산과 '내레이션이 영상보다 김' 경고가 정확해진다
+    fin = outdir / f"{code}_final.mp4"
+    P.build_narration_wav(clips, wav, em.log,
+                          video_sec=(P.video_duration(str(fin)) if fin.is_file() else None))
     em.file("내레이션 음성", wav)
     out = {"mode": "tts", "narration_wav": wav, "count": len(clips)}
     if mux:

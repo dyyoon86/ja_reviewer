@@ -587,15 +587,20 @@ def _hint_block(hint):
 
 
 # 3분휴지 실측(3편·55작품·1746초·14965자): 문장당 5.4초, 발화 8.6자/초, 문장 평균 45자.
-# 내레이션 분량은 이 값으로 target_sec에서 역산한다(하드코딩 금지 — 길이 설정과 어긋난다).
-_SEC_PER_SENT = 5.4
-_CHARS_PER_SEC = 8.6
+# 다만 8.6자/초는 '편집된 방송' 속도다. TTS(voicebox 한국어)는 대략 6.5~7자/초라
+# 그대로 쓰면 문장이 슬롯을 넘어 겹친다(build_narration_wav가 보정하긴 하나 촘촘해진다).
+# → 실제 예산은 TTS 속도로 잡고, 문장 사이 숨돌림 여유(0.85)를 곱한다.
+_TTS_CHARS_PER_SEC = 6.8
+_BREATH = 0.85           # 전체 길이 중 실제 발화가 차지할 비율
+_SEC_PER_SENT = 5.4      # 3분휴지 실측 — 문장 개수 산정용
 
 
 def narration_budget(target_sec):
-    """목표 길이(초) → (문장 수 하한, 상한, 대략 글자수). 예: 60초 → 10~13문장·약 516자."""
+    """목표 길이(초) → (문장 수 하한, 상한, 대략 글자수).
+    글자수는 TTS 발화속도 기준. 예: 60초 → 10~13문장·약 346자."""
     n = max(4, round(float(target_sec) / _SEC_PER_SENT))
-    return n - 1, n + 2, int(float(target_sec) * _CHARS_PER_SEC)
+    chars = int(float(target_sec) * _TTS_CHARS_PER_SEC * _BREATH)
+    return n - 1, n + 2, chars
 
 
 def _roundup_block(pos="mid", target_sec=60):
@@ -979,19 +984,79 @@ def tts_generate(base, text, profile_id, language, out_wav, seed=None, log=print
     return out_wav
 
 
-def build_narration_wav(clips, out_wav, log=print):
-    """clips=[(start_sec, wav_path)] → 각 클립을 시작시간에 배치(A안: 자연길이, 겹치면 믹스)한 단일 WAV."""
+def audio_duration(path):
+    """오디오 길이(초). 실패 시 0."""
+    try:
+        out = subprocess.check_output(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "csv=p=0", str(path)])
+        return float(out.decode().strip())
+    except Exception:
+        return 0.0
+
+
+MIN_GAP = 0.12       # 문장 사이 최소 숨돌림(초)
+MAX_TEMPO = 1.35     # 이 이상 빠르게 하면 알아듣기 어렵다
+
+
+def build_narration_wav(clips, out_wav, log=print, video_sec=None,
+                        min_gap=MIN_GAP, max_tempo=MAX_TEMPO):
+    """clips=[(start_sec, wav_path)] → 단일 내레이션 트랙.
+
+    TTS 실제 발화가 LLM이 잡은 슬롯보다 길면 다음 문장과 겹쳐 두 목소리가 동시에 난다
+    (예전 구현은 겹치면 그대로 amix). 여기서는:
+      1) 슬롯에 안 들어가면 atempo로 살짝 빠르게(최대 max_tempo) → 영상 싱크 유지
+      2) 그래도 넘치면 다음 문장 시작을 뒤로 민다(싱크가 조금 밀리더라도 겹침보다 낫다)
+    """
     if not clips:
         raise RuntimeError("내레이션 클립이 없습니다.")
+    items = sorted(((float(s), str(p)) for s, p in clips), key=lambda x: x[0])
+    durs = [audio_duration(p) for _, p in items]
+
+    placed, cursor = [], 0.0     # placed: (start, path, tempo)
+    sped = pushed = 0
+    for i, ((st, p), d) in enumerate(zip(items, durs)):
+        start = max(st, cursor)
+        if start > st + 1e-6:
+            pushed += 1
+        # 다음 문장 시작(마지막이면 영상 끝)까지가 이 문장의 슬롯
+        nxt = items[i + 1][0] if i + 1 < len(items) else (video_sec or (start + d + min_gap))
+        slot = max(0.5, nxt - start - min_gap)
+        tempo = 1.0
+        if d > slot and d > 0:
+            tempo = min(max_tempo, d / slot)
+            if tempo > 1.001:
+                sped += 1
+        eff = (d / tempo) if tempo > 0 else d
+        placed.append((start, p, tempo))
+        cursor = start + eff + min_gap
+
     inputs, filt = [], []
-    for i, (st, p) in enumerate(clips):
-        inputs += ["-i", str(p)]
+    for i, (st, p, tempo) in enumerate(placed):
+        inputs += ["-i", p]
         ms = int(max(0.0, st) * 1000)
-        filt.append(f"[{i}:a]adelay={ms}|{ms}[a{i}];")
-    mix = "".join(f"[a{i}]" for i in range(len(clips))) + f"amix=inputs={len(clips)}:normalize=0[a]"
+        chain = f"[{i}:a]"
+        if tempo > 1.001:
+            chain += f"atempo={tempo:.4f},"
+        chain += f"adelay={ms}|{ms}[a{i}];"
+        filt.append(chain)
+    mix = "".join(f"[a{i}]" for i in range(len(placed))) + f"amix=inputs={len(placed)}:normalize=0[a]"
     subprocess.run(["ffmpeg", "-y", *inputs, "-filter_complex", "".join(filt) + mix,
                     "-map", "[a]", str(out_wav)], check=True)
-    log(f"내레이션 WAV 합성 완료: {out_wav}")
+
+    end = cursor - min_gap
+    msg = f"내레이션 WAV 합성 완료: {out_wav} ({len(placed)}문장, 끝 {end:.1f}s"
+    if video_sec:
+        msg += f" / 영상 {video_sec:.1f}s"
+    msg += ")"
+    log(msg)
+    if sped:
+        log(f"  · 슬롯이 좁아 {sped}문장을 최대 {max_tempo}배까지 빠르게 조정")
+    if pushed:
+        log(f"  · {pushed}문장은 앞 문장과 겹쳐 뒤로 밀었습니다(내레이션이 촘촘합니다)")
+    if video_sec and end > video_sec + 0.5:
+        log(f"  ※ 내레이션이 영상보다 {end - video_sec:.1f}s 깁니다 — "
+            f"문장 수를 줄이거나 목표 길이를 늘리세요")
     return out_wav
 
 
