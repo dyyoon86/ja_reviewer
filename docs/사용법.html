@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ja_reviewer 사용법</title>
+<style>
+  :root{
+    --bg:#12141a; --card:#1a1e27; --card2:#20252f; --line:#2c3340;
+    --tx:#d8dee8; --mut:#8b95a5; --acc:#ffd400; --ok:#6fdc8c; --warn:#ff8f66; --info:#7fd0ff;
+    --mono:Consolas,'Malgun Gothic',monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--tx);
+       font:15px/1.7 'Malgun Gothic','Segoe UI',sans-serif;padding:0 0 80px}
+  .wrap{max-width:880px;margin:0 auto;padding:0 20px}
+  header{background:linear-gradient(180deg,#1a1e27,#12141a);border-bottom:1px solid var(--line);
+         padding:38px 0 26px;margin-bottom:30px}
+  h1{margin:0 0 6px;font-size:26px}
+  h1 .v{font-size:13px;color:var(--mut);font-weight:normal;margin-left:10px}
+  .sub{color:var(--mut)}
+  h2{font-size:19px;margin:44px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line);color:var(--acc)}
+  h3{font-size:15.5px;margin:24px 0 8px;color:var(--info)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:14px 0}
+  .flow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0}
+  .flow .st{background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:7px 13px;white-space:nowrap}
+  .flow .ar{color:var(--mut)}
+  code{background:var(--card2);border:1px solid var(--line);border-radius:4px;
+       padding:1px 6px;font-family:var(--mono);font-size:13px;color:var(--info)}
+  pre{background:#0d0f14;border:1px solid var(--line);border-radius:8px;padding:12px 14px;
+      overflow-x:auto;font-family:var(--mono);font-size:13px;line-height:1.6;color:#c9d4e3}
+  pre code{background:none;border:none;padding:0;color:inherit}
+  table{border-collapse:collapse;width:100%;margin:10px 0;font-size:14px}
+  th,td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+  th{background:var(--card2);color:var(--info);font-weight:600;white-space:nowrap}
+  td:first-child{white-space:nowrap}
+  .ok{color:var(--ok)} .warn{color:var(--warn)} .mut{color:var(--mut)} .acc{color:var(--acc)}
+  ul,ol{padding-left:22px} li{margin:5px 0}
+  .tip{border-left:3px solid var(--info);padding:10px 14px;background:var(--card);border-radius:0 8px 8px 0;margin:12px 0}
+  .warnbox{border-left:3px solid var(--warn);padding:10px 14px;background:var(--card);border-radius:0 8px 8px 0;margin:12px 0}
+  .kbd{display:inline-block;background:var(--card2);border:1px solid var(--line);border-bottom-width:2px;
+       border-radius:4px;padding:0 7px;font-family:var(--mono);font-size:12.5px}
+  .big{font-size:17px;font-weight:700}
+  .num{display:inline-block;background:var(--acc);color:#111;border-radius:50%;width:22px;height:22px;
+       text-align:center;line-height:22px;font-size:13px;font-weight:700;margin-right:8px}
+  .toc{columns:2;gap:30px;font-size:14px}
+  .toc a{color:var(--info);text-decoration:none}
+  .toc a:hover{text-decoration:underline}
+  @media(max-width:640px){.toc{columns:1}}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>🎬 ja_reviewer 사용법 <span class="v">풀오토 v1 · 2026-07</span></h1>
+    <div class="sub">일본 신작 영상 → 스토리 컷 + 한국어 자막·해설 내레이션 + TTS + 번인 — 1분 완성본 자동 생성</div>
+  </div>
+</header>
+<div class="wrap">
+
+<div class="card toc">
+  <a href="#quick">1. 빠른 시작 (풀오토 — 던지면 끝)</a><br>
+  <a href="#pre">2. 사전 준비 (전제조건 4가지)</a><br>
+  <a href="#fullauto">3. 풀오토 자세히</a><br>
+  <a href="#manual">4. 수동 워크플로우 (단계별)</a><br>
+  <a href="#queue">5. 작업 큐 (여러 편 묶음)</a><br>
+  <a href="#regen">6. 결과가 마음에 안 들 때 (재생성)</a><br>
+  <a href="#files">7. 출력 파일 구조</a><br>
+  <a href="#tools">8. tools/ CLI</a><br>
+  <a href="#trouble">9. 문제 해결</a>
+</div>
+
+<h2 id="quick">1. 빠른 시작 — 던지면 끝 (풀오토)</h2>
+<div class="card">
+  <p class="big">영상 파일을 감시 폴더에 복사하면, 1분짜리 완성본이 <code>_완성\</code> 폴더에 떨어집니다.</p>
+  <ol>
+    <li><span class="num">1</span><code>run.bat</code> 더블클릭 → 브라우저에 스튜디오가 열림</li>
+    <li><span class="num">2</span>좌측 <b>📋 작업 큐</b> 패널에서 <b>🔮 폴더 감시(풀오토)</b> 체크 + 감시 폴더 경로 입력</li>
+    <li><span class="num">3</span>다운받은 영상을 그 폴더에 복사 (파일명에 품번 포함 — 예: <code>MIDA-999 [1080p].mp4</code>)</li>
+    <li><span class="num">4</span>끝. 완성본: <code>C:\Users\yoon\ja_reviewer_out\_완성\MIDA-999.mp4</code></li>
+  </ol>
+  <div class="flow">
+    <span class="st">📂 폴더에 투하</span><span class="ar">→</span>
+    <span class="st">품번 인식</span><span class="ar">→</span>
+    <span class="st">① 전사</span><span class="ar">→</span>
+    <span class="st">② AI 압축·번역·내레이션</span><span class="ar">→</span>
+    <span class="st">③ 자막</span><span class="ar">→</span>
+    <span class="st">④ 배너</span><span class="ar">→</span>
+    <span class="st">⑤ TTS</span><span class="ar">→</span>
+    <span class="st">⑥ 번인</span><span class="ar">→</span>
+    <span class="st ok">✅ _완성\품번.mp4</span>
+  </div>
+</div>
+
+<h2 id="pre">2. 사전 준비 — 전제조건 4가지</h2>
+<table>
+  <tr><th>전제</th><th>확인 방법</th><th>안 될 때</th></tr>
+  <tr><td>🖥 서버 기동</td><td><code>run.bat</code> 더블클릭 (venv 자동)</td>
+      <td>수동: <code>.venv\Scripts\python.exe -m server.app</code> — <b>반드시 venv</b>(아니면 GPU 전사 실패)</td></tr>
+  <tr><td>🔊 voicebox</td><td>Voicebox 앱 실행 중 (포트 17493)</td>
+      <td>기동 실패 시 <code>iphlpsvc</code>가 포트 선점한 것 — 서비스 내리고 Voicebox 먼저 켠 뒤 서비스 복구</td></tr>
+  <tr><td>🌐 meta_api (우분투)</td><td><code>http://172.30.1.40:8770/work/품번</code> 응답</td>
+      <td>우분투에서 <code>python meta_api.py --port 8770</code> (@reboot cron 등록돼 있음)</td></tr>
+  <tr><td>🤖 claude CLI</td><td>터미널에서 <code>claude -p "hi"</code> 응답</td><td><code>claude login</code>. codex는 토큰 만료 잦음 → claude 권장</td></tr>
+</table>
+<div class="tip">서버 켜고 GUI의 <b>통합 점검(health)</b>을 누르면 ffmpeg·Whisper·메타·TTS·DB·GPU를 한 번에 확인해 줍니다.<br>
+GPU(RTX 3060) 가속은 첫 설치 때 한 번만 <code>setup_gpu.bat</code> 실행(cuBLAS/cuDNN).</div>
+
+<h2 id="fullauto">3. 풀오토 자세히</h2>
+<div class="card">
+  <h3>동작 방식</h3>
+  <ul>
+    <li>5초마다 감시 폴더를 확인. 파일 크기가 <b>두 번 연속 같으면</b>(=다운로드 완료) 큐에 투입</li>
+    <li>대상 확장자: mp4 · mkv · avi · ts · wmv · mov</li>
+    <li>한 번 처리한 파일은 기억(<code>watch_seen.json</code>) — 서버 재시작해도 중복 투입 없음</li>
+    <li>품번을 파일명에서 못 읽으면 큐에 <b>"품번 입력 필요"</b>로 대기 → 클릭해서 품번만 넣으면 진행</li>
+    <li>voicebox·meta_api가 죽어 있으면 에러 대신 <b>60초 간격 자동 재시도</b> — 던져놓고 자리 비워도 됨</li>
+  </ul>
+  <h3>풀오토 프리셋 (자동 적용)</h3>
+  <table>
+    <tr><th>항목</th><th>값</th></tr>
+    <tr><td>길이</td><td>1분 (config <code>target_sec</code>)</td></tr>
+    <tr><td>오프닝</td><td><b>단독(solo)</b> — "이번 작품은 ○○의 신작입니다" + 마무리 인사로 완결</td></tr>
+    <tr><td>문체</td><td>3분휴지형 (담백한 총평)</td></tr>
+    <tr><td>TTS</td><td>윤두영일반 보이스 · 원음 덕킹(해설 중 원음 30%) · 먹싱 포함</td></tr>
+    <tr><td>번인</td><td>자막 + 인포배너 + 워터마크까지 구움</td></tr>
+  </table>
+  <div class="warnbox"><b>⚠ 노출 안전장치</b> — 트림 없이 원본을 던지므로, AI가 고른 구간 중 <b>대사가 한 줄도 없는 keep</b>(정사장면 의심)은 자동 제외됩니다(로그에 <code>⚠ keep … 대사 0줄</code>). 그래도 <b>업로드 전 완성본은 꼭 눈으로 검수</b>하세요 — 대사가 있는 노출 장면까지 걸러주진 못합니다. 확실히 하려면 ① 잘라내기로 정사장면을 먼저 빼고 큐에 넣는 게 안전합니다.</div>
+</div>
+
+<h2 id="manual">4. 수동 워크플로우 — 단계별로 직접</h2>
+<div class="card">
+  <h3>① 잘라내기 (선택 구간 삭제)</h3>
+  <ul>
+    <li>영상 열기 → 내장 플레이어에서 정사장면 구간 마킹 (또는 텍스트로 <code>12:30-18:00, 45:00-52:00</code>)</li>
+    <li>단축키: <span class="kbd">Space</span> 재생/정지 · <span class="kbd">[</span>/<span class="kbd">I</span> 구간시작 · <span class="kbd">]</span>/<span class="kbd">O</span> 구간끝 · <span class="kbd">←</span><span class="kbd">→</span> 5초</li>
+    <li>기본 컷은 <b>스마트 컷</b>(경계만 재인코딩+중간 카피 — 2시간짜리도 수십 초, 프레임 정밀). 실패 시 자동 폴백</li>
+    <li>"정밀(재인코딩)" 체크는 전체 재인코딩 강제 — 보통 필요 없음</li>
+  </ul>
+  <h3>② 단계 실행 (전사 → AI → 자막)</h3>
+  <ul>
+    <li>품번 입력 후 각 단계 <b>실행</b> 버튼. 중간에 실패하면 그 단계만 다시(앞 단계 결과 재사용)</li>
+    <li>방식: <b>짜집기(요약형)</b>=줄거리 고루 / <b>알파컷(하이라이트형)</b>=후킹 순간 몰아서</li>
+    <li>문체: <b>3분휴지형</b>(원음 끄고 총평) / <b>고몽·김시선형</b>(대사와 주고받기, 원음 살림)</li>
+    <li>위치: <b>단독</b>(하나로 완결) / 먼저·다음은·마지막으로(묶음 리뷰 꼭지) / 자동(큐 순서)</li>
+    <li>AI가 거부/빈 응답이면 <b>🛠 수동 모드</b>: 프롬프트 복사 → claude/codex에 직접 붙여넣기 → 결과 JSON 붙여넣기</li>
+  </ul>
+  <h3>③ TTS · 자막굽기 · 인포배너</h3>
+  <ul>
+    <li>TTS: 보이스 선택 → 내레이션 SRT를 문장별 합성 → 원음 덕킹 먹싱</li>
+    <li>굽기: 대사(하단 흰/남자 하늘색)·내레이션(상단 노랑)·강조·정보 스타일 템플릿 3종</li>
+    <li>배너: 품번으로 메타 조회 → 인포카드+워터마크 투명 PNG → 굽기와 같은 1패스에 합성</li>
+  </ul>
+</div>
+
+<h2 id="queue">5. 작업 큐 — 여러 편 묶음 처리</h2>
+<div class="card">
+  <ul>
+    <li><b>＋ 영상 여러 개 추가</b> → 자동 진행할 단계 체크(전사~번인) → 알아서 순차+병렬 처리</li>
+    <li>리소스 레인: GPU 1 · AI 2 · TTS 1 — A가 전사하는 동안 B는 LLM 처리 (VRAM 충돌 없음)</li>
+    <li><b>큐 순서 = 묶음 영상의 편집 순서</b> — 전환 문구(먼저/다음은/마지막으로)가 순서로 자동 판정.
+        1개만 넣으면 <b>단독</b>. 묶음은 한 번에 다 넣을 것(도중 추가/삭제 시 순서 바뀜)</li>
+    <li>번인 미체크 시 <b>✋ 검수대기</b>에서 멈춤 → 항목 클릭해 확인 후 이어서</li>
+    <li>서버 재시작해도 완료된 단계는 파일 기준으로 건너뛰고 이어서 진행</li>
+  </ul>
+</div>
+
+<h2 id="regen">6. 결과가 마음에 안 들 때</h2>
+<table>
+  <tr><th>상황</th><th>버튼/방법</th><th>효과</th></tr>
+  <tr><td>내레이션 톤·내용이 별로</td><td>③ 행의 <b>🔁 내레이션 재생성</b></td>
+      <td>컷·대사는 그대로, 내레이션만 6슬롯 규칙(소개→장면묘사→평가→질문)으로 재작성</td></tr>
+  <tr><td>고른 구간 자체가 별로</td><td>③ 행의 <b>🔁 구간 재선정</b></td>
+      <td>LLM이 keep을 다시 골라 final.mp4 재컷 + 자막까지 자동 재생성 (기존 덮어씀)</td></tr>
+  <tr><td>문구 몇 개만 고치고 싶음</td><td><b>✎ 자막 편집</b> 섹션</td>
+      <td>내레이션·대사를 직접 수정 → 저장 → 다시 굽기</td></tr>
+  <tr><td>재생성 후</td><td colspan="2">TTS와 번인은 다시 실행해야 새 내레이션이 반영됩니다</td></tr>
+</table>
+
+<h2 id="files">7. 출력 파일 구조</h2>
+<pre><code>C:\Users\yoon\ja_reviewer_out\
+├─ _완성\                      ★ 최종 완성본 수거함 (풀오토 출구)
+│   └─ MIDA-999.mp4
+├─ watch_seen.json             감시폴더 처리 기록
+├─ queue.json                  작업 큐 영속화
+└─ MIDA-999\                   품번별 작업 폴더
+    ├─ MIDA-999_trim.mp4       ① 잘라낸 영상 (수동 트림 시)
+    ├─ MIDA-999_전사.srt/.json  ① 일본어 전사
+    ├─ MIDA-999_plan.json      ② AI 결과 (keep·대사·내레이션·별점)
+    ├─ MIDA-999_final.mp4      ② 핵심 구간 컷
+    ├─ MIDA-999_대사.srt/.json  ③ 한국어 대사 (화자 포함)
+    ├─ MIDA-999_내레이션.srt/.json ③ 해설 내레이션 (유형 포함)
+    ├─ MIDA-999_tts\           ⑤ 문장별 TTS 클립
+    ├─ MIDA-999_내레이션.wav    ⑤ 합성 내레이션 트랙
+    ├─ MIDA-999_final_voiced.mp4 ⑤ 음성 입힌 영상
+    └─ MIDA-999_final_subbed.mp4 ⑥ 자막+배너 구운 완성본</code></pre>
+
+<h2 id="tools">8. tools/ — 단독 실행 CLI</h2>
+<p class="mut">GUI 없이 출력 폴더를 직접 손볼 때. 설정은 <code>studio_config.json</code> 공유.</p>
+<pre><code>python tools/run_single.py MIDA-999        # trim.mp4 폴더 전체 파이프라인(전사→메타→LLM→SRT)
+python tools/replan.py &lt;폴더&gt;              # keep 재선정 + final 재컷 (GUI 버튼과 동일 로직)
+python tools/regen_narration.py &lt;폴더&gt;     # 내레이션만 재생성 (GUI 버튼과 동일 로직)
+python tools/transcribe_hq.py --video X.mp4  # 고품질 전사 + Claude 검증 리포트(품질 판단용)</code></pre>
+
+<h2 id="trouble">9. 문제 해결</h2>
+<table>
+  <tr><th>증상</th><th>원인 / 해결</th></tr>
+  <tr><td><code>cublas64_12.dll not found</code></td>
+      <td>venv가 아닌 시스템 파이썬으로 뜬 것. <b>run.bat으로 기동</b>. 첫 설치면 <code>setup_gpu.bat</code></td></tr>
+  <tr><td>② AI가 "자막을 보내달라"며 거부</td>
+      <td>콘텐츠 거부가 아니라 프롬프트 전달 문제였던 케이스 — 현재는 stdin 전달로 해결됨. 재발 시 수동 모드 사용</td></tr>
+  <tr><td>TTS가 몇 분씩 멈춘 듯</td>
+      <td>정상 — GPU 느릴 때 문장당 수 분. 600초까지 기다림. 도중 강제종료하면 voicebox 큐에 좀비 잡이 쌓여 더 밀림</td></tr>
+  <tr><td>배너가 신작 품번을 못 찾음</td>
+      <td>로컬 <code>jav_scrap\jav_2026.db</code>가 구버전 — 우분투에서 <code>scp</code>로 동기화(+<code>images_actress/</code>)</td></tr>
+  <tr><td>voicebox 기동 실패 (포트 17493)</td>
+      <td><code>iphlpsvc</code> 서비스가 포트 선점 — 서비스 중지 → Voicebox 실행 → 서비스 재시작</td></tr>
+  <tr><td>풀오토 아이템이 ⏳ 대기만 반복</td>
+      <td>voicebox 또는 meta_api가 죽어 있음. 켜면 60초 안에 자동 진행</td></tr>
+  <tr><td>완성본에 총평·별점이 없음</td>
+      <td>내레이션이 keep 밖으로 나간 케이스 — 자동으로 끝에서부터 재배치됨. 로그의 재배치 경고 확인</td></tr>
+  <tr><td>mkv가 미리보기에 안 나옴</td>
+      <td>브라우저 제약 — 처리 자체는 되므로 그대로 진행하거나 mp4 권장</td></tr>
+</table>
+
+<div class="tip" style="margin-top:36px">
+  <b>요약</b> — 평소엔 <span class="acc">풀오토(감시 폴더)</span>에 던지고, 특별히 신경 쓸 영상만
+  ① 잘라내기로 정사장면 직접 빼고 큐에 넣는다. 완성본은 <code>_완성\</code>에서 수거,
+  업로드 전 눈으로 한 번 검수.
+</div>
+
+</div>
+</body>
+</html>
