@@ -402,6 +402,35 @@ $("#btnStepSubs").onclick = () => {
   }, ()=>setBadge("badgeSubs","err")));
 };
 
+// ③-b 내레이션 재생성 — 컷·대사 유지, 내레이션만 6슬롯 규칙으로 다시 쓰기
+$("#btnRegenNar").onclick = () => {
+  if(!needCode()) return;
+  const code=$("#code").value.trim();
+  log("── 🔁 내레이션 재생성 시작 (컷·대사 유지) ──"); setBadge("badgeSubs","run");
+  fetch("/regen/narration",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    code
+  })}).then(r=>r.json()).then(j=>runJob(j.job, (res)=>{
+    setBadge("badgeSubs","done");
+    log(`✔ 내레이션 재생성 완료 (${res.count}줄) — 마음에 들면 TTS·굽기를 다시 실행하세요`,"ok");
+    refreshSteps(code);
+  }, ()=>setBadge("badgeSubs","err")));
+};
+
+// ③-c 구간 재선정 — LLM이 keep을 다시 골라 final.mp4 + 자막 전부 재생성
+$("#btnReplan").onclick = () => {
+  if(!needCode()) return;
+  const code=$("#code").value.trim();
+  if(!confirm(`[${code}] keep 구간을 다시 골라 final.mp4와 자막을 전부 다시 만듭니다.\n기존 plan.json·final.mp4를 덮어씁니다. 진행할까요?`)) return;
+  log("── 🔁 구간 재선정 시작 (plan·final·자막 재생성) ──"); setBadge("badgeAi","run"); setBadge("badgeSubs","run");
+  fetch("/regen/plan",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    code, target_sec:+$("#target").value, llm:$("#llm").value
+  })}).then(r=>r.json()).then(j=>runJob(j.job, (res)=>{
+    setBadge("badgeAi","done"); setBadge("badgeSubs","done"); showResult(res);
+    log(`✔ 구간 재선정 완료 (최종 ${Math.round(res.final_sec||0)}초) — TTS·굽기를 다시 실행하세요`,"ok");
+    refreshSteps(code);
+  }, ()=>{ setBadge("badgeAi","err"); setBadge("badgeSubs","err"); }));
+};
+
 // ── LLM(codex/claude) 연결 확인 ──
 function setLlmBadge(id, name, st){ // st: ok|fail|run|idle
   const b=$("#"+id); if(!b) return;

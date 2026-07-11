@@ -722,6 +722,54 @@ async def step_subs(req: Request):
     return {"job": jid}
 
 
+@app.post("/regen/narration")
+async def regen_narration_route(req: Request):
+    """③-b 내레이션 재생성 — plan.json의 내레이션만 6슬롯 규칙으로 다시 쓴다(컷·대사 유지)."""
+    body = await req.json(); c = load_cfg()
+    code = body["code"]
+    jid = new_job()
+
+    def work():
+        try:
+            from server.core.regen import regen_narration
+            outdir = work_dir(c, code)
+            new_nar = regen_narration(outdir, c["meta_api"], log=lambda m: jlog(jid, m))
+            jfile(jid, "내레이션 SRT", outdir / f"{code}_내레이션.srt")
+            jfile(jid, "내레이션 JSON", outdir / f"{code}_내레이션.json")
+            jdone(jid, {"step": "regen_narration", "code": code, "count": len(new_nar)})
+        except Exception as e:
+            jerr(jid, e)
+    run_bg(work)
+    return {"job": jid}
+
+
+@app.post("/regen/plan")
+async def regen_plan_route(req: Request):
+    """③-c 구간 재선정 — LLM이 keep을 다시 골라 plan.json 갱신 + final.mp4 재컷 + 자막 재생성."""
+    body = await req.json(); c = load_cfg()
+    code = body["code"]
+    target = int(body.get("target_sec", c["target_sec"])); llm = body.get("llm", c["llm"])
+    jid = new_job()
+
+    def work():
+        try:
+            from server.core.regen import replan
+            outdir = work_dir(c, code)
+            jstep(jid, 1, 2, "keep 구간 재선정 + 재컷")
+            replan(outdir, c["meta_api"], llm, target, log=lambda m: jlog(jid, m))
+            jstep(jid, 2, 2, "자막 재생성")
+            res = stage_subs(c, code, JobEmitter(jid))
+            final = str(outdir / f"{code}_final.mp4")
+            jfile(jid, "최종 영상", final)
+            res.update({"step": "regen_plan", "final": final,
+                        "final_sec": P.video_duration(final)})
+            jdone(jid, res)
+        except Exception as e:
+            jerr(jid, e)
+    run_bg(work)
+    return {"job": jid}
+
+
 # ─── ② 리뷰 생성 (품번 필요) — 현재 영상 전사→메타→LLM 압축→컷+SRT ──────────
 @app.post("/review")
 async def review(req: Request):
