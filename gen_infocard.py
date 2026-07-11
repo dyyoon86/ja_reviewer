@@ -214,7 +214,9 @@ def html_info(m: dict, mb: str, t: dict) -> str:
  box-shadow:0 8px 26px rgba(0,0,0,.4);transform:rotate(-2deg);border:2px solid rgba(255,255,255,.25)}}
 .logo img{{width:64px;height:64px;object-fit:contain;filter:drop-shadow(0 2px 4px rgba(0,0,0,.4))}}
 .logo .t{{color:#fff;font-family:'Jua';font-size:30px}}
-.lower{{position:absolute;left:76px;bottom:84px}}
+.lower{{position:absolute;left:76px;bottom:84px;
+ background:rgba(12,7,11,.62);border-radius:26px;padding:26px 36px 26px 30px;
+ border:1.5px solid rgba(255,255,255,.14);box-shadow:0 10px 40px rgba(0,0,0,.45)}}
 .title{{font-family:'Nanum Brush Script';font-size:134px;line-height:.9;
  background:linear-gradient(180deg,#fff 60%,{t['accent']});-webkit-background-clip:text;-webkit-text-fill-color:transparent;
  filter:drop-shadow(0 5px 18px rgba(0,0,0,.65)) drop-shadow(0 0 30px {t['c1']}66)}}
