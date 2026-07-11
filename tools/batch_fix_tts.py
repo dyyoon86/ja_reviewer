@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""LONG keep 폴더 수정 + 전체 TTS 배치 생성"""
+"""LONG keep 폴더 수정 + 전체 TTS 배치 생성.
+
+※ 2026-07-10 배치(SNOS 3건 keep 수정) 전용 원오프 — KEEP_FIX가 하드코딩돼 있다.
+   범용 배치 TTS가 필요하면 GUI 큐(stage_tts)를 쓰고, 이 파일은 패턴 참고용으로만.
+"""
 import json, sys
 from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
-sys.path.insert(0, str(Path(__file__).parent))
+import _common
 from server import pipeline as P
 
-OUT_DIR  = Path.home() / "ja_reviewer_out"
-TTS_BASE = "http://127.0.0.1:17493"
-TTS_PROF = "ebc09f54-89c2-4797-97a0-6b7a6056a7dd"  # 윤두영일반
-TTS_LANG = "ko"
+CFG      = _common.load_cfg()
+OUT_DIR  = Path(CFG["out_dir"])
+TTS_BASE = CFG["tts_base"]
+TTS_PROF = CFG["tts_profile"] or "ebc09f54-89c2-4797-97a0-6b7a6056a7dd"  # 윤두영일반
+TTS_LANG = CFG["tts_language"]
 TTS_SEED = 42  # 동일 시드 → 일관된 음색
 
 # keep 수정이 필요한 폴더: {code: new_keep}

@@ -13,6 +13,20 @@
 | `server/pipeline.py` | 윈도우 PC | UI 무관 파이프라인 로직(전사·메타·LLM 프롬프트·컷·재타이밍) |
 | `meta_api.py` | **우분투** (DB 있는 곳) | LAN 메타 API. `GET /work/<품번>` → 작품 정보 JSON. `python meta_api.py --port 8770` |
 | `gen_narration.py` | 우분투 | 품번→DB 메타 조회 로직(`meta_api`가 사용) |
+| `tools/` | 윈도우 PC | 단독 실행 CLI 툴 모음(아래 참조). 설정은 `studio_config.json` 공유 |
+
+### tools/ — 단독 실행 CLI
+
+GUI 없이 출력 폴더를 직접 손볼 때 쓰는 툴. 모두 `python tools/<이름>.py`로 실행하며
+`meta_api`·`out_dir`·`llm` 등은 `studio_config.json`에서 읽는다(`tools/_common.py`).
+
+| 툴 | 역할 |
+|----|------|
+| `run_single.py <품번>` | trim.mp4가 있는 폴더 전체 파이프라인(전사→메타→LLM→SRT) |
+| `replan.py <폴더>` | plan.json의 keep 구간을 LLM으로 재선정 + final.mp4 재컷 |
+| `regen_narration.py <폴더>` | 내레이션만 6슬롯 규칙으로 재생성(SRT/JSON 갱신) |
+| `transcribe_hq.py --video <mp4>` | 고품질 전사 + Claude 검증 리포트(품질 판단용) |
+| `batch_fix_tts.py` | (원오프) 2026-07-10 배치 keep 수정 + TTS 일괄 — 패턴 참고용 |
 
 ## 두 가지 모드
 

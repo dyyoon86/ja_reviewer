@@ -8,18 +8,14 @@
 import sys
 import json
 import subprocess
-import tempfile
-import urllib.request
 from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
+import _common
+from server import pipeline as P
 
-# pipeline.py의 retime 사용 — plan.json은 trim좌표, SRT는 final좌표
-sys.path.insert(0, str(Path(__file__).parent))
-from server.pipeline import retime
-
-EXE      = r"C:\Users\yoon\AppData\Roaming\npm\claude.cmd"
-META_API = "http://172.30.1.40:8770"
+CFG      = _common.load_cfg()
+META_API = CFG["meta_api"]
 
 RULE = """너는 일본 AV 리뷰 채널 나레이터다. 슬롯마다 지정된 스타일이 다르다.
 
@@ -52,24 +48,6 @@ S6 궁금증 질문: "○○는 어떻게 될까요?" — 딱 1회, 여기만.
 """
 
 
-def s2srt(x):
-    total = int(round(max(0.0, float(x)) * 1000))
-    h = total // 3600000; total %= 3600000
-    m = total // 60000;   total %= 60000
-    s = total // 1000;    ms = total % 1000
-    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-
-
-def fetch_meta(code: str) -> dict:
-    try:
-        url = f"{META_API}/work/{code}"
-        with urllib.request.urlopen(url, timeout=8) as r:
-            return json.load(r)
-    except Exception as e:
-        print(f"  메타 조회 실패 ({e}), 코드명만 사용")
-        return {}
-
-
 def slot_type(slot_start, keep):
     if not keep or slot_start < keep[0][0]: return "인트로"
     if slot_start >= keep[-1][1]: return "아웃트로"
@@ -96,11 +74,11 @@ def dialogue_before(slot_start, dialogue, window=15.0):
     return lines
 
 
-def regen(folder: Path):
+def regen(folder: Path, log=print):
     code = folder.name
     plan_file = folder / f"{code}_plan.json"
     if not plan_file.exists():
-        print(f"plan.json 없음: {plan_file}"); sys.exit(1)
+        raise RuntimeError(f"plan.json 없음: {plan_file}")
 
     plan      = json.loads(plan_file.read_text(encoding="utf-8"))
     narration = plan.get("narration", [])
@@ -108,7 +86,7 @@ def regen(folder: Path):
     keep      = plan.get("keep", [])
 
     if not narration:
-        print("narration 항목 없음"); sys.exit(1)
+        raise RuntimeError("narration 항목 없음")
 
     # 슬롯 6개로 압축: 인트로 1 + 중간 4 + 아웃트로 1
     MAX_SLOTS = 6
@@ -119,11 +97,15 @@ def regen(folder: Path):
         step   = max(1, len(middle) // (MAX_SLOTS - 2))
         mid6   = middle[::step][: MAX_SLOTS - 2]
         narration = intro + mid6 + outro
-        print(f"  슬롯 압축: {len(plan['narration'])}→{len(narration)}개")
+        log(f"  슬롯 압축: {len(plan['narration'])}→{len(narration)}개")
 
     # ── 메타 정보 ──────────────────────────────────────────────────────────
-    print("메타 조회 중...")
-    meta = fetch_meta(code)
+    log("메타 조회 중...")
+    try:
+        meta = P.fetch_meta(META_API, code, log=log)
+    except Exception as e:
+        log(f"  메타 조회 실패 ({e}), 코드명만 사용")
+        meta = {}
     actress = meta.get("actress") or code
     meas    = meta.get("meas") or ""          # "B83(C컵) W57 H89 키168"
     label   = meta.get("label") or ""         # "S1 NO.1 STYLE"
@@ -226,29 +208,21 @@ S6: "{actress}는 어떻게 될까요?"
 출력: JSON 배열만. start/end 슬롯 시간 사용. 25자 초과 시 2항목 분리.
 [{{"start":초,"end":초,"text":"내용","style":"기본"}},...] """
 
-    print(f"프롬프트 {len(prompt)}자 — Claude 호출 중...")
+    log(f"프롬프트 {len(prompt)}자 — Claude 호출 중...")
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", encoding="utf-8",
-                                     delete=False, dir=str(folder)) as f:
-        f.write(prompt)
-        pf = Path(f.name)
-    try:
-        with open(pf, "r", encoding="utf-8") as fin:
-            r = subprocess.run(
-                [EXE, "-p", "--output-format", "text"],
-                stdin=fin, timeout=600, text=True, encoding="utf-8", errors="replace",
-                capture_output=True
-            )
-    finally:
-        pf.unlink(missing_ok=True)
+    # 프롬프트는 stdin으로 (argv로 넘기면 긴 다중행이 잘림 — pipeline.call_llm과 동일 원칙)
+    exe = P._cli_path("claude")
+    r = subprocess.run([exe, "-p", "--output-format", "text"],
+                       input=prompt, timeout=600, text=True,
+                       encoding="utf-8", errors="replace", capture_output=True)
 
     raw = (r.stdout or "").strip()
     if not raw:
-        print("응답 없음:", (r.stderr or "")[:300]); sys.exit(1)
+        raise RuntimeError(f"응답 없음: {(r.stderr or '')[:300]}")
     raw = raw.replace("```json","").replace("```","").strip()
     s = raw.find("["); e = raw.rfind("]") + 1
     if s < 0 or e <= s:
-        print("JSON 파싱 실패:\n", raw[:500]); sys.exit(1)
+        raise RuntimeError(f"JSON 파싱 실패:\n{raw[:500]}")
     try:
         new_nar = json.loads(raw[s:e])
     except json.JSONDecodeError:
@@ -259,8 +233,8 @@ S6: "{actress}는 어떻게 될까요?"
             try: new_nar.append(json.loads(item))
             except: pass
         if not new_nar:
-            print("JSON 파싱 실패:\n", raw[:500]); sys.exit(1)
-        print(f"  부분 파싱: {len(new_nar)}개")
+            raise RuntimeError(f"JSON 파싱 실패:\n{raw[:500]}")
+        log(f"  부분 파싱: {len(new_nar)}개")
 
     # gap_windows는 프롬프트 빌드 전에 이미 계산됨 (위에서 compute_gap_windows 호출)
 
@@ -306,11 +280,11 @@ S6: "{actress}는 어떻게 될까요?"
 
     # retime: trim좌표 → final 좌표 (갭 밖 나레이션은 keep 경계로 스냅)
     nar_tuples = [(n["start"], n["end"], n["text"], n.get("style", "기본")) for n in new_nar]
-    retimed    = retime(nar_tuples, keep, snap=True)
+    retimed    = P.retime(nar_tuples, keep, snap=True)
 
     srt_lines = []
     for i, (s, e, text, *_) in enumerate(retimed, 1):
-        srt_lines += [str(i), f"{s2srt(s)} --> {s2srt(e)}", text, ""]
+        srt_lines += [str(i), f"{P.s2srt(s)} --> {P.s2srt(e)}", text, ""]
     srt_path = folder / f"{code}_내레이션.srt"
     srt_path.write_text("\n".join(srt_lines), encoding="utf-8-sig")
 
@@ -318,11 +292,12 @@ S6: "{actress}는 어떻게 될까요?"
     json_path = folder / f"{code}_내레이션.json"
     json_path.write_text(json.dumps(new_nar, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"완료: {srt_path}")
-    print(f"\n[새 내레이션] {len(new_nar)}줄")
+    log(f"완료: {srt_path}")
+    log(f"\n[새 내레이션] {len(new_nar)}줄")
     for n in new_nar:
         flag = "⚠️" if len(n["text"]) > 25 else "  "
-        print(f"  {flag}[{n.get('style','기본')}] {n['text']}  ({len(n['text'])}자)")
+        log(f"  {flag}[{n.get('style','기본')}] {n['text']}  ({len(n['text'])}자)")
+    return new_nar
 
 
 if __name__ == "__main__":

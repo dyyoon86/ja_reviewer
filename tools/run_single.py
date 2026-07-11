@@ -12,13 +12,14 @@ import shutil
 from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
-sys.path.insert(0, str(Path(__file__).parent))
+import _common
 from server import pipeline as P
 
-META_API  = "http://172.30.1.40:8770"
-OUT_BASE  = Path(r"C:\Users\yoon\ja_reviewer_out")
-LLM       = "claude"
-TARGET_SEC = 60
+CFG        = _common.load_cfg()
+META_API   = CFG["meta_api"]
+OUT_BASE   = Path(CFG["out_dir"])
+LLM        = CFG["llm"]
+TARGET_SEC = CFG["target_sec"]
 
 
 def log(msg):

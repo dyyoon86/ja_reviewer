@@ -20,8 +20,10 @@ transcribe_hq.py — 고품질 일본어 전사 + Claude 검증 (단독 실행 /
 import argparse, sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+import _common
 from server import pipeline as P
+
+CFG = _common.load_cfg()
 
 
 def _fmt(t):
@@ -45,7 +47,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--video", required=True, help="입력 영상(mp4 권장)")
     ap.add_argument("--code", default="", help="품번(메타 조회 → initial_prompt/검증맥락)")
-    ap.add_argument("--meta-api", default="", help="메타 API base (예: http://192.168.0.x:8770)")
+    ap.add_argument("--meta-api", default=CFG["meta_api"], help="메타 API base (기본: studio_config.json)")
     ap.add_argument("--model", default="large-v3")
     ap.add_argument("--which", default="claude", choices=["claude", "codex"])
     ap.add_argument("--no-verify", action="store_true", help="Claude 검증 생략(전사만)")
