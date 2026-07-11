@@ -1182,22 +1182,27 @@ def tts_generate(base, text, profile_id, language, out_wav, seed=None, log=print
             gen_id = j["id"]
             base_url = url.rstrip("/generate").rstrip("/")
             log(f"  async 생성 중(id={gen_id[:8]}...)...")
-            for _ in range(90):
+            # GPU 느릴 때 한 문장에 수 분 걸릴 수 있음 — 도중 포기하면 voicebox 큐에
+            # 좀비 잡이 쌓여 뒤 요청까지 밀리므로 넉넉히(600s) 기다린다.
+            # 폴링 자체의 일시 오류(소켓 타임아웃 등)는 실패로 치지 않고 계속 재시도.
+            for _ in range(200):
                 _time.sleep(3)
                 try:
                     with urllib.request.urlopen(f"{base_url}/history/{gen_id}", timeout=10) as rh:
                         hj = json.loads(rh.read())
                     st = hj.get("status", "")
                     if st == "completed":
-                        with urllib.request.urlopen(f"{base_url}/audio/{gen_id}", timeout=30) as ra:
+                        with urllib.request.urlopen(f"{base_url}/audio/{gen_id}", timeout=60) as ra:
                             Path(tmp).write_bytes(ra.read())
                         break
                     elif st in ("failed", "error"):
                         raise RuntimeError(f"voicebox 생성 실패: {hj.get('error')}")
-                except urllib.error.HTTPError:
-                    pass
+                except RuntimeError:
+                    raise
+                except Exception:
+                    pass    # 폴링 일시 오류 — 다음 폴링에서 재시도
             else:
-                raise RuntimeError("voicebox 생성 타임아웃(270s)")
+                raise RuntimeError("voicebox 생성 타임아웃(600s)")
         else:
             raise RuntimeError(f"voicebox 응답에서 오디오를 못 찾음: keys={list(j.keys())}")
     # 표준 WAV(48k stereo)로 정규화
