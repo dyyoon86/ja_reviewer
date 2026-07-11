@@ -117,6 +117,143 @@ def cut_video(video, keep, out_path, log=print, progress=None):
     log(f"컷 완료: {out_path}")
 
 
+def _video_codec(video):
+    """v:0 코덱명(h264/hevc/...). 실패 시 ''."""
+    try:
+        out = subprocess.check_output(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(video)],
+            timeout=FFPROBE_TIMEOUT)
+        return out.decode().strip().lower()
+    except Exception:
+        return ""
+
+
+def _kf_scan(video, a, b):
+    """[a,b] 구간의 비디오 키프레임 pts 목록(read_intervals — 전체 디먹스 안 함)."""
+    r = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "packet=pts_time,flags", "-of", "csv=p=0",
+         "-read_intervals", f"{max(0.0, a):.3f}%{b:.3f}", str(video)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=FFPROBE_TIMEOUT)
+    out = []
+    for line in (r.stdout or "").splitlines():
+        parts = line.strip().split(",")
+        if len(parts) >= 2 and "K" in parts[1]:
+            try:
+                out.append(float(parts[0]))
+            except ValueError:
+                continue
+    return sorted(out)
+
+
+def _kf_before(video, t, window=30.0):
+    """t 이전(같음 포함) 마지막 키프레임 pts. 못 찾으면 window 넓혀 1회 재시도 후 None."""
+    for w in (window, window * 4):
+        kfs = [k for k in _kf_scan(video, t - w, t + 1.0) if k <= t + 0.02]
+        if kfs:
+            return kfs[-1]
+    return None
+
+
+def cut_video_smart(video, keep, out_path, log=print, progress=None):
+    """스마트 컷 — keep 경계 근방(GOP 몇 초)만 재인코딩하고 중간은 스트림 카피.
+
+    · 정밀도: 재인코딩 컷과 같은 frame-accurate 경계 (카피 컷의 '키프레임 스냅 손실' 없음)
+    · 속도: 작업량이 '경계 조각 몇 초'에만 비례 — 2시간 영상에서 대부분 남겨도 수십 초
+    · 방법: 각 keep을 [경계 재인코딩][키프레임~키프레임 카피][경계 재인코딩] 조각으로 나눠
+      MPEG-TS(코덱 파라미터 in-band라 concat에 관대)로 만든 뒤 이어붙여 mp4로 재먹싱.
+      오디오는 조각 균일성을 위해 전 조각 AAC 재인코딩(속도 영향 미미).
+    · h264 소스 전용. 실패/길이 불일치 시 RuntimeError → 호출부에서 카피/재인코딩 폴백.
+    """
+    keep = [(float(a), float(b)) for a, b in sorted(keep) if float(b) - float(a) > 0.05]
+    if not keep:
+        raise RuntimeError("남길 구간이 없습니다.")
+    codec = _video_codec(video)
+    if codec != "h264":
+        raise RuntimeError(f"smart-cut은 h264 소스 전용(현재 '{codec or '?'}')")
+    expected = sum(b - a for a, b in keep)
+    gpu = [has_nvenc()]
+    log(f"스마트 컷: {len(keep)}구간 — 경계만 재인코딩({'NVENC' if gpu[0] else 'libx264'}), 중간은 카피...")
+
+    # 조각 목록 만들기: (mode, start, dur)  mode='copy'|'enc'
+    pieces = []
+    for a, b in keep:
+        kf_a = _kf_after(video, a)
+        kf_b = _kf_before(video, b)
+        # 키프레임을 못 찾거나 카피할 중간이 사실상 없으면 통째로 재인코딩
+        if kf_a is None or kf_b is None or kf_b - kf_a < 1.0 or kf_a >= b or kf_b <= a:
+            pieces.append(("enc", a, b - a))
+            continue
+        if kf_a - a > 0.05:
+            pieces.append(("enc", a, kf_a - a))
+        pieces.append(("copy", kf_a, kf_b - kf_a))
+        if b - kf_b > 0.05:
+            pieces.append(("enc", kf_b, b - kf_b))
+    n_enc = sum(1 for m, *_ in pieces if m == "enc")
+    enc_sec = sum(d for m, _, d in pieces if m == "enc")
+    log(f"  조각 {len(pieces)}개 (재인코딩 {n_enc}개·{enc_sec:.1f}s / 카피 {len(pieces) - n_enc}개)")
+
+    def _run(cmd):
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=FFMPEG_TIMEOUT)
+        if r.returncode != 0:
+            raise RuntimeError((r.stderr or "").strip()[-300:] or f"ffmpeg 실패({r.returncode})")
+
+    with tempfile.TemporaryDirectory(prefix="jasmart_") as td:
+        td = Path(td)
+        files = []
+        for i, (mode, st, dur) in enumerate(pieces):
+            seg = td / f"p{i:03d}.ts"
+            if mode == "copy":
+                _run(["ffmpeg", "-y", "-loglevel", "error",
+                      "-ss", f"{st:.6f}", "-i", str(video), "-t", f"{dur:.6f}",
+                      "-c:v", "copy", "-c:a", "aac",
+                      "-avoid_negative_ts", "make_zero", "-f", "mpegts", str(seg)])
+            else:
+                def enc_cmd(use_gpu):
+                    return (["ffmpeg", "-y", "-loglevel", "error",
+                             "-ss", f"{st:.6f}", "-i", str(video), "-t", f"{dur:.6f}"]
+                            + _vcodec_args(use_gpu)
+                            + ["-c:a", "aac", "-avoid_negative_ts", "make_zero",
+                               "-f", "mpegts", str(seg)])
+                if gpu[0]:
+                    try:
+                        _run(enc_cmd(True))
+                    except Exception as e:
+                        log(f"  NVENC 실패({e}) → 이후 libx264")
+                        gpu[0] = False
+                        _run(enc_cmd(False))
+                else:
+                    _run(enc_cmd(False))
+            files.append(seg)
+            if progress:
+                progress(min(0.9, (i + 1) / (len(pieces) + 1)))
+
+        listf = td / "list.txt"
+        listf.write_text("".join(f"file '{p.as_posix()}'\n" for p in files), encoding="utf-8")
+        tmp = _part_path(out_path)
+        _run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
+              "-i", str(listf), "-c", "copy", "-bsf:a", "aac_adtstoasc",
+              "-movflags", "+faststart", tmp])
+
+        # 길이 검증 — 조각 이어붙이기가 어긋나면 폴백하도록 여기서 실패시킨다
+        from .common import video_duration
+        got = video_duration(tmp)
+        tol = max(2.0, expected * 0.02)
+        if abs(got - expected) > tol:
+            try:
+                Path(tmp).unlink()
+            except OSError:
+                pass
+            raise RuntimeError(f"결과 길이 불일치(기대 {expected:.1f}s, 실제 {got:.1f}s)")
+        _finalize(tmp, out_path)
+    if progress:
+        progress(1.0)
+    log(f"스마트 컷 완료: {out_path} ({expected:.1f}s)")
+
+
 def _kf_after(video, t, window=30.0):
     """t 이후 첫 비디오 키프레임 pts. read_intervals로 근방만 스캔(전체 디먹스 안 함).
     못 찾으면 window를 넓혀 1회 재시도, 그래도 없으면 None."""

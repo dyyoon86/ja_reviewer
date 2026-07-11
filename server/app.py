@@ -552,14 +552,19 @@ async def trim(req: Request):
                 P.cut_video(path, keep, out, lambda m: jlog(jid, m),
                             lambda fr: jprog(jid, fr, "잘라내는 중"))
             else:
-                jstep(jid, 1, 1, "선택 구간 삭제 컷 (무손실·초고속)")
+                jstep(jid, 1, 1, "선택 구간 삭제 컷 (스마트 — 경계만 재인코딩)")
                 try:
-                    P.cut_video_copy(path, keep, out, lambda m: jlog(jid, m),
-                                     lambda fr: jprog(jid, fr, "잘라내는 중"))
-                except Exception as ce:
-                    jlog(jid, f"무손실 컷 실패({ce}) → 재인코딩으로 폴백")
-                    P.cut_video(path, keep, out, lambda m: jlog(jid, m),
-                                lambda fr: jprog(jid, fr, "잘라내는 중"))
+                    P.cut_video_smart(path, keep, out, lambda m: jlog(jid, m),
+                                      lambda fr: jprog(jid, fr, "잘라내는 중"))
+                except Exception as se:
+                    jlog(jid, f"스마트 컷 실패({se}) → 무손실 카피 컷으로 폴백")
+                    try:
+                        P.cut_video_copy(path, keep, out, lambda m: jlog(jid, m),
+                                         lambda fr: jprog(jid, fr, "잘라내는 중"))
+                    except Exception as ce:
+                        jlog(jid, f"무손실 컷 실패({ce}) → 재인코딩으로 폴백")
+                        P.cut_video(path, keep, out, lambda m: jlog(jid, m),
+                                    lambda fr: jprog(jid, fr, "잘라내는 중"))
             dur = P.video_duration(out)
             # 잘라낸 구간 정보 사이드카 저장
             info = [f"원본: {path}", f"원본 길이: {_hms(total)}", "",

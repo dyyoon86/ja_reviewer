@@ -45,7 +45,10 @@ from server.core.prompts import (
     _TTS_CHARS_PER_SEC, _BREATH, _SEC_PER_SENT, _CINEMA_SPEECH_RATIO,
     narration_budget, _roundup_block, prompt_auto, prompt_highlight, prompt_manual,
 )
-from server.core.cutter import has_nvenc, _vcodec_args, cut_video, _kf_after, cut_video_copy
+from server.core.cutter import (
+    has_nvenc, _vcodec_args, cut_video, _kf_after, _kf_before,
+    cut_video_copy, cut_video_smart,
+)
 from server.core.tts import (
     tts_profiles, tts_generate, audio_duration, MIN_GAP, MAX_TEMPO,
     build_narration_wav, merge_spans, _duck_expr, ORIG_AUDIO_MODES, mux_narration,
