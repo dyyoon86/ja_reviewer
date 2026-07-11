@@ -14,6 +14,8 @@
 import json
 import threading
 import time
+import urllib.error
+import urllib.request
 import uuid
 from pathlib import Path
 
@@ -226,9 +228,11 @@ class QueueManager:
     def _dispatch_loop(self):
         while True:
             try:
+                now = time.time()
                 with self._lock:
                     pending = [it for it in self.items
-                               if it["status"] == "queued" and it["id"] not in self._running_ids]
+                               if it["status"] == "queued" and it["id"] not in self._running_ids
+                               and it.get("not_before", 0) <= now]
                 for it in pending:
                     if self._workers.acquire(blocking=False):
                         with self._lock:
@@ -240,10 +244,37 @@ class QueueManager:
                 pass
             time.sleep(0.5)
 
+    def _services_down(self, c, it):
+        """풀오토 아이템이 쓸 외부 서비스 가동 확인. 죽은 서비스 이름(문자열) 반환, 정상이면 None.
+        도중에 에러로 죽는 대신 시작 전에 확인하고 대기·재시도한다(던져놓고 자리 비울 때용)."""
+        pipe = it.get("pipeline") or {}
+        down = []
+        if pipe.get("tts"):
+            try:
+                urllib.request.urlopen(c["tts_base"].rstrip("/") + "/profiles", timeout=4)
+            except Exception:
+                down.append("voicebox")
+        if pipe.get("transcribe") or pipe.get("ai") or pipe.get("banner"):
+            try:
+                urllib.request.urlopen(c["meta_api"].rstrip("/") + "/work/PING-000", timeout=4)
+            except urllib.error.HTTPError:
+                pass                      # 응답이 왔으면 살아있는 것(404 등 무관)
+            except Exception:
+                down.append("meta_api")
+        return "·".join(down) if down else None
+
     def _run_item(self, it):
         em = _ItemEmitter(self, it)
         try:
             c = self.load_cfg()
+            if (it.get("opts") or {}).get("fullauto"):
+                down = self._services_down(c, it)
+                if down:
+                    it["status"] = "queued"
+                    it["stage_label"] = f"⏳ {down} 대기 — 60초 후 재시도"
+                    it["not_before"] = time.time() + 60
+                    self._touch()
+                    return
             it["status"] = "running"; it["error"] = None
             self._touch()
             code = it["code"]
@@ -290,21 +321,25 @@ class QueueManager:
     def _resolve_pos(self, it, pos, em=None):
         """묶음 리뷰에서 이 작품이 첫/중간/마지막 꼭지인지 결정.
         pos='auto'면 큐에 담긴 순서(추가순)로 판단한다 — 큐가 곧 영상의 편집 순서.
-        아이템이 하나뿐이면 'first'(전환 문구만 붙고 아웃트로는 없음).
+        아이템이 하나뿐이면 'solo'(묶음 문구 없이 단독 완결 — '이번 작품은 ~').
         수동 지정(first/mid/last)이면 그대로 존중.
 
         ※ 판정은 ② AI 처리가 '실행되는 시점'의 큐 상태 기준이다. 따라서
           · 도중에 아이템을 추가/삭제하거나 '완료 정리'를 누르면 순서가 바뀔 수 있다.
           · 10개를 한 번에 넣고 돌리는 게 안전하다. 나눠 넣을 거면 수동 지정을 쓸 것."""
-        if pos in ("first", "mid", "last"):
+        if pos in ("first", "mid", "last", "solo"):
             return pos
         ids = [x["id"] for x in self.items if (x.get("code") or "").strip()]
         if it["id"] not in ids:
             return "mid"
         i, n = ids.index(it["id"]), len(ids)
-        out = "first" if i == 0 else ("last" if i == n - 1 else "mid")
+        if n == 1:
+            out = "solo"          # 큐에 하나뿐 → 묶음 아님, 단독 완결 영상
+        else:
+            out = "first" if i == 0 else ("last" if i == n - 1 else "mid")
         if em:
-            label = {"first": "먼저", "mid": "다음은", "last": "마지막으로"}[out]
+            label = {"first": "먼저", "mid": "다음은", "last": "마지막으로",
+                     "solo": "단독(이번 작품은)"}[out]
             em.log(f"묶음 위치 자동판정: {i + 1}/{n}번째 → '{label} …' ({out})")
         return out
 

@@ -203,10 +203,22 @@ def narration_budget(target_sec, style="3min"):
 def _roundup_block(pos="mid", target_sec=60, style="3min"):
     """묶음 리뷰(여러 작품을 한 영상에 이어붙임)의 '한 꼭지'로 쓰이는 내레이션 규칙.
     3분휴지 실측: 영상 1편에 작품 16~23개, 작품당 29~36초.
-    첫 꼭지 '먼저 ~', 중간 '다음은 ~', 끝 '마지막으로 ~'. 인사·구독은 영상 맨 끝에 한 번만."""
-    pos = pos if pos in ("first", "mid", "last") else "mid"
-    opener = {"first": "먼저", "mid": "다음은", "last": "마지막으로"}[pos]
+    첫 꼭지 '먼저 ~', 중간 '다음은 ~', 끝 '마지막으로 ~'. 인사·구독은 영상 맨 끝에 한 번만.
+    pos='solo'는 묶음이 아니라 이 작품 하나로 완결되는 단독 영상(풀오토 기본)."""
+    pos = pos if pos in ("first", "mid", "last", "solo") else "mid"
     lo, hi, chars = narration_budget(target_sec, style)
+    if pos == "solo":
+        tail = (" 대사가 흐르는 구간에는 내레이션이 없으므로 문장 수가 적다.\n"
+                if style == "cinema" else "\n")
+        return ("[★단독 리뷰] 이 내레이션은 이 작품 하나로 완결되는 독립 영상이다(묶음 아님).\n"
+                " · 첫 문장은 '이번 작품은 OOO(배우)의 신작입니다.' 또는 "
+                "'이번 작품은 ~라는 내용입니다.'로 담담히 연다. '먼저/다음은/마지막으로' 금지.\n"
+                " · 채널 인사·자기소개·구독/좋아요 요청·'오늘은 ~을 준비했습니다' 금지.\n"
+                f" · 분량은 약 {int(target_sec)}초 — 내레이션 {lo}~{hi}문장, 합쳐 {chars}자 안팎. "
+                f"이보다 길게 늘이지도, 짧게 줄이지도 말 것." + tail +
+                " · 마지막은 '~작품이었습니다.'로 총평을 닫고 마무리 한 줄을 덧붙인다"
+                "('오늘도 이상한 영상을 시청해 주셔서 감사합니다. 지금까지 딸감별사였습니다.').\n")
+    opener = {"first": "먼저", "mid": "다음은", "last": "마지막으로"}[pos]
     kind = "첫" if pos == "first" else ("마지막" if pos == "last" else "중간")
     tail = (" 대사가 흐르는 구간에는 내레이션이 없으므로 문장 수가 적다.\n"
             if style == "cinema" else "\n")

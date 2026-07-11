@@ -862,7 +862,22 @@ function qOpen(it){
   }, 300);
 }
 
+function renderWatch(w){
+  const st=$("#watchStat"); if(!st) return;
+  if(!w){ st.style.display="none"; return; }
+  if(w.enabled){
+    st.style.display="block";
+    st.textContent = `🔮 감시 중: ${w.dir} · 투입 ${w.added}개` + (w.waiting?` · 다운로드 대기 ${w.waiting}개`:"");
+  }else if((w.dir||"").trim() && $("#watchOn") && $("#watchOn").checked){
+    st.style.display="block";
+    st.textContent = "⚠ 감시 폴더가 없거나 접근 불가: " + w.dir;
+  }else{
+    st.style.display="none";
+  }
+}
+
 function renderQueue(snap){
+  renderWatch(snap.watch);
   const ul=$("#qlist"); if(!ul) return;
   const items=snap.items||[];
   $("#qCount").textContent = items.length ? `${items.filter(i=>i.status==="running").length}▶ / ${items.length}` : "";
@@ -881,10 +896,10 @@ function renderQueue(snap){
     const [btxt,bcls]=Q_ST[it.status]||["?",""];
     const li=document.createElement("li"); li.className="q-item "+bcls;
     const pct=Math.round((it.progress||0)*100);
-    // 큐 순서 = 묶음 영상의 편집 순서 → 첫/마지막 꼭지는 전환 문구가 달라진다
+    // 큐 순서 = 묶음 영상의 편집 순서 → 첫/마지막 꼭지는 전환 문구가 달라진다 (1개뿐이면 단독)
     const coded=items.filter(x=>(x.code||"").trim());
     const ci=coded.indexOf(it), cn=coded.length;
-    const posTag = ci<0 ? "" : (cn===1||ci===0 ? "먼저" : (ci===cn-1 ? "마지막" : "다음은"));
+    const posTag = ci<0 ? "" : (cn===1 ? "단독" : (ci===0 ? "먼저" : (ci===cn-1 ? "마지막" : "다음은")));
     li.innerHTML =
       `<div class="q-top"><b class="q-code">${it.code||"(품번?)"}</b>`+
       (posTag?`<span class="q-badge" title="묶음 리뷰에서 이 작품의 전환 문구(큐 순서로 자동 판정)">${ci+1}. ${posTag}</span>`:"")+
@@ -919,6 +934,21 @@ connectQueue();
 fetch("/queue").then(r=>r.json()).then(renderQueue).catch(()=>{});
 
 $("#btnQClear").onclick=()=>fetch("/queue/clear_finished",{method:"POST"});
+
+// ── 폴더 감시(풀오토) — config에 저장, 서버 워처가 5초마다 확인 ──
+function saveWatch(){
+  fetch("/config",{method:"POST",headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({watch_enabled:$("#watchOn").checked, watch_dir:$("#watchDir").value.trim()})});
+  if($("#watchOn").checked)
+    log(`🔮 폴더 감시 켜짐: ${$("#watchDir").value.trim()||"(폴더 미지정)"} — 여기 떨어지는 영상은 1분 단독 완성본까지 자동 처리`,"ok");
+  else log("폴더 감시 꺼짐");
+}
+$("#watchOn").onchange=saveWatch;
+$("#watchDir").onchange=saveWatch;
+fetch("/config").then(r=>r.json()).then(c=>{
+  if($("#watchOn")) $("#watchOn").checked=!!c.watch_enabled;
+  if($("#watchDir")) $("#watchDir").value=c.watch_dir||"";
+}).catch(()=>{});
 function saveLanes(){
   fetch("/config",{method:"POST",headers:{'Content-Type':'application/json'},
     body:JSON.stringify({queue_gpu:+$("#qLaneGpu").value||1, queue_ai:+$("#qLaneAi").value||2})});

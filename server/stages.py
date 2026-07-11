@@ -7,6 +7,7 @@
 """
 import json
 import re
+import shutil
 import threading
 from pathlib import Path
 
@@ -131,6 +132,25 @@ def stage_transcribe(c, code, video, model, em, initial_prompt=None):
             "srt": str(outdir / f"{code}_전사.srt")}
 
 
+def _guard_keep(keep, segs, log):
+    """안전장치 — 대사(전사)가 한 줄도 없는 keep 구간은 제외한다.
+    전사에서 신음은 환청필터로 걸러지므로, 대사 0줄 keep = 노출 장면 의심.
+    원본을 트림 없이 풀오토로 던졌을 때 노출 구간이 최종본에 섞이는 걸 억제한다.
+    전부 걸리면 판단 불가로 보고 원본 유지(안전망 — 결과 없음보단 검수)."""
+    ok, dropped = [], []
+    for a, b in keep:
+        n = sum(1 for s, e, _t in segs if s < b and e > a)
+        (ok if n else dropped).append((a, b))
+    if dropped and ok:
+        for a, b in dropped:
+            log(f"⚠ keep {_hms(a)}~{_hms(b)}: 대사 0줄 — 노출 장면 의심, 자동 제외")
+        log(f"안전장치: keep {len(keep)}→{len(ok)}구간 (제외 {len(dropped)})")
+        return ok
+    if dropped:
+        log("※ 모든 keep에 대사가 없어 안전장치를 건너뜁니다(원본 유지) — 결과를 꼭 검수하세요")
+    return keep
+
+
 def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", style="3min"):
     """② AI 처리 — 저장된 전사 + 메타 → LLM 압축·번역·내레이션. plan.json 저장 + 컷.
     gpu: 컷(NVENC) 구간을 감쌀 세마포어(큐 병렬 시) — None이면 잠금 없음(기존 단독 동작)."""
@@ -158,6 +178,8 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
     keep = P.parse_keep(res.get("keep", []), total=P.video_duration(video))
     if not keep:
         raise RuntimeError("LLM이 keep 구간을 못 골랐습니다(빈 응답 — 헤드리스 거부 가능. 아래 수동 모드 사용).")
+    keep = _guard_keep(keep, segs, em.log)
+    res["keep"] = [[a, b] for a, b in keep]   # 제외 반영된 keep을 plan에 저장(자막 재타이밍 일치)
     # ★ 컷을 먼저 하고 성공한 뒤에 plan.json을 쓴다.
     #   완료 판정이 plan.json 존재로 되므로, 컷 도중 죽으면 plan.json이 없어 재실행된다
     #   (반대 순서면 컷이 실패해도 'AI 완료'로 오판되어 final.mp4 없이 다음 단계로 넘어감).
@@ -333,5 +355,13 @@ def stage_burn(c, code, styles, em, source=None, banner=True, parts=None):
                 str(djson) if djson.is_file() else None, em.log,
                 banner=bl, subs=want_subs)
     em.file("완성 영상", out)
+    # 완성본 수거함 — 품번 폴더에 흩어진 완성본을 {out_dir}/_완성/ 한 곳에 모은다(풀오토 출구)
+    try:
+        dest = Path(c["out_dir"]) / "_완성" / f"{_safe(code)}.mp4"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(out, dest)
+        em.file("완성본 수거", dest)
+    except Exception as e:
+        em.log(f"※ 완성본 수거 실패({e}) — 완성본은 {out}")
     return {"mode": "burn", "subbed": out, "source": str(src),
             "banner": bool(bl), "parts": picked}

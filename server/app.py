@@ -57,6 +57,7 @@ DEFAULTS = {"meta_api": "http://172.30.1.40:8770", "llm": "claude",
             "target_sec": 60,
             "tts_base": "http://127.0.0.1:17493", "tts_profile": "", "tts_language": "ko",
             "queue_gpu": 1, "queue_ai": 2, "queue_tts": 1,
+            "watch_dir": "", "watch_enabled": False,
             "sub_styles": P.STYLE_DEFAULT, "sub_templates": SUB_TEMPLATES}
 
 app = FastAPI(title="ja_reviewer")
@@ -1130,9 +1131,20 @@ def guess_code(name):
     return f"{m.group(1)}-{m.group(2)}".upper() if m else ""
 
 
+# 감시 폴더(풀오토 입구) — config watch_enabled/watch_dir 로 켜고 끈다
+from .watcher import Watcher
+WATCHER = Watcher(load_cfg, QUEUE, guess_code)
+
+
+def _queue_snap():
+    s = QUEUE.snapshot()
+    s["watch"] = WATCHER.status()
+    return s
+
+
 @app.get("/queue")
 def queue_snapshot():
-    return QUEUE.snapshot()
+    return _queue_snap()
 
 
 @app.get("/queue/events")
@@ -1146,7 +1158,7 @@ async def queue_events():
                 yield ": keepalive\n\n"
                 continue
             since = v
-            yield f"data: {json.dumps(QUEUE.snapshot(), ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps(_queue_snap(), ensure_ascii=False)}\n\n"
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
