@@ -309,6 +309,16 @@ class QueueManager:
             else:
                 it["status"] = "review"; it["stage_label"] = "✋ 검수대기 — 클릭해서 확인"
         except Exception as e:
+            # 풀오토는 시작 전 확인만으로는 부족 — 도중에 voicebox 등이 죽으면
+            # error로 끝내지 말고 대기·재시도로 돌린다(완료 스테이지는 파일로 스킵되니 이어서 진행).
+            if (it.get("opts") or {}).get("fullauto"):
+                down = self._services_down(self.load_cfg(), it)
+                if down:
+                    it["status"] = "queued"; it["stage"] = None
+                    it["stage_label"] = f"⏳ {down} 끊김 — 60초 후 재시도"
+                    it["not_before"] = time.time() + 60
+                    em.log(f"⚠ {down} 연결 끊김({e}) → 복구 대기 후 자동 재개")
+                    return
             it["status"] = "error"; it["error"] = str(e)
             it["stage_label"] = f"✗ 오류: {str(e)[:60]}"
             em.log(f"✖ 오류: {e}")
