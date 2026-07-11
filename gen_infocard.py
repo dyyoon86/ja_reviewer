@@ -299,7 +299,7 @@ def render_layers(m: dict, outdir: str, theme=None) -> dict:
         b = p.chromium.launch(executable_path=CHROME) if CHROME else p.chromium.launch()
         for name, (html, transp) in pages.items():
             f = os.path.join(outdir, f"_L_{name}.html")
-            with open(f, "w") as fp: fp.write(html)
+            with open(f, "w", encoding="utf-8") as fp: fp.write(html)
             pg = b.new_page(viewport={"width": 1920, "height": 1080}, device_scale_factor=1)
             pg.goto("file://" + f); pg.wait_for_timeout(1300)
             png = os.path.join(outdir, f"L_{name}.png")
