@@ -64,8 +64,10 @@ DEFAULTS = {"meta_api": "http://172.30.1.40:8770", "llm": "claude",
             # NudeNet은 프레임마다 점수가 요동쳐 1패스로는 0이 안 되므로 수렴할 때까지 반복.
             "nsfw_scan_step": 1.0, "nsfw_clean_threshold": 0.22, "nsfw_pad": 3.0,
             "nsfw_merge_gap": 12.0, "nsfw_min_clip": 3.0, "nsfw_max_pass": 3,
-            # 클린 단계를 안 쓸 때의 폴백(keep 구간만 스캔)
-            "nsfw_full_scan": False,
+            # ② AI 처리 전 노출 스캔 — NN으로 1차 컷한 영상에도 정사신이 남을 수 있으므로
+            # LLM에 보내기 전에 다시 훑어 ①노출 구간 대사를 입력에서 빼고 ②고른 구간에서 도려낸다.
+            # ⓪ 클린 스테이지를 거친 항목(state.cleaned)은 스캔을 생략한다(중복 방지).
+            "nsfw_full_scan": True,
             # 완성본 전수 검사(최후 방어선) — 검출 시 _완성/ 대신 _검수필요/ 로 격리
             "nsfw_final_check": True, "nsfw_final_step": 0.25,
             "fullauto_mode": "summary",   # 자동 모드 방식: summary | highlight
@@ -594,6 +596,39 @@ async def nsfw_scan(req: Request):
                         "total": total, "bad_sec": round(bad_sec, 1)})
         except ImportError:
             jerr(jid, RuntimeError("NudeNet이 설치되지 않았습니다 (pip install nudenet)"))
+        except Exception as e:
+            jerr(jid, e)
+
+    run_bg(work)
+    return {"job": jid}
+
+
+@app.post("/audio/scan")
+async def audio_scan(req: Request):
+    """②단계(수동) — 전사(small)로 '실대사 없는' 구간(신음/무음)을 찾아 삭제 후보로 준다.
+    NN(화면)만으로는 노출 의상으로 대화하는 장면을 정사로 오판한다 → 소리로 되돌린다.
+    자르지는 않는다: GUI가 삭제 목록에 채우면 사람이 확인 후 자른다.
+    {path, model?, window?} → {ranges, stats}"""
+    body = await req.json(); c = load_cfg()
+    path = body["path"]
+    if not Path(path).is_file():
+        raise HTTPException(400, f"영상을 찾을 수 없습니다: {path}")
+    jid = new_job()
+
+    def work():
+        try:
+            from server.core import moan
+            jstep(jid, 1, 1, "신음·정사 구간 스캔 (전사 기반 — 대사 있는 구간은 보존)")
+            ranges, stats = moan.scan_audio(
+                path, model_name=body.get("model") or c.get("scan_model", "small"),
+                log=lambda m: jlog(jid, m),
+                progress=lambda fr: jprog(jid, fr, "전사"),
+                window=float(body.get("window", 30.0)))
+            jlog(jid, "※ 자동으로 자르지 않았습니다 — 삭제 구간 목록을 확인·수정한 뒤 "
+                      "'① 선택 구간 잘라내기'를 누르세요.")
+            jdone(jid, {"mode": "audio_scan",
+                        "ranges": [[round(a, 2), round(b, 2)] for a, b in ranges],
+                        **stats})
         except Exception as e:
             jerr(jid, e)
 

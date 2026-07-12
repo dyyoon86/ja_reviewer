@@ -168,16 +168,34 @@
             placeholder="텍스트로 구간 입력 (여러 줄 가능)&#10;12:30-18:00&#10;45:00-52:00" style="flex:1"></textarea>
           <button id="btnAddText">추가</button>
         </div>
-        <div class="formrow" style="margin:8px 0">
-          <button id="btnNsfwScan" title="영상 전체를 NudeNet으로 훑어 노출 구간을 찾아 아래 삭제 목록에 자동으로 채웁니다. 자동으로 자르지는 않으니 확인·수정 후 잘라내세요">🛡 NN으로 노출 구간 자동 찾기</button>
-          <span class="fld"><span class="lbl">민감도</span>
-            <select id="nsfwThr" title="낮을수록 공격적으로 잡습니다(오검출도 늘어남). 기본 0.22" style="width:140px">
-              <option value="0.15">아주 강하게 (0.15)</option>
-              <option value="0.22" selected>강하게 (0.22·권장)</option>
-              <option value="0.35">보통 (0.35)</option>
-              <option value="0.5">약하게 (0.5)</option>
-            </select></span>
-          <span class="muted">2시간 영상 ≈ 4분 소요</span>
+        <div class="autofind">
+          <div class="af-head">자동으로 찾기 <span class="muted">· 후보만 채워줍니다. 확인·수정 후 잘라내세요</span></div>
+          <div class="formrow">
+            <button id="btnNsfwScan" title="화면을 NudeNet으로 훑어 노출 구간을 찾습니다">1️⃣ 화면 — NN 노출 구간</button>
+            <span class="fld"><span class="lbl">민감도</span>
+              <select id="nsfwThr" title="낮을수록 공격적으로 잡습니다(오검출도 늘어남)" style="width:130px">
+                <option value="0.15">아주 강하게</option>
+                <option value="0.22" selected>강하게 (권장)</option>
+                <option value="0.35">보통</option>
+                <option value="0.5">약하게</option>
+              </select></span>
+            <span class="muted">2시간 ≈ 4분</span>
+          </div>
+          <div class="formrow" style="margin-top:6px">
+            <button id="btnAudioScan" title="small 모델로 빠르게 전사해 '실대사가 없는' 구간(신음·무음)을 찾습니다. 대사가 있는 구간은 절대 자르지 않습니다">2️⃣ 소리 — 신음·정사 구간</button>
+            <span class="fld"><span class="lbl">판정 단위</span>
+              <select id="moanWin" title="이 길이 안에 실대사가 하나도 없으면 삭제 후보" style="width:110px">
+                <option value="20">20초</option>
+                <option value="30" selected>30초</option>
+                <option value="60">60초</option>
+              </select></span>
+            <span class="muted">2시간 ≈ 1~2분</span>
+          </div>
+          <div class="hint" style="margin:7px 0 0">
+            <b>화면(1️⃣)</b>은 노출 부위를 보고, <b>소리(2️⃣)</b>는 대사 유무를 봅니다.
+            NN만 쓰면 <u>노출 있는 옷으로 대화하는 장면</u>도 정사로 오판하므로(실측: 식사 대화 39분이 잘림),
+            <b>둘 다 돌린 뒤 목록을 보고 판단</b>하는 것을 권합니다. 2️⃣는 <b>대사가 있는 구간은 절대 자르지 않습니다.</b>
+          </div>
         </div>
         <ul class="ex" id="exList"></ul>
         <div class="actions">

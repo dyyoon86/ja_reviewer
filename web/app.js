@@ -265,6 +265,34 @@ $("#btnNsfwScan").onclick = () => {
     .catch(e=>{ log("요청 실패: "+e,"warn"); btn.disabled=false; btn.textContent=old; });
 };
 
+// 2️⃣ 소리 — 전사(small)로 '실대사 없는' 구간(신음·정사·무음) 찾기.
+// NN(화면)은 노출 의상으로 대화하는 장면도 정사로 오판한다 → 대사 유무로 되돌린다.
+$("#btnAudioScan").onclick = () => {
+  if(!needVideo()) return;
+  const btn = $("#btnAudioScan"); btn.disabled = true;
+  const old = btn.textContent; btn.textContent = "2️⃣ 전사 중…";
+  log("── 2️⃣ 신음·정사 구간 스캔 시작 (small 전사 — 대사 있는 구간은 보존) ──");
+  fetch("/audio/scan",{method:"POST",headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({path:videoPath, window:parseFloat($("#moanWin").value)})})
+    .then(r=>r.json()).then(j=>{
+      if(!j.job){ log("스캔 시작 실패","warn"); btn.disabled=false; btn.textContent=old; return; }
+      runJob(j.job,
+        (res)=>{
+          btn.disabled=false; btn.textContent=old;
+          const rs = (res && res.ranges) || [];
+          log(`전사 결과: 실대사 ${res.dialogue||0}줄 · 신음/무의미 ${res.moan||0}줄`);
+          if(!rs.length){ log("✔ 실대사 없는 구간이 없습니다 — 자를 게 없습니다","ok"); return; }
+          rs.forEach(([a,b])=>excludes.push([a,b]));
+          excludes.sort((x,y)=>x[0]-y[0]);
+          renderEx();
+          log(`✔ 실대사 없는 ${rs.length}구간(${((res.cut_sec||0)/60).toFixed(1)}분)을 삭제 목록에 추가. `
+             +`대사가 있는 구간은 건드리지 않았습니다.`, "ok");
+        },
+        ()=>{ btn.disabled=false; btn.textContent=old; });
+    })
+    .catch(e=>{ log("요청 실패: "+e,"warn"); btn.disabled=false; btn.textContent=old; });
+};
+
 $("#btnTrim").onclick = () => {
   if(!needVideo()) return;
   if(!excludes.length){ log("삭제할 구간을 하나 이상 추가하세요","warn"); return; }

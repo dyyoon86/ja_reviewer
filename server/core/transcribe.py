@@ -119,13 +119,16 @@ def _finish(out, dropped, log):
 
 
 def transcribe(video, model_name="large-v3", log=print, progress=None, initial_prompt=None,
-               beam_size=5, batched=True, batch_size=8):
+               beam_size=5, batched=False, batch_size=8):
     """
     고도화 전사. initial_prompt(작품 제목·배우명 등 맥락)를 주면 정확도↑.
     환청 억제 파라미터 + 후처리 필터로 신음/무음발 가짜자막을 걸러낸다.
     progress(frac 0~1) 콜백을 주면 전사 진행률을 보고한다.
-    batched=True면 BatchedInferencePipeline(VAD 음성구간 병렬 디코딩)로 4~8배 빠름.
-    실패(OOM 등) 시 순차 전사로 자동 폴백.
+
+    ★ batched 기본 False — BatchedInferencePipeline은 4~8배 빠르지만 **세그먼트를 뭉친다**
+      (실측: 같은 120초를 순차 42세그 vs 배치 3세그). 이 프로젝트는 타임스탬프로 컷을
+      만들기 때문에 뭉침이 곧 오작동이다. 자막·구간선정 용도로는 절대 켜지 말 것.
+      켜도 되는 경우: 텍스트 내용만 필요하고 시각 정확도가 무관할 때.
     """
     log(f"Whisper 전사 (모델 {model_name}{f', 배치×{batch_size}' if batched else ''})...")
     _ensure_cuda_dll_path(log)
@@ -152,11 +155,16 @@ def transcribe(video, model_name="large-v3", log=print, progress=None, initial_p
 
 def transcribe_scan(video, model_name="small", log=print, progress=None, initial_prompt=None,
                     batch_size=16):
-    """1차 러프 스캔 — 구간 '선정'용이라 오탈자 허용. 작은 모델+beam1+배치로 최고 속도.
-    최종 자막 품질은 2차 정밀 전사(transcribe_ranges)가 책임진다."""
+    """1차 러프 스캔 — 구간 '선정'용이라 오탈자는 허용하되 **타임스탬프는 정확해야 한다**.
+
+    ★ 배치(BatchedInferencePipeline)를 쓰면 안 된다 — 세그먼트를 뭉쳐버린다.
+      실측(같은 120초): 순차 42세그 vs 배치 3세그(45초짜리 덩어리에 대사 6개가 뭉침).
+      LLM이 그 뭉친 줄만 보고 keep을 고르면 구간이 통째로 어긋나고, '대사 부족'
+      가드까지 오작동한다(FNS-235가 6세그로 보였지만 실제는 537세그였다).
+      small 순차도 123분에 2.4분이라 large-v3 순차(20~40분) 대비 충분히 빠르다."""
     log(f"1차 스캔 전사(러프, {model_name}) — 구간 선정용. 최종 자막은 2차 정밀 전사로 확보")
     return transcribe(video, model_name, log, progress, initial_prompt,
-                      beam_size=1, batched=True, batch_size=batch_size)
+                      beam_size=1, batched=False)
 
 
 def transcribe_ranges(video, ranges, model_name="large-v3", log=print, progress=None,

@@ -297,3 +297,7 @@ body[data-mode="manual"] .auto-only{display:none !important}
   color:var(--dim);background:var(--panel2);white-space:nowrap}
 .q-step.s-done{color:#3ec46d;border-color:#2c6b43;background:rgba(62,196,109,.10)}
 .q-step.s-run{color:#fff;border-color:var(--acc,#c33);background:var(--acc,#c33);font-weight:700}
+
+/* 수동 ① 자동 찾기(화면 NN / 소리 전사) 묶음 */
+.autofind{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px 0;background:var(--panel2)}
+.af-head{font-size:12.5px;font-weight:700;color:var(--txt);margin-bottom:8px}
