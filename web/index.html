@@ -110,6 +110,9 @@
   <!-- 좌: 플레이어 -->
   <div class="col manual-only">
     <div class="card">
+      <div id="curFile" class="muted" style="margin:0 0 6px;font-size:12px;display:none;
+           white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
+           title="지금 스캔·자르기가 적용되는 파일 — 자르기 후 '잘라낸 영상으로 계속'을 눌러야 결과물로 바뀝니다"></div>
       <video id="vid" controls preload="metadata"></video>
       <div class="tl" id="tl"><div class="cur" id="cur"></div></div>
       <div class="ctrls">
@@ -182,12 +185,12 @@
             <span class="muted">2시간 ≈ 4분</span>
           </div>
           <div class="formrow" style="margin-top:6px">
-            <button id="btnAudioScan" title="small 모델로 빠르게 전사해 '실대사가 없는' 구간(신음·무음)을 찾습니다. 대사가 있는 구간은 절대 자르지 않습니다">2️⃣ 소리 — 신음·정사 구간</button>
-            <span class="fld"><span class="lbl">판정 단위</span>
-              <select id="moanWin" title="이 길이 안에 실대사가 하나도 없으면 삭제 후보" style="width:110px">
-                <option value="20">20초</option>
-                <option value="30" selected>30초</option>
-                <option value="60">60초</option>
+            <button id="btnAudioScan" title="small 모델로 빠르게 전사해 '내용 있는 대사가 없는' 구간(신음·흥분 속삭임·무음)을 찾습니다. 내용 대사 주변만 보호합니다 — 'やばい' 반복 같은 흥분 감탄은 대사로 안 칩니다">2️⃣ 소리 — 신음·정사 구간</button>
+            <span class="fld"><span class="lbl">대사 보호</span>
+              <select id="moanPad" title="내용 있는 대사의 앞뒤 몇 초를 보호할지 — 넓을수록 덜 잘립니다" style="width:110px">
+                <option value="3">좁게 ±3초</option>
+                <option value="5" selected>표준 ±5초</option>
+                <option value="8">넓게 ±8초</option>
               </select></span>
             <span class="muted">2시간 ≈ 1~2분</span>
           </div>

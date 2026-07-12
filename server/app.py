@@ -605,10 +605,12 @@ async def nsfw_scan(req: Request):
 
 @app.post("/audio/scan")
 async def audio_scan(req: Request):
-    """②단계(수동) — 전사(small)로 '실대사 없는' 구간(신음/무음)을 찾아 삭제 후보로 준다.
-    NN(화면)만으로는 노출 의상으로 대화하는 장면을 정사로 오판한다 → 소리로 되돌린다.
+    """②단계(수동) — 전사(small)로 '내용 대사 없는' 구간(신음/흥분속삭임/무음)을 찾아
+    삭제 후보로 준다. NN(화면)만으로는 노출 의상으로 대화하는 장면을 정사로 오판한다
+    → 소리로 되돌린다. 대사 버블 방식: 내용 대사 ±pad초만 보호(구 30초 윈도우 폐기 —
+    경계에 걸친 무대사 정사 43초와 속삭임 애무씬 89초를 통과시켰던 구멍).
     자르지는 않는다: GUI가 삭제 목록에 채우면 사람이 확인 후 자른다.
-    {path, model?, window?} → {ranges, stats}"""
+    {path, model?, pad?, min_len?} → {ranges, stats}"""
     body = await req.json(); c = load_cfg()
     path = body["path"]
     if not Path(path).is_file():
@@ -618,12 +620,13 @@ async def audio_scan(req: Request):
     def work():
         try:
             from server.core import moan
-            jstep(jid, 1, 1, "신음·정사 구간 스캔 (전사 기반 — 대사 있는 구간은 보존)")
+            jstep(jid, 1, 1, "신음·정사 구간 스캔 (전사 기반 — 내용 대사 주변만 보호)")
             ranges, stats = moan.scan_audio(
                 path, model_name=body.get("model") or c.get("scan_model", "small"),
                 log=lambda m: jlog(jid, m),
                 progress=lambda fr: jprog(jid, fr, "전사"),
-                window=float(body.get("window", 30.0)))
+                pad=float(body.get("pad", 5.0)),
+                min_len=float(body.get("min_len", 8.0)))
             jlog(jid, "※ 자동으로 자르지 않았습니다 — 삭제 구간 목록을 확인·수정한 뒤 "
                       "'① 선택 구간 잘라내기'를 누르세요.")
             jdone(jid, {"mode": "audio_scan",

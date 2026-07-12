@@ -34,6 +34,18 @@ function resetForNewVideo(){
   clearFiles(); setProg(0,"대기 중");
 }
 
+// 작업 대상 배지 — 지금 스캔·자르기가 적용되는 파일을 상시 표시한다.
+// "자른 결과에서 또 자르는 건지, 원본에서 다시 자르는 건지"가 안 보이던 문제의 답.
+function setCurFile(){
+  const el = $("#curFile"); if(!el) return;
+  if(!videoPath){ el.style.display="none"; return; }
+  const name = videoPath.split(/[\\/]/).pop();
+  const nTrim = (name.match(/_trim/g)||[]).length;
+  const kind = nTrim ? `✂ ${nTrim}차 잘라낸 영상` : "원본";
+  el.innerHTML = `🎬 작업 대상: <b>${name}</b> <span style="color:${nTrim?'#e8b54d':'#7fd18a'}">(${kind}${duration?` · ${hhmmss(duration)}`:""})</span> — 스캔·자르기는 이 파일에 적용됩니다`;
+  el.style.display="";
+}
+
 async function openVideo(path){
   try{
     const r = await fetch("/open",{method:"POST",headers:{'Content-Type':'application/json'},
@@ -42,7 +54,7 @@ async function openVideo(path){
     const j = await r.json();
     videoPath = j.path; duration = j.duration || 0;
     vid.src = `/video/stream?path=${encodeURIComponent(j.path)}`;
-    excludes = []; pendingIn = null; renderEx();
+    excludes = []; pendingIn = null; renderEx(); setCurFile();
     log(`영상 로드: ${j.name} (${hhmmss(duration)})`, "ok");
     // 품번 자동 추정 (파일명에서 XXX-000 패턴) → 양 탭에 채움
     resetForNewVideo();
@@ -186,6 +198,12 @@ function openTrimModal(){
 function closeTrimModal(){
   $("#trimModal").style.display = "none";
   const tv = $("#trimVid"); tv.pause(); tv.removeAttribute("src"); tv.load();
+  // '잘라낸 영상으로 계속'을 안 누르고 닫음 → 작업 대상은 여전히 이전 파일이다.
+  // 다음 스캔·자르기가 어디에 적용되는지 헷갈리는 지점이라 명시적으로 알린다.
+  if(trimResultPath && videoPath !== trimResultPath){
+    log(`⚠ 작업 대상이 바뀌지 않았습니다 — 여전히 ${ (videoPath||"").split(/[\\/]/).pop() } 에서 작업합니다. `
+       +`잘라낸 결과에 이어서 작업하려면 모달의 '잘라낸 영상으로 계속'을 누르세요.`, "warn");
+  }
 }
 function setTrimProg(frac, label, cls){
   const f = $("#trimProgFill");
@@ -265,28 +283,29 @@ $("#btnNsfwScan").onclick = () => {
     .catch(e=>{ log("요청 실패: "+e,"warn"); btn.disabled=false; btn.textContent=old; });
 };
 
-// 2️⃣ 소리 — 전사(small)로 '실대사 없는' 구간(신음·정사·무음) 찾기.
+// 2️⃣ 소리 — 전사(small)로 '내용 대사 없는' 구간(신음·흥분속삭임·무음) 찾기.
 // NN(화면)은 노출 의상으로 대화하는 장면도 정사로 오판한다 → 대사 유무로 되돌린다.
+// 대사 버블 방식: 내용 대사 ±pad초만 보호. 'やばい' 반복 같은 흥분 감탄은 보호 못 함.
 $("#btnAudioScan").onclick = () => {
   if(!needVideo()) return;
   const btn = $("#btnAudioScan"); btn.disabled = true;
   const old = btn.textContent; btn.textContent = "2️⃣ 전사 중…";
-  log("── 2️⃣ 신음·정사 구간 스캔 시작 (small 전사 — 대사 있는 구간은 보존) ──");
+  log("── 2️⃣ 신음·정사 구간 스캔 시작 (small 전사 — 내용 대사 주변만 보호) ──");
   fetch("/audio/scan",{method:"POST",headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({path:videoPath, window:parseFloat($("#moanWin").value)})})
+    body:JSON.stringify({path:videoPath, pad:parseFloat($("#moanPad").value)})})
     .then(r=>r.json()).then(j=>{
       if(!j.job){ log("스캔 시작 실패","warn"); btn.disabled=false; btn.textContent=old; return; }
       runJob(j.job,
         (res)=>{
           btn.disabled=false; btn.textContent=old;
           const rs = (res && res.ranges) || [];
-          log(`전사 결과: 실대사 ${res.dialogue||0}줄 · 신음/무의미 ${res.moan||0}줄`);
-          if(!rs.length){ log("✔ 실대사 없는 구간이 없습니다 — 자를 게 없습니다","ok"); return; }
+          log(`전사 결과: 내용 대사 ${res.dialogue||0}줄 · 신음/흥분/무의미 ${res.moan||0}줄`);
+          if(!rs.length){ log("✔ 내용 대사 없는 구간이 없습니다 — 자를 게 없습니다","ok"); return; }
           rs.forEach(([a,b])=>excludes.push([a,b]));
           excludes.sort((x,y)=>x[0]-y[0]);
           renderEx();
-          log(`✔ 실대사 없는 ${rs.length}구간(${((res.cut_sec||0)/60).toFixed(1)}분)을 삭제 목록에 추가. `
-             +`대사가 있는 구간은 건드리지 않았습니다.`, "ok");
+          log(`✔ 내용 대사 없는 ${rs.length}구간(${((res.cut_sec||0)/60).toFixed(1)}분)을 삭제 목록에 추가. `
+             +`내용 대사 ±보호반경은 건드리지 않았습니다.`, "ok");
         },
         ()=>{ btn.disabled=false; btn.textContent=old; });
     })
@@ -316,7 +335,7 @@ $("#trimUse").onclick = () => {
   if(!trimResultPath) return;
   videoPath = trimResultPath; duration = trimResultDur;
   vid.src = `/video/stream?path=${encodeURIComponent(trimResultPath)}`;
-  excludes = []; pendingIn = null; renderEx();
+  excludes = []; pendingIn = null; renderEx(); setCurFile();
   log(`✔ 잘라낸 영상으로 계속: ${trimResultPath} (${hhmmss(duration)}). 품번 넣고 ②를 누르세요.`,"ok");
   closeTrimModal();
   collapseAcc("#btnTrim");   // ① 완료 → 접기
@@ -372,7 +391,7 @@ $("#btnUseTrim").onclick = () => {
   if(!trimAvail) return;
   videoPath=trimAvail.path; duration=trimAvail.dur;
   vid.src=`/video/stream?path=${encodeURIComponent(trimAvail.path)}&t=${Date.now()}`;
-  excludes=[]; pendingIn=null; renderEx();
+  excludes=[]; pendingIn=null; renderEx(); setCurFile();
   log(`✔ 이전에 잘라낸 결과 사용: ${trimAvail.path} (${hhmmss(duration)}). 품번 넣고 ① 전사부터 진행하세요.`,"ok");
   $("#btnUseTrim").style.display="none";
 };
