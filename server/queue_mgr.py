@@ -357,7 +357,10 @@ class QueueManager:
         code, video = it["code"], it["video"]
         o = it.get("opts") or {}
         if stg == "clean":
-            r = S.stage_clean(c, code, video, em, gpu=self._lane("gpu"))
+            # gpu 레인은 이 스테이지를 감싼 바깥 with lane이 이미 잡고 있다(STAGE_LANE["clean"]="gpu").
+            # 여기서 또 넘기면 stage_clean 안의 `with gpu:` 가 같은 세마포어(크기 1)를 두 번
+            # 획득하려다 자기 자신과 데드락 → "GPU 차례 대기"에서 영원히 멈춘다. 반드시 None.
+            r = S.stage_clean(c, code, video, em)
             # ★ 이후 모든 스테이지(전사·AI·컷·번인)는 클린본만 본다 — 노출이 샐 여지 제거
             if r.get("clean"):
                 it["video"] = r["clean"]
