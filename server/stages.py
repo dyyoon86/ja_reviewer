@@ -247,6 +247,15 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
                 fine = P.transcribe_ranges(video, keep, precise_model, em.log,
                                            lambda fr: em.prog(fr, "정밀 전사"),
                                            initial_prompt=P.build_initial_prompt(m))
+            # ★ 노출 안전장치 2차 — 러프 스캔은 신음 구간에 환청 대사를 지어내
+            #   _guard_keep(러프 기준)을 뚫을 수 있다. 정밀 전사에서도 대사 0줄인
+            #   keep은 노출 장면으로 보고 다시 제외한다(전부 걸리면 원본 유지=검수行).
+            keep2 = _guard_keep(keep, fine, em.log)
+            if keep2 != keep:
+                keep = keep2
+                res["keep"] = [[a, b] for a, b in keep]
+            fine = [s for s in fine
+                    if any(a - 0.05 <= s[0] < b + 0.05 for a, b in keep)]
             if fine:
                 fix = P.call_llm(P.prompt_dialogue_fix(m, fine), llm, em.log)
                 dlg = fix.get("dialogue") or []
