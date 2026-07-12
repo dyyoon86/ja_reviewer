@@ -436,10 +436,16 @@ def stage_burn(c, code, styles, em, source=None, banner=True, parts=None):
     picked = ([k for k in ("frame", "info", "wm") if bl and k in bl]
               + (["자막"] if want_subs else []))
     em.step(1, 1, "굽기(ffmpeg) — " + (", ".join(picked) or "없음"))
+    anim = dict(P.BANNER_ANIM)
+    try:   # 인포카드 유지시간(초) — config banner_hold로 조절, 워터마크는 그 직후 등장
+        anim["hold"] = float(c.get("banner_hold", anim["hold"]))
+        anim["wm_start"] = anim["hold"] + 0.1
+    except (TypeError, ValueError):
+        pass
     P.burn_subs(str(src), str(dsrt), str(nsrt), out, styles,
                 str(njson) if njson.is_file() else None,
                 str(djson) if djson.is_file() else None, em.log,
-                banner=bl, subs=want_subs)
+                banner=bl, banner_anim=anim, subs=want_subs)
     em.file("완성 영상", out)
     # 완성본 수거함 — 품번 폴더에 흩어진 완성본을 {out_dir}/_완성/ 한 곳에 모은다(풀오토 출구)
     try:

@@ -127,13 +127,15 @@ def build_ass(dialogue, narration, out_ass, width, height, styles=None):
 
 
 """배너 모션 기본값 — 브라우저 미리보기(/preview/data)와 반드시 같은 값을 쓴다."""
-BANNER_ANIM = {"hold": 2.0, "fade": 0.5, "blur": 16, "wm_start": 2.1, "wm_slide": 40}
+BANNER_ANIM = {"hold": 4.0, "fade": 0.5, "blur": 16, "wm_start": 4.1, "wm_slide": 40}
 
 
-def _prep_banner_layers(banner, workdir, blur=16):
+def _prep_banner_layers(banner, workdir, blur=16, vid_wh=None):
     """레이어 PNG를 굽기용으로 준비 — 내용 크기로 crop(오버레이 비용↓) + 인포카드 블러본 1회 생성.
     ffmpeg에서 gblur을 매 프레임 돌리면 수십 배 느려지므로 블러는 여기서 미리 굽는다.
-    반환: {키: (경로, x, y)}  x,y = 원본 캔버스에서의 위치"""
+    vid_wh=(w,h)를 주면 배너 캔버스(1920×1080)를 영상 해상도에 맞춰 스케일한다
+    — 720p 영상에 1080p 좌표로 얹으면 인포카드가 화면 밖으로 잘리는 버그 방지.
+    반환: {키: (경로, x, y)}  x,y = 영상 좌표계 위치"""
     try:
         from PIL import Image, ImageFilter
     except Exception:
@@ -145,6 +147,9 @@ def _prep_banner_layers(banner, workdir, blur=16):
         if not p or not Path(p).is_file():
             continue
         im = Image.open(p).convert("RGBA")
+        s = 1.0
+        if vid_wh and im.width and im.height:
+            s = min(vid_wh[0] / im.width, vid_wh[1] / im.height)
         bb = im.getbbox()
         if not bb:
             continue
@@ -152,13 +157,16 @@ def _prep_banner_layers(banner, workdir, blur=16):
             bb = (max(0, bb[0] - pad), max(0, bb[1] - pad),
                   min(im.width, bb[2] + pad), min(im.height, bb[3] + pad))
         crop = im.crop(bb)
+        if abs(s - 1.0) > 1e-3:
+            crop = crop.resize((max(1, round(crop.width * s)),
+                                max(1, round(crop.height * s))), Image.LANCZOS)
         cp = Path(workdir) / f"_bn_{k}.png"
         crop.save(cp)
-        out[k] = (cp.name, bb[0], bb[1])
+        out[k] = (cp.name, round(bb[0] * s), round(bb[1] * s))
         if k == "info":
             bp = Path(workdir) / "_bn_info_blur.png"
-            crop.filter(ImageFilter.GaussianBlur(blur)).save(bp)
-            out["info_blur"] = (bp.name, bb[0], bb[1])
+            crop.filter(ImageFilter.GaussianBlur(round(blur * s) or 1)).save(bp)
+            out["info_blur"] = (bp.name, round(bb[0] * s), round(bb[1] * s))
     return out
 
 
@@ -241,7 +249,9 @@ def burn_subs(video, dialogue_srt, narration_srt, out_video, styles=None,
 
     inputs, fc, last = [], "", "0:v"
     if banner:
-        prep = _prep_banner_layers(banner, ass_path.parent, (banner_anim or {}).get("blur", BANNER_ANIM["blur"]))
+        prep = _prep_banner_layers(banner, ass_path.parent,
+                                   (banner_anim or {}).get("blur", BANNER_ANIM["blur"]),
+                                   vid_wh=(w, h))
         if prep:
             inputs, fc, last = _banner_filter(prep, banner_anim or BANNER_ANIM)
             log(f"배너 동시 굽기: {', '.join(prep)} (재인코딩 1패스 — 추가 비용 적음)")

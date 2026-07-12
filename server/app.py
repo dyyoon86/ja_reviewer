@@ -57,6 +57,7 @@ DEFAULTS = {"meta_api": "http://172.30.1.40:8770", "llm": "claude",
             # 2-pass 전사: ①러프 스캔(scan_model)→②keep만 정밀(whisper_model).
             # map_reduce_chars: 전사가 이 글자수를 넘으면 블록 요약 후 최종 선정(토큰 폭탄 방지)
             "two_pass": True, "scan_model": "small", "map_reduce_chars": 25000,
+            "banner_hold": 4.0,   # 인포카드 유지시간(초)
             "target_sec": 60,
             "tts_base": "http://127.0.0.1:17493", "tts_profile": "", "tts_language": "ko",
             "queue_gpu": 1, "queue_ai": 2, "queue_tts": 1,
