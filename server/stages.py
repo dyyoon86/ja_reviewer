@@ -481,13 +481,32 @@ def stage_burn(c, code, styles, em, source=None, banner=True, parts=None):
                 str(djson) if djson.is_file() else None, em.log,
                 banner=bl, banner_anim=anim, subs=want_subs)
     em.file("완성 영상", out)
-    # 완성본 수거함 — 품번 폴더에 흩어진 완성본을 {out_dir}/_완성/ 한 곳에 모은다(풀오토 출구)
+    # ★ 최후 방어선 — 실제로 나가는 완성본을 전수 검사(0.25s 간격).
+    #   keep 가드는 2초 샘플이라 컷 경계에 스치는 노출을 놓칠 수 있다. 여기서 잡는다.
+    #   검출되면 _완성/이 아니라 _검수필요/로 보내 업로드 대상에서 자동 격리한다.
+    flagged = False
+    if c.get("nsfw_final_check", True):
+        try:
+            from server.core import nsfw
+            hits = nsfw.check_final(out, step=float(c.get("nsfw_final_step", 0.25)),
+                                    threshold=float(c.get("nsfw_threshold", nsfw.DEFAULT_THRESHOLD)),
+                                    log=em.log)
+            flagged = bool(hits)
+        except ImportError:
+            em.log("※ NudeNet 미설치 — 완성본 전수 검사 생략")
+        except Exception as e:
+            em.log(f"※ 완성본 전수 검사 실패({type(e).__name__}: {e}) — 검사 없이 수거")
+    # 완성본 수거함 — 품번 폴더에 흩어진 완성본을 한 곳에 모은다(풀오토 출구).
+    # 노출이 검출된 건 _검수필요/ 로 격리 — 사람이 보기 전엔 업로드 폴더에 들어가지 않는다.
     try:
-        dest = Path(c["out_dir"]) / "_완성" / f"{_safe(code)}.mp4"
+        folder = "_검수필요" if flagged else "_완성"
+        dest = Path(c["out_dir"]) / folder / f"{_safe(code)}.mp4"
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(out, dest)
-        em.file("완성본 수거", dest)
+        em.file("완성본 수거" if not flagged else "🚨 검수 필요(노출 검출)", dest)
+        if flagged:
+            em.log(f"🚨 노출이 검출되어 {folder}/ 로 격리했습니다 — 확인 후 직접 옮기세요")
     except Exception as e:
         em.log(f"※ 완성본 수거 실패({e}) — 완성본은 {out}")
     return {"mode": "burn", "subbed": out, "source": str(src),
-            "banner": bool(bl), "parts": picked}
+            "banner": bool(bl), "parts": picked, "nsfw_flagged": flagged}

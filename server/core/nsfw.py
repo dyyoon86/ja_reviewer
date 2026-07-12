@@ -37,6 +37,49 @@ def _detector():
     return _DETECTOR
 
 
+def scan_video(video, step=0.25, threshold=DEFAULT_THRESHOLD, log=print):
+    """영상 **전 구간**을 step 간격으로 전수 검사. 반환: [(t, class, score), ...].
+    ffmpeg 1회 호출(fps 필터, 순차 디코딩) + detect_batch — 71초 완성본 0.25s 간격이 5초.
+    구간별 -ss 재호출 방식보다 훨씬 빠르므로 짧은 완성본 검사에 쓴다."""
+    import glob
+    det = _detector()
+    found = []
+    with tempfile.TemporaryDirectory() as td:
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(video),
+                        "-vf", f"fps={1.0 / step:g},scale=640:-1",
+                        os.path.join(td, "f%05d.jpg")], check=True, timeout=1800)
+        files = sorted(glob.glob(os.path.join(td, "*.jpg")))
+        if not files:
+            return found
+        try:
+            batch = det.detect_batch(files)
+        except Exception:   # detect_batch 미지원 빌드 → 개별 판정으로 폴백
+            batch = [det.detect(f) for f in files]
+        for k, res in enumerate(batch):
+            t = k * step
+            for x in (res or []):
+                if x.get("class") in NSFW_CLASSES and float(x.get("score", 0)) >= threshold:
+                    found.append((round(t, 2), x["class"], round(float(x["score"]), 2)))
+    return found
+
+
+def check_final(video, step=0.25, threshold=DEFAULT_THRESHOLD, log=print):
+    """최후 방어선 — 실제로 나가는 완성본을 전수 검사한다.
+    keep 단위 가드는 2초 간격 샘플이라 컷 경계에 스치는 노출을 놓칠 수 있다.
+    여기서는 최종 산출물 자체를 촘촘히 훑어 '나가는 물건에 노출 없음'을 보증한다.
+    반환: [(t, class, score)] — 비어 있으면 통과."""
+    log(f"완성본 전수 노출 검사(NudeNet, {step}s 간격)...")
+    hits = scan_video(video, step, threshold, log)
+    if not hits:
+        log("✔ 완성본 전수 검사 통과 — 노출 검출 0")
+        return hits
+    top = max(hits, key=lambda x: x[2])
+    log(f"🚨 완성본에서 노출 검출: {len(hits)}프레임 (최고 {top[1]} {top[2]} @ {top[0]:.1f}s)")
+    for t, cls, sc in hits[:8]:
+        log(f"   {t:6.1f}s  {cls} {sc}")
+    return hits
+
+
 def scan_ranges(video, ranges, step=DEFAULT_STEP, threshold=DEFAULT_THRESHOLD, log=print):
     """keep 구간별 노출 검사. 반환: {구간index: [(t, class, score), ...]} (검출된 것만)."""
     det = _detector()
