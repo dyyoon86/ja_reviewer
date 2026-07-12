@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3중 노출 필터 — 화면·소리·의미</title>
+<style>
+  :root{--bg:#12141a;--card:#1a1e27;--line:#2a3040;--fg:#dfe4ee;--mut:#8b93a7;
+        --acc:#5b8cff;--ok:#7fd18a;--warn:#e8b54d;--bad:#e87070;}
+  *{box-sizing:border-box}
+  body{margin:0;padding:32px 16px 80px;background:var(--bg);color:var(--fg);
+       font:15px/1.75 "Pretendard","Malgun Gothic",system-ui,sans-serif}
+  main{max-width:860px;margin:0 auto}
+  h1{font-size:26px;margin:0 0 4px}
+  h2{font-size:19px;margin:44px 0 12px;padding-top:20px;border-top:1px solid var(--line)}
+  h3{font-size:16px;margin:24px 0 8px;color:var(--acc)}
+  .sub{color:var(--mut);font-size:13px;margin-bottom:8px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;
+        padding:16px 20px;margin:14px 0}
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px}
+  th,td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+  th{background:#20263380;color:var(--mut);font-weight:600}
+  code{background:#242a38;border-radius:4px;padding:1px 6px;font-size:13px;
+       font-family:Consolas,monospace}
+  .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+  ul,ol{padding-left:22px} li{margin:4px 0}
+  .badge{display:inline-block;background:#242a38;border:1px solid var(--line);
+         border-radius:6px;padding:2px 10px;margin-right:6px;font-size:13px}
+  .flow{background:#20263380;border-left:3px solid var(--acc);padding:10px 16px;
+        border-radius:0 8px 8px 0;margin:10px 0}
+</style>
+</head>
+<body>
+<main>
+<h1>🛡 3중 노출 필터 — 1️⃣ 화면 · 2️⃣ 소리 · 3️⃣ 의미</h1>
+<div class="sub">2026-07-13 정리 · 수동 모드에서 부적절(노출·정사·애무) 장면을 걸러내는 3종 스캔 시스템<br>
+관련 커밋: <code>07b2dd5</code> STT 대사버블 · <code>b096914</code> CLIP 의미스캔 · <code>49d4904</code> ✓ 완료표시</div>
+
+<h2>왜 3개가 필요한가 — 실제로 뚫린 사건</h2>
+<div class="card">
+FNS-235 테스트(7/12~13)에서 <b>1️⃣NN → 2️⃣STT 두 단계를 다 돌렸는데도
+어두운 소파 애무씬 89초가 결과물에 남았다.</b>
+</div>
+<table>
+<tr><th>필터</th><th>보는 것</th><th>뚫린 이유</th></tr>
+<tr><td>1️⃣ NN (NudeNet)</td><td>노출 <b>부위</b></td>
+    <td>옷 입은 채 + 어두운 조명 → EXPOSED 검출 0</td></tr>
+<tr><td>2️⃣ STT (구 30초 윈도우)</td><td><b>대사</b> 유무</td>
+    <td>"動いていい?" 속삭임이 '실대사'로 인정 → 30초 통째 보존.<br>
+        윈도우 경계에 걸친 무대사 정사 43초도 통과</td></tr>
+</table>
+<p>각 필터는 자기 신호만 보므로 <b>부위도 안 보이고 대사도 있는 장면</b>(옷 입은 애무)이
+구조적 사각지대 → <b>장면의 의미</b>를 보는 3️⃣ 추가.</p>
+
+<h2>세 스캔의 원리</h2>
+
+<h3>1️⃣ 화면 — NN 노출 (NudeNet)</h3>
+<ul>
+<li>노출 부위(가슴/성기/항문/둔부 EXPOSED) 직접 검출 + <b>살 노출 지속</b> 규칙
+    (겨드랑이·배 노출이 20초 윈도우의 30%↑ = 옷 벗은 정사 구간)</li>
+<li class="warn">사각: 부위가 가려진 체위, 옷 입은 애무, 어두운 조명</li>
+<li class="warn">반대 함정: 노출 의상으로 <u>대화</u>하는 장면을 정사로 오판 → 2️⃣가 되돌림</li>
+</ul>
+
+<h3>2️⃣ 소리 — 신음·정사 구간 (Whisper small + 대사 버블)</h3>
+<ul>
+<li>small 모델 <b>순차</b> 전사 (배치 금지 — 세그먼트가 뭉개져 타임스탬프 파괴)</li>
+<li><b>대사 버블</b>: '내용 있는 대사' 앞뒤 ±5초(옵션)만 보호, 보호 밖 공백 8초↑는 삭제 후보.
+    영상 시작·끝 경계도 동일 처리</li>
+<li>'내용 있는 대사'가 <b>아닌</b> 것(보호 못 함): 신음 · 같은 말 반복(やばい×3) ·
+    흥분 상용구뿐인 줄(いいじゃん、やろう) · 4자 이하 호명(トミー)
+    <br><span class="sub">단, 약한 발화는 삭제 트리거도 아님 — 주변 진짜 대사 버블 안이면 같이 살아남는다</span></li>
+<li class="ok">대화신은 대사가 촘촘해 버블이 이어짐 → 안 잘림 (식사대화 0컷 실측)</li>
+</ul>
+
+<h3>3️⃣ 의미 — 스킨십·애무 장면 (CLIP zero-shot)</h3>
+<ul>
+<li>프레임(2초 간격)과 문장 대조: "두 사람이 키스한다" 류 7문장 vs
+    "파티에서 대화한다" 류 9문장의 유사도 <b>차이(margin)</b></li>
+<li>이동평균 14초 스무딩 + 임계 0.02 + <b>14초 이상 지속</b>해야 검출
+    <br><span class="sub">'지속' 조건이 오탐 방지 핵심 — 부축 같은 순간 스파이크는 걸러지고 애무는 수십 초 이어진다</span></li>
+<li>모델: Xenova CLIP ONNX 양자화(~150MB, <code>models/clip/</code> 최초 1회 자동 다운로드).
+    onnxruntime <b>CPU</b> 26fps — torch 불필요, 완전 로컬</li>
+<li class="warn">softmax 확률 방식은 실패작(노출 의상 파티까지 끌어올림) — margin 채택</li>
+</ul>
+
+<h2>사용법</h2>
+<div class="card">
+세 버튼은 <b>순서 무관, 독립적</b> — 각자 <span class="badge">🎬 작업 대상</span> 배지에 표시된
+영상을 훑어 같은 <b>삭제 구간 목록</b>에 후보를 추가할 뿐이다. 자동으로 자르지 않는다
+(검토 가능한 자동화). 끝나면 버튼에 <b>✓ N구간</b>이 남는다 (✓ 0구간 = 돌렸는데 깨끗).
+</div>
+
+<div class="flow"><b>플로우 A — 한 번에</b> (타임라인 안 헷갈림)<br>
+원본 로드 → 1️⃣ 2️⃣ 3️⃣ 아무 순서로 실행 → 삭제 목록(전부 원본 기준) 검수 → <b>① 잘라내기 한 번</b></div>
+
+<div class="flow"><b>플로우 B — 순차</b> (더 빠름: 뒷 스캔 입력이 점점 짧아짐)<br>
+1️⃣ 스캔 → 잘라내기 → 모달의 <b>"잘라낸 영상으로 계속"</b> 클릭(필수!) →
+2️⃣ 스캔 → 잘라내기 → "잘라낸 영상으로 계속" → 3️⃣ 스캔 → 잘라내기<br>
+<span class="warn">주의: "잘라낸 영상으로 계속"을 안 누르고 모달을 닫으면 작업 대상이 안 바뀐다(경고 로그).
+각 단계의 삭제 목록은 그 시점 작업 대상 타임라인 기준.</span></div>
+
+<h3>옵션</h3>
+<ul>
+<li>2️⃣ 대사 보호: 좁게 ±3 / 표준 ±5 / 넓게 ±8초 — 좁을수록 많이 잘림</li>
+<li>3️⃣ 민감도: 민감 0.015 / 표준 0.02 / 둔감 0.03 — 낮을수록 많이 잡음</li>
+<li>3️⃣이 못 잡는 애무 → 민감도↓. 일상 장면(마사지·옷 갈아입기 등)을 잡으면
+    <code>server/core/intimacy.py</code>의 PROMPTS_NEUTRAL에 그 장면 추가</li>
+</ul>
+
+<h2>검증 실측 (FNS-235 클립, 정답지 보유)</h2>
+<p>step2_stt.mp4 (239초 = 0~150s 식사대화 + 150~239s 애무):</p>
+<table>
+<tr><th>스캔</th><th>검출</th><th>판정</th></tr>
+<tr><td>2️⃣ 버블(신규)</td><td>163~177, 193~239 (60초)</td>
+    <td class="ok">무대사 정사 43초 정확히 잡음 · 식사대화 0컷</td></tr>
+<tr><td>3️⃣ CLIP</td><td><b>156~240 한 스팬</b></td>
+    <td class="ok">애무씬 전체 · 파티 오탐 0</td></tr>
+<tr><td>구 30초 윈도우</td><td>0구간</td><td class="bad">전부 통과 (폐기 사유)</td></tr>
+</table>
+<p>step1_nn.mp4(338초)에서도 3️⃣이 식사 파트는 안 건드리고 156초 이후만 검출.
+2026-07-13 사용자 실전 테스트: 3종 독립 실행 → 잘 잘림 확인.</p>
+
+<h2>속도 (123분 원본 실측)</h2>
+<!-- BENCHMARK: 실측 완료 후 아래 표를 채운다 -->
+<p class="sub">벤치마크 실행 중 — 완료 후 업데이트 예정.</p>
+<table>
+<tr><th>스캔</th><th>전체영상(123분) 소요</th><th>비고</th></tr>
+<tr><td>1️⃣ NN (1초 간격)</td><td>(측정 중)</td><td>CPU ONNX</td></tr>
+<tr><td>2️⃣ STT (small 순차)</td><td>(측정 중)</td><td>GPU · 어제 실측 ≈ 2.4분</td></tr>
+<tr><td>3️⃣ CLIP (2초 간격)</td><td>(측정 중)</td><td>CPU ONNX</td></tr>
+</table>
+<p>순차 플로우(B)는 앞 단계에서 잘린 만큼 뒷 스캔이 비례해 빨라진다.</p>
+
+<h2>한계 · 남은 것</h2>
+<ul>
+<li>진짜 대사("よったらマジ起きない") 바로 옆 애무 몇 초는 2️⃣ 버블이 보호
+    → 3️⃣이 잡아주지만 최종 결과물은 한 번 훑어보길 권장</li>
+<li>신음 위주 본편형(대사 6줄)은 리뷰 자동화 자체가 부적합 (7/12 결론)</li>
+<li>다음 후보: 풀오토(감시폴더) ⓪노출제거에 3️⃣ CLIP 결합 — 수동에서 몇 편 더 검증 후</li>
+</ul>
+</main>
+</body>
+</html>
