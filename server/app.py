@@ -61,6 +61,8 @@ DEFAULTS = {"meta_api": "http://172.30.1.40:8770", "llm": "claude",
             # 비주얼 노출 가드(NudeNet) — keep 구간 프레임을 NN으로 검사해 노출 장면 제외
             "nsfw_guard": True, "nsfw_step": 2.0, "nsfw_threshold": 0.35,
             "fullauto_mode": "summary",   # 자동 모드 방식: summary | highlight
+            # keep 합계가 목표의 이 비율 미만이면 ②에서 중단(대사 없는 본편형 = 자동화 부적합)
+            "min_keep_ratio": 0.5,
             "target_sec": 60,
             "tts_base": "http://127.0.0.1:17493", "tts_profile": "", "tts_language": "ko",
             "queue_gpu": 1, "queue_ai": 2, "queue_tts": 1,

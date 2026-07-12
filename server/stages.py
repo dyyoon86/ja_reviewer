@@ -132,6 +132,12 @@ def stage_transcribe(c, code, video, model, em, initial_prompt=None):
         em.step(1, 1, f"전사(faster-whisper {model})")
         segs = P.transcribe(video, model, em.log, lambda fr: em.prog(fr, "전사"),
                             initial_prompt=initial_prompt)
+    # 대사 밀도 조기 경보 — 10분당 1줄 미만이면 대사 없는 본편형(신음 위주) 의심.
+    # ② AI가 keep 재료를 못 찾아 목표 길이를 못 채울 가능성이 크다(거기서 중단됨).
+    dur = P.video_duration(video) or 0
+    if dur > 600 and len(segs) < dur / 600:
+        em.log(f"⚠ 대사가 매우 적습니다({len(segs)}줄 / {dur/60:.0f}분) — 대사 없는 본편형 의심. "
+               f"AI가 구간을 못 고를 수 있습니다(그 경우 ②에서 중단됩니다)")
     data = [{"start": round(s, 3), "end": round(e, 3), "text": t} for s, e, t in segs]
     (outdir / f"{code}_전사.json").write_text(
         json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -283,6 +289,17 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
             em.log("※ NudeNet 미설치 — 비주얼 노출 가드 생략(pip install nudenet). 대사 가드만 적용됨")
         except Exception as e:
             em.log(f"※ 비주얼 노출 가드 실패({type(e).__name__}: {e}) — 대사 가드만 적용됨")
+    # ★ 대사 부족 조기 중단 — 대사 없는 본편형(신음 위주) 작품은 keep 재료가 없어
+    #   목표 길이를 못 채운다. 그대로 진행하면 target 기준으로 뽑힌 내레이션(수십 초)이
+    #   짧은 영상에 뭉개져(retime이 끝점으로 밀어붙임) 쓸 수 없는 결과가 나온다.
+    #   여기서 멈춰야 TTS·번인 낭비도 없앤다. 수동 모드에서 구간을 직접 고르면 된다.
+    got = sum(b - a for a, b in keep)
+    ratio = float(c.get("min_keep_ratio", 0.5))
+    if target and got < target * ratio:
+        raise RuntimeError(
+            f"대사가 부족해 목표 길이를 못 채웁니다 — 고른 구간 {got:.0f}초 / 목표 {target}초 "
+            f"(전사 대사 {len(segs)}줄). 대사 없는 본편형 작품으로 보입니다. "
+            f"수동 모드에서 구간을 직접 고르거나, 목표 길이를 줄여 다시 시도하세요.")
     # ★ 컷을 먼저 하고 성공한 뒤에 plan.json을 쓴다.
     #   완료 판정이 plan.json 존재로 되므로, 컷 도중 죽으면 plan.json이 없어 재실행된다
     #   (반대 순서면 컷이 실패해도 'AI 완료'로 오판되어 final.mp4 없이 다음 단계로 넘어감).
