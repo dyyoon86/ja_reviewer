@@ -36,7 +36,8 @@ from server.core.common import (
 )
 from server.core.transcribe import (
     HALLUCINATION_JA, _looks_hallucinated, _ensure_cuda_dll_path,
-    transcribe, build_initial_prompt, verify_transcript, write_verify_report,
+    transcribe, transcribe_scan, transcribe_ranges,
+    build_initial_prompt, verify_transcript, write_verify_report,
 )
 from server.core.llm import fetch_meta, _cli_path, call_llm, llm_ping
 from server.core.prompts import (
@@ -44,6 +45,7 @@ from server.core.prompts import (
     _must_have, _style_3min, _hint_block, _timeline_rule,
     _TTS_CHARS_PER_SEC, _BREATH, _SEC_PER_SENT, _CINEMA_SPEECH_RATIO,
     narration_budget, _roundup_block, prompt_auto, prompt_highlight, prompt_manual,
+    prompt_block, prompt_dialogue_fix,
 )
 from server.core.cutter import (
     has_nvenc, _vcodec_args, cut_video, _kf_after, _kf_before,

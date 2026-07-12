@@ -117,16 +117,26 @@ class NullLock:
 
 # ─── 스테이지 코어 ───────────────────────────────────────────────────────────
 def stage_transcribe(c, code, video, model, em, initial_prompt=None):
-    """① 전사 — 영상 → 일본어 STT. {code}_전사.srt/.json 저장."""
+    """① 전사 — 영상 → 일본어 STT. {code}_전사.srt/.json 저장.
+    two_pass(기본 on)면 작은 모델로 러프 스캔만 한다(구간 선정용) — 최종 대사자막은
+    ② AI 처리에서 keep 구간만 정밀 재전사(transcribe_ranges)로 확보한다.
+    2시간짜리 원본도 정밀 전사는 keep 합계(1~3분)에만 들어가 전체가 수 분에 끝난다."""
     outdir = work_dir(c, code)
-    em.step(1, 1, f"전사(faster-whisper {model})")
-    segs = P.transcribe(video, model, em.log, lambda fr: em.prog(fr, "전사"),
-                        initial_prompt=initial_prompt)
+    two_pass = bool(c.get("two_pass", True))
+    if two_pass:
+        scan_model = c.get("scan_model", "small")
+        em.step(1, 1, f"전사 1차 스캔(faster-whisper {scan_model} — 러프, 구간선정용)")
+        segs = P.transcribe_scan(video, scan_model, em.log, lambda fr: em.prog(fr, "스캔"),
+                                 initial_prompt=initial_prompt)
+    else:
+        em.step(1, 1, f"전사(faster-whisper {model})")
+        segs = P.transcribe(video, model, em.log, lambda fr: em.prog(fr, "전사"),
+                            initial_prompt=initial_prompt)
     data = [{"start": round(s, 3), "end": round(e, 3), "text": t} for s, e, t in segs]
     (outdir / f"{code}_전사.json").write_text(
         json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
     P.write_srt([(s, e, t) for s, e, t in segs], outdir / f"{code}_전사.srt")
-    save_state(outdir, code, video=str(video), model=model)
+    save_state(outdir, code, video=str(video), model=model, scan=two_pass)
     em.file("전사 자막", outdir / f"{code}_전사.srt")
     return {"step": "transcribe", "code": code, "count": len(segs),
             "srt": str(outdir / f"{code}_전사.srt")}
@@ -151,6 +161,49 @@ def _guard_keep(keep, segs, log):
     return keep
 
 
+def _reduce_transcript(meta, segs, llm, em, limit=25000, block_sec=1200):
+    """전사가 토큰 한도를 넘보면 map-reduce — 20분 블록별로 '줄거리+핵심 대사 후보'만 뽑아
+    최종 선정 프롬프트 입력을 항상 작게 고정한다. 반환: (선정용 세그, 전체줄거리 hint 조각).
+    짧은 전사는 그대로 통과(기존 원샷 동작 불변)."""
+    total_chars = sum(len(t) for _, _, t in segs) + 16 * len(segs)   # 타임스탬프 오버헤드 포함
+    if total_chars <= limit or len(segs) < 80:
+        return segs, ""
+    blocks, cur, t0 = [], [], segs[0][0]
+    for s in segs:
+        if s[0] - t0 >= block_sec and cur:
+            blocks.append(cur); cur = []; t0 = s[0]
+        cur.append(s)
+    if cur:
+        blocks.append(cur)
+    em.log(f"전사가 김({total_chars:,}자, {len(segs)}줄) → {len(blocks)}블록 요약 후 최종 선정(map-reduce)")
+    picked, summaries = [], []
+    for bi, blk in enumerate(blocks, 1):
+        try:
+            r = P.call_llm(P.prompt_block(meta, blk, bi, len(blocks), blk[0][0], blk[-1][1]),
+                           llm, em.log)
+        except Exception as e:
+            em.log(f"  블록 {bi} 요약 실패({type(e).__name__}) → 블록 앞 12줄을 후보로 대체")
+            picked.extend(blk[:12])
+            continue
+        if r.get("summary"):
+            summaries.append(f"{bi}. {r['summary']}")
+        idx = set()
+        for k in (r.get("picks") or []):
+            try:
+                idx.add(int(k))
+            except (TypeError, ValueError):
+                pass
+        sel = [blk[k - 1] for k in sorted(idx) if 1 <= k <= len(blk)]
+        picked.extend(sel)
+        em.log(f"  블록 {bi}/{len(blocks)}: 후보 {len(sel)}줄")
+    if not picked:   # 전 블록이 빈 후보면 선정 불능 → 원본으로 후퇴(느려도 결과는 낸다)
+        em.log("※ map-reduce 후보가 0줄 — 전사 원본으로 진행합니다")
+        return segs, ""
+    picked.sort(key=lambda x: x[0])
+    hint = ("(참고) 전체 줄거리 — 블록별 요약:\n" + "\n".join(summaries)) if summaries else ""
+    return picked, hint
+
+
 def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", style="3min"):
     """② AI 처리 — 저장된 전사 + 메타 → LLM 압축·번역·내레이션. plan.json 저장 + 컷.
     gpu: 컷(NVENC) 구간을 감쌀 세마포어(큐 병렬 시) — None이면 잠금 없음(기존 단독 동작)."""
@@ -172,7 +225,11 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
     pf = P.prompt_highlight if mode == "highlight" else P.prompt_manual
     hb = heartbeat(em, f"AI 처리({llm})")
     try:
-        res = P.call_llm(pf(m, segs, target, hint=hint, pos=pos, style=style), llm, em.log)
+        plan_segs, story = _reduce_transcript(m, segs, llm, em,
+                                              limit=int(c.get("map_reduce_chars", 25000)))
+        full_hint = "\n".join(x for x in ((hint or "").strip(), story) if x)
+        res = P.call_llm(pf(m, plan_segs, target, hint=full_hint, pos=pos, style=style),
+                         llm, em.log)
     finally:
         hb.set()
     keep = P.parse_keep(res.get("keep", []), total=P.video_duration(video))
@@ -180,6 +237,26 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
         raise RuntimeError("LLM이 keep 구간을 못 골랐습니다(빈 응답 — 헤드리스 거부 가능. 아래 수동 모드 사용).")
     keep = _guard_keep(keep, segs, em.log)
     res["keep"] = [[a, b] for a, b in keep]   # 제외 반영된 keep을 plan에 저장(자막 재타이밍 일치)
+    # 2-pass: ①이 러프 스캔이었다면 keep 구간만 정밀 재전사 → 대사자막을 정밀본으로 교체.
+    # 실패해도 러프 기반 dialogue가 남아 있으니 결과는 항상 나온다(품질만 러프로 후퇴).
+    if st.get("scan"):
+        try:
+            precise_model = st.get("model") or c.get("whisper_model", "large-v3")
+            em.log(f"2차 정밀 전사 — keep {len(keep)}구간만 {precise_model}로 재전사")
+            with gpu:
+                fine = P.transcribe_ranges(video, keep, precise_model, em.log,
+                                           lambda fr: em.prog(fr, "정밀 전사"),
+                                           initial_prompt=P.build_initial_prompt(m))
+            if fine:
+                fix = P.call_llm(P.prompt_dialogue_fix(m, fine), llm, em.log)
+                dlg = fix.get("dialogue") or []
+                if dlg:
+                    res["dialogue"] = dlg
+                    em.log(f"대사자막을 정밀 전사본으로 교체: {len(dlg)}줄")
+            else:
+                em.log("※ 정밀 전사 결과 0줄 — 러프 대사자막 유지")
+        except Exception as e:
+            em.log(f"※ 정밀 재전사 실패({type(e).__name__}: {e}) — 러프 대사자막으로 진행")
     # ★ 컷을 먼저 하고 성공한 뒤에 plan.json을 쓴다.
     #   완료 판정이 plan.json 존재로 되므로, 컷 도중 죽으면 plan.json이 없어 재실행된다
     #   (반대 순서면 컷이 실패해도 'AI 완료'로 오판되어 final.mp4 없이 다음 단계로 넘어감).

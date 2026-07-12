@@ -73,21 +73,12 @@ def _ensure_cuda_dll_path(log=print):
     _CUDA_DLL_DONE = True
 
 
-def transcribe(video, model_name="large-v3", log=print, progress=None, initial_prompt=None):
-    """
-    고도화 전사. initial_prompt(작품 제목·배우명 등 맥락)를 주면 정확도↑.
-    환청 억제 파라미터 + 후처리 필터로 신음/무음발 가짜자막을 걸러낸다.
-    progress(frac 0~1) 콜백을 주면 전사 진행률을 보고한다.
-    """
-    log(f"Whisper 전사 (모델 {model_name})...")
-    _ensure_cuda_dll_path(log)
-    from faster_whisper import WhisperModel
-    model = WhisperModel(model_name, device="auto", compute_type="auto")
-    segs, info = model.transcribe(
-        str(video),
+def _whisper_kwargs(beam_size=5, initial_prompt=None):
+    """환청 억제 공통 파라미터 — 순차/배치 양쪽에서 동일하게 쓴다."""
+    return dict(
         language="ja",
         task="transcribe",
-        beam_size=5,
+        beam_size=beam_size,
         temperature=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],   # 실패 시 온도 폴백
         condition_on_previous_text=False,             # ★ 신음→직전텍스트 반복 폭주 차단(핵심)
         compression_ratio_threshold=2.4,              # 반복 텍스트 세그 폐기
@@ -97,8 +88,10 @@ def transcribe(video, model_name="large-v3", log=print, progress=None, initial_p
         vad_parameters=dict(min_silence_duration_ms=500, speech_pad_ms=200, threshold=0.5),
         initial_prompt=initial_prompt or None,
     )
-    dur = float(getattr(info, "duration", 0) or 0)
-    log(f"모델 로드/오디오 분석 완료 (길이 {dur:.0f}s). 전사 시작…")
+
+
+def _collect(segs, dur, log, progress):
+    """지연 생성 세그먼트를 소비하며 환청 필터 + 진행률 보고."""
     out, dropped = [], 0
     for s in segs:  # faster-whisper는 지연 생성 → 세그 처리할수록 s.end 증가
         t = (s.text or "").strip()
@@ -113,12 +106,103 @@ def transcribe(video, model_name="large-v3", log=print, progress=None, initial_p
             log(f"   …{len(out)} 세그먼트")
     if progress:
         progress(1.0)
+    return out, dropped
+
+
+def _finish(out, dropped, log):
     out = sanitize_segments(out)   # 타임스탬프 역전/겹침/순서 정상화
     before = out
     out = clamp_durations(out)     # 글자수 대비 과길이 자막 컷(무음/신음 구간 끌림 제거)
     trimmed = sum(1 for (a, b, *_), (a2, b2, *_2) in zip(before, out) if b - b2 > 0.3)
     log(f"전사 완료: {len(out)} 세그먼트 (환청/무의미 {dropped}개 제거, 과길이 자막 {trimmed}개 단축)")
     return out
+
+
+def transcribe(video, model_name="large-v3", log=print, progress=None, initial_prompt=None,
+               beam_size=5, batched=True, batch_size=8):
+    """
+    고도화 전사. initial_prompt(작품 제목·배우명 등 맥락)를 주면 정확도↑.
+    환청 억제 파라미터 + 후처리 필터로 신음/무음발 가짜자막을 걸러낸다.
+    progress(frac 0~1) 콜백을 주면 전사 진행률을 보고한다.
+    batched=True면 BatchedInferencePipeline(VAD 음성구간 병렬 디코딩)로 4~8배 빠름.
+    실패(OOM 등) 시 순차 전사로 자동 폴백.
+    """
+    log(f"Whisper 전사 (모델 {model_name}{f', 배치×{batch_size}' if batched else ''})...")
+    _ensure_cuda_dll_path(log)
+    from faster_whisper import WhisperModel
+    model = WhisperModel(model_name, device="auto", compute_type="auto")
+    kw = _whisper_kwargs(beam_size, initial_prompt)
+    if batched:
+        try:
+            from faster_whisper import BatchedInferencePipeline
+            segs, info = BatchedInferencePipeline(model).transcribe(
+                str(video), batch_size=batch_size, **kw)
+            dur = float(getattr(info, "duration", 0) or 0)
+            log(f"모델 로드/오디오 분석 완료 (길이 {dur:.0f}s). 배치 전사 시작…")
+            out, dropped = _collect(segs, dur, log, progress)
+            return _finish(out, dropped, log)
+        except Exception as e:
+            log(f"※ 배치 전사 실패({type(e).__name__}: {e}) → 순차 전사로 폴백")
+    segs, info = model.transcribe(str(video), **kw)
+    dur = float(getattr(info, "duration", 0) or 0)
+    log(f"모델 로드/오디오 분석 완료 (길이 {dur:.0f}s). 전사 시작…")
+    out, dropped = _collect(segs, dur, log, progress)
+    return _finish(out, dropped, log)
+
+
+def transcribe_scan(video, model_name="small", log=print, progress=None, initial_prompt=None,
+                    batch_size=16):
+    """1차 러프 스캔 — 구간 '선정'용이라 오탈자 허용. 작은 모델+beam1+배치로 최고 속도.
+    최종 자막 품질은 2차 정밀 전사(transcribe_ranges)가 책임진다."""
+    log(f"1차 스캔 전사(러프, {model_name}) — 구간 선정용. 최종 자막은 2차 정밀 전사로 확보")
+    return transcribe(video, model_name, log, progress, initial_prompt,
+                      beam_size=1, batched=True, batch_size=batch_size)
+
+
+def transcribe_ranges(video, ranges, model_name="large-v3", log=print, progress=None,
+                      initial_prompt=None):
+    """2차 정밀 전사 — 선정된 keep 구간만 ffmpeg로 오디오 슬라이스해 정밀 전사.
+    타임스탬프는 원본 영상 기준 초로 환원해 반환. 2시간짜리도 실제 작업량은 keep 합계(1~3분)뿐."""
+    import os
+    import subprocess
+    import tempfile
+    ranges = [(float(a), float(b)) for a, b in ranges if float(b) > float(a)]
+    if not ranges:
+        return []
+    total = sum(b - a for a, b in ranges)
+    log(f"2차 정밀 전사({model_name}): {len(ranges)}구간 합계 {total:.0f}s")
+    _ensure_cuda_dll_path(log)
+    from faster_whisper import WhisperModel
+    model = WhisperModel(model_name, device="auto", compute_type="auto")
+    kw = _whisper_kwargs(5, initial_prompt)
+    out, dropped, done = [], 0, 0.0
+    with tempfile.TemporaryDirectory() as td:
+        for idx, (a, b) in enumerate(ranges, 1):
+            wav = os.path.join(td, f"r{idx:03d}.wav")
+            # 슬라이스에 앞뒤 0.3s 패딩 — 경계 단어 잘림 방지(타임스탬프 환원 시 보정)
+            pa = max(0.0, a - 0.3)
+            subprocess.run(["ffmpeg", "-y", "-loglevel", "error",
+                            "-ss", f"{pa:.3f}", "-to", f"{b + 0.3:.3f}", "-i", str(video),
+                            "-vn", "-ac", "1", "-ar", "16000", wav],
+                           check=True, timeout=600)
+            segs, _info = model.transcribe(wav, **kw)
+            n = 0
+            for s in segs:
+                t = (s.text or "").strip()
+                if not t:
+                    continue
+                if _looks_hallucinated(t):
+                    dropped += 1
+                    continue
+                out.append((pa + float(s.start), min(b, pa + float(s.end)), t))
+                n += 1
+            done += b - a
+            if progress and total:
+                progress(min(0.99, done / total))
+            log(f"   구간 {idx}/{len(ranges)} ({a:.0f}~{b:.0f}s): 대사 {n}줄")
+    if progress:
+        progress(1.0)
+    return _finish(out, dropped, log)
 
 
 def build_initial_prompt(meta):

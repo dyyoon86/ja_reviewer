@@ -235,6 +235,31 @@ def _roundup_block(pos="mid", target_sec=60, style="3min"):
     return b
 
 
+def prompt_block(meta, segs, bi, nb, t0, t1):
+    """map-reduce의 map — 긴 전사를 블록으로 쪼개 '블록 줄거리 + 핵심 대사 후보'만 뽑는다.
+    출력이 작아(요약 2~3줄 + 라인번호) 토큰이 블록 수에 비례해서만 늘어난다."""
+    body = "\n".join(f"{k}\t{a:.2f}\t{b:.2f}\t{t}" for k, (a, b, t) in enumerate(segs, 1))
+    return (f"너는 일본 영상 리뷰어다. 아래는 긴 영상의 일부 블록({bi}/{nb}, "
+            f"{int(t0 // 60)}분~{int(t1 // 60)}분 구간)의 일본어 자막이다.\n"
+            f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n"
+            f"[할 일] (1)이 블록의 줄거리를 2~3줄로 요약(앞뒤 블록과 이어 읽을 수 있게 사실 위주). "
+            f"(2)스토리(설정·관계·전환·갈등·결말)가 드러나는 핵심 대사의 라인 번호를 최대 12개 고른다"
+            f"(신음·잡담·반복·의미없는 짧은 줄 제외). 핵심 대사가 없으면 빈 배열.\n"
+            f'[출력 JSON만] {{"summary":"2~3줄","picks":[라인번호,...]}}')
+
+
+def prompt_dialogue_fix(meta, segs):
+    """2차 정밀 전사(keep 구간만) → 최종 대사자막 번역. 시간은 원본 영상 기준 초 그대로."""
+    body = "\n".join(f"{a:.2f}\t{b:.2f}\t{t}" for a, b, t in segs)
+    return (f"너는 일본 영상 자막 번역가다. 아래는 최종 영상에 실제로 들어갈 구간의 "
+            f"정밀 일본어 전사다(시작초\\t끝초\\t대사).\n"
+            f"[메타]\n{_meta_block(meta)}\n[일본어대사]\n{body}\n"
+            f"[할 일] 각 줄을 자연스러운 한국어 구어체 대사자막으로 번역한다. "
+            f"신음·잡음·의미없는 줄은 버린다(출력에서 제외). "
+            f"화자 성별을 추정해 speaker에 '여' 또는 '남'. 시간은 입력 값 그대로 유지.\n"
+            f'[출력 JSON만] {{"dialogue":[{{"start":초,"end":초,"ko":"","speaker":"여|남"}}]}}')
+
+
 def prompt_auto(meta, segs, target_sec=60, hint="", pos="mid", style="3min"):
     body = "\n".join(f"{k}\t{a:.2f}\t{b:.2f}\t{t}" for k, (a, b, t) in enumerate(segs, 1))
     return (f"너는 일본 영상 리뷰어다. 아래 영상의 일본어 자막을 보고 '스토리 핵심만' 골라 "
