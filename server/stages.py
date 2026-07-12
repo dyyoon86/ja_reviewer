@@ -266,6 +266,23 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
                 em.log("※ 정밀 전사 결과 0줄 — 러프 대사자막 유지")
         except Exception as e:
             em.log(f"※ 정밀 재전사 실패({type(e).__name__}: {e}) — 러프 대사자막으로 진행")
+    # ★ 비주얼 노출 가드 — 대사 기반 가드가 못 잡는 '대사하며 노출' 케이스를 화면으로 직접 판정.
+    #   keep 구간만 검사하므로 수 초. 모델 없음/실패는 가드 생략(결과는 항상 나온다).
+    if c.get("nsfw_guard", True) and keep:
+        try:
+            from server.core import nsfw
+            keep2 = nsfw.guard_keep_visual(
+                keep, video, em.log,
+                step=float(c.get("nsfw_step", nsfw.DEFAULT_STEP)),
+                threshold=float(c.get("nsfw_threshold", nsfw.DEFAULT_THRESHOLD)))
+            if keep2 != keep:
+                keep = keep2
+                res["keep"] = [[a, b] for a, b in keep]
+                # 제외된 구간의 대사/내레이션은 stage_subs의 retime이 keep 기준으로 정리한다
+        except ImportError:
+            em.log("※ NudeNet 미설치 — 비주얼 노출 가드 생략(pip install nudenet). 대사 가드만 적용됨")
+        except Exception as e:
+            em.log(f"※ 비주얼 노출 가드 실패({type(e).__name__}: {e}) — 대사 가드만 적용됨")
     # ★ 컷을 먼저 하고 성공한 뒤에 plan.json을 쓴다.
     #   완료 판정이 plan.json 존재로 되므로, 컷 도중 죽으면 plan.json이 없어 재실행된다
     #   (반대 순서면 컷이 실패해도 'AI 완료'로 오판되어 final.mp4 없이 다음 단계로 넘어감).
