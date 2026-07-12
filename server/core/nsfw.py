@@ -38,29 +38,59 @@ def _detector():
     return _DETECTOR
 
 
-def scan_video(video, step=0.25, threshold=DEFAULT_THRESHOLD, log=print):
+def scan_video(video, step=0.25, threshold=DEFAULT_THRESHOLD, log=print, progress=None,
+               duration=None):
     """영상 **전 구간**을 step 간격으로 전수 검사. 반환: [(t, class, score), ...].
     ffmpeg 1회 호출(fps 필터, 순차 디코딩) + detect_batch — 71초 완성본 0.25s 간격이 5초.
-    구간별 -ss 재호출 방식보다 훨씬 빠르므로 짧은 완성본 검사에 쓴다."""
+
+    progress(frac 0~1) 콜백을 주면 진행률을 보고한다 — 2시간 영상 스캔은 수 분이 걸려서
+    진행 표시가 없으면 '멈춘 건지 도는 건지' 알 수가 없다(실제로 그렇게 보였다).
+    프레임 추출을 0~55%, NN 판정을 55~100%로 나눠 보고한다."""
     import glob
     det = _detector()
     found = []
     with tempfile.TemporaryDirectory() as td:
-        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(video),
-                        "-vf", f"fps={1.0 / step:g},scale=640:-1",
-                        os.path.join(td, "f%05d.jpg")], check=True, timeout=1800)
+        # ffmpeg -progress 로 추출 진행률을 실시간으로 읽는다(out_time_ms / 전체길이)
+        p = subprocess.Popen(
+            ["ffmpeg", "-y", "-loglevel", "error", "-progress", "pipe:1", "-nostats",
+             "-i", str(video), "-vf", f"fps={1.0 / step:g},scale=640:-1",
+             os.path.join(td, "f%05d.jpg")],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        last = 0.0
+        for line in p.stdout:
+            if duration and line.startswith("out_time_ms="):
+                try:
+                    sec = int(line.split("=", 1)[1]) / 1e6
+                except ValueError:
+                    continue
+                fr = min(0.55, sec / duration * 0.55)
+                if progress and fr - last > 0.01:
+                    progress(fr); last = fr
+                    if int(sec) % 600 < 2:      # 10분 단위로 로그도 한 줄
+                        log(f"   …프레임 추출 {sec / 60:.0f}분 / {duration / 60:.0f}분")
+        p.wait(timeout=3600)
         files = sorted(glob.glob(os.path.join(td, "*.jpg")))
         if not files:
             return found
-        try:
-            batch = det.detect_batch(files)
-        except Exception:   # detect_batch 미지원 빌드 → 개별 판정으로 폴백
-            batch = [det.detect(f) for f in files]
-        for k, res in enumerate(batch):
-            t = k * step
-            for x in (res or []):
-                if x.get("class") in NSFW_CLASSES and float(x.get("score", 0)) >= threshold:
-                    found.append((round(t, 2), x["class"], round(float(x["score"]), 2)))
+        log(f"   프레임 {len(files)}장 추출 완료 → NN 판정 시작")
+        # 청크로 나눠 판정 — 진행률을 흘리기 위해(한 번에 다 넣으면 몇 분간 깜깜)
+        CHUNK = 200
+        for i in range(0, len(files), CHUNK):
+            part = files[i:i + CHUNK]
+            try:
+                batch = det.detect_batch(part)
+            except Exception:   # detect_batch 미지원 빌드 → 개별 판정으로 폴백
+                batch = [det.detect(f) for f in part]
+            for k, res in enumerate(batch):
+                t = (i + k) * step
+                for x in (res or []):
+                    if x.get("class") in NSFW_CLASSES and float(x.get("score", 0)) >= threshold:
+                        found.append((round(t, 2), x["class"], round(float(x["score"]), 2)))
+            if progress:
+                progress(0.55 + 0.45 * min(1.0, (i + len(part)) / len(files)))
+            log(f"   NN 판정 {min(i + CHUNK, len(files))}/{len(files)}장 (노출 {len(found)}프레임)")
+    if progress:
+        progress(1.0)
     return found
 
 
@@ -130,7 +160,7 @@ def complement(spans, total, min_len=3.0):
 
 
 def build_map(video, step=2.0, threshold=DEFAULT_THRESHOLD, pad=1.5, cache=None, log=print,
-              merge_gap=6.0):
+              merge_gap=6.0, progress=None, duration=None):
     """원본 **전체**를 훑어 노출 구간 지도를 만든다. 반환: [(a, b), ...] (병합된 노출 구간).
 
     사후 필터(고른 뒤 버리기)와 달리, 이 지도가 있으면
@@ -146,7 +176,7 @@ def build_map(video, step=2.0, threshold=DEFAULT_THRESHOLD, pad=1.5, cache=None,
         except Exception:
             pass
     log(f"전체 노출 스캔(NudeNet, {step}s 간격) — 원본 전 구간. 2시간이면 3~4분…")
-    hits = scan_video(video, step, threshold, log)
+    hits = scan_video(video, step, threshold, log, progress=progress, duration=duration)
     spans = []
     for t, _cls, _sc in hits:
         a, b = max(0.0, t - pad), t + pad

@@ -150,12 +150,13 @@ def stage_clean(c, code, video, em, gpu=None):
     tmp_prev = None
     prev_bad_sec = None
     for p in range(1, max_pass + 1):
-        em.step(p, max_pass, f"노출 스캔·제거 {p}패스")
         total = P.video_duration(src)
+        em.step(p, max_pass, f"노출 스캔 {p}패스 ({total / 60:.0f}분 분량 — 수 분 걸립니다)")
         with gpu:
             bad = nsfw.build_map(src, step=step, threshold=thr, pad=pad, merge_gap=gap,
                                  cache=(str(outdir / f"{code}_노출지도.json") if p == 1 else None),
-                                 log=em.log)
+                                 log=em.log, duration=total,
+                                 progress=lambda fr: em.prog(fr, f"노출 스캔 {p}패스"))
         if not bad:
             em.log(f"✔ {p}패스: 노출 검출 0 — 수렴 완료")
             break
