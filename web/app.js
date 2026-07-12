@@ -54,7 +54,7 @@ async function openVideo(path){
     const j = await r.json();
     videoPath = j.path; duration = j.duration || 0;
     vid.src = `/video/stream?path=${encodeURIComponent(j.path)}`;
-    excludes = []; pendingIn = null; renderEx(); setCurFile();
+    excludes = []; pendingIn = null; renderEx(); setCurFile(); resetScanMarks();
     log(`영상 로드: ${j.name} (${hhmmss(duration)})`, "ok");
     // 품번 자동 추정 (파일명에서 XXX-000 패턴) → 양 탭에 채움
     resetForNewVideo();
@@ -254,13 +254,23 @@ function runTrimJob(job){
   es.onerror = () => { es.close(); };
 }
 
+// 스캔 버튼 완료 표시 — 끝났는지, 몇 구간 나왔는지를 버튼 자체에 남긴다.
+// (진행바 '완료'와 로그 ✔만으로는 어느 스캔을 돌렸는지 한눈에 안 보인다)
+function scanBase(btn){ return btn.textContent.replace(/\s*✓.*$/, ""); }
+function markScanDone(btn, base, n){ btn.textContent = `${base} ✓ ${n}구간`; }
+function resetScanMarks(){
+  ["btnNsfwScan","btnAudioScan","btnIntimacyScan"].forEach(id=>{
+    const b=$("#"+id); if(b) b.textContent = scanBase(b);
+  });
+}
+
 // 🛡 NN 노출 자동 찾기 — 스캔만 하고 '삭제 구간' 목록에 채운다(자르지는 않는다).
 // 사람이 목록을 보고 고친 뒤 기존 '① 선택 구간 잘라내기'로 자르는 흐름 = 검토 가능한 자동화.
 $("#btnNsfwScan").onclick = () => {
   if(!needVideo()) return;
   const thr = parseFloat($("#nsfwThr").value);
   const btn = $("#btnNsfwScan"); btn.disabled = true;
-  const old = btn.textContent; btn.textContent = "🛡 스캔 중…";
+  const old = scanBase(btn); btn.textContent = "🛡 스캔 중…";
   log("── 🛡 NN 노출 구간 스캔 시작 (영상이 길면 수 분 걸립니다) ──");
   fetch("/nsfw/scan",{method:"POST",headers:{'Content-Type':'application/json'},
     body:JSON.stringify({path:videoPath, threshold:thr})})
@@ -268,8 +278,9 @@ $("#btnNsfwScan").onclick = () => {
       if(!j.job){ log("스캔 시작 실패","warn"); btn.disabled=false; btn.textContent=old; return; }
       runJob(j.job,
         (res)=>{
-          btn.disabled=false; btn.textContent=old;
+          btn.disabled=false;
           const rs = (res && res.ranges) || [];
+          markScanDone(btn, old, rs.length);
           if(!rs.length){ log("✔ 노출 구간이 검출되지 않았습니다 — 자를 게 없습니다","ok"); return; }
           rs.forEach(([a,b])=>excludes.push([a,b]));
           excludes.sort((x,y)=>x[0]-y[0]);
@@ -289,7 +300,7 @@ $("#btnNsfwScan").onclick = () => {
 $("#btnAudioScan").onclick = () => {
   if(!needVideo()) return;
   const btn = $("#btnAudioScan"); btn.disabled = true;
-  const old = btn.textContent; btn.textContent = "2️⃣ 전사 중…";
+  const old = scanBase(btn); btn.textContent = "2️⃣ 전사 중…";
   log("── 2️⃣ 신음·정사 구간 스캔 시작 (small 전사 — 내용 대사 주변만 보호) ──");
   fetch("/audio/scan",{method:"POST",headers:{'Content-Type':'application/json'},
     body:JSON.stringify({path:videoPath, pad:parseFloat($("#moanPad").value)})})
@@ -297,8 +308,9 @@ $("#btnAudioScan").onclick = () => {
       if(!j.job){ log("스캔 시작 실패","warn"); btn.disabled=false; btn.textContent=old; return; }
       runJob(j.job,
         (res)=>{
-          btn.disabled=false; btn.textContent=old;
+          btn.disabled=false;
           const rs = (res && res.ranges) || [];
+          markScanDone(btn, old, rs.length);
           log(`전사 결과: 내용 대사 ${res.dialogue||0}줄 · 신음/흥분/무의미 ${res.moan||0}줄`);
           if(!rs.length){ log("✔ 내용 대사 없는 구간이 없습니다 — 자를 게 없습니다","ok"); return; }
           rs.forEach(([a,b])=>excludes.push([a,b]));
@@ -317,7 +329,7 @@ $("#btnAudioScan").onclick = () => {
 $("#btnIntimacyScan").onclick = () => {
   if(!needVideo()) return;
   const btn = $("#btnIntimacyScan"); btn.disabled = true;
-  const old = btn.textContent; btn.textContent = "3️⃣ 스캔 중…";
+  const old = scanBase(btn); btn.textContent = "3️⃣ 스캔 중…";
   log("── 3️⃣ 스킨십·애무 장면 스캔 시작 (CLIP — 장면 의미 판정) ──");
   fetch("/intimacy/scan",{method:"POST",headers:{'Content-Type':'application/json'},
     body:JSON.stringify({path:videoPath, threshold:parseFloat($("#intimacyTh").value)})})
@@ -325,8 +337,9 @@ $("#btnIntimacyScan").onclick = () => {
       if(!j.job){ log("스캔 시작 실패","warn"); btn.disabled=false; btn.textContent=old; return; }
       runJob(j.job,
         (res)=>{
-          btn.disabled=false; btn.textContent=old;
+          btn.disabled=false;
           const rs = (res && res.ranges) || [];
+          markScanDone(btn, old, rs.length);
           if(!rs.length){ log("✔ 스킨십 장면이 검출되지 않았습니다","ok"); return; }
           rs.forEach(([a,b])=>excludes.push([a,b]));
           excludes.sort((x,y)=>x[0]-y[0]);
@@ -362,7 +375,7 @@ $("#trimUse").onclick = () => {
   if(!trimResultPath) return;
   videoPath = trimResultPath; duration = trimResultDur;
   vid.src = `/video/stream?path=${encodeURIComponent(trimResultPath)}`;
-  excludes = []; pendingIn = null; renderEx(); setCurFile();
+  excludes = []; pendingIn = null; renderEx(); setCurFile(); resetScanMarks();
   log(`✔ 잘라낸 영상으로 계속: ${trimResultPath} (${hhmmss(duration)}). 품번 넣고 ②를 누르세요.`,"ok");
   closeTrimModal();
   collapseAcc("#btnTrim");   // ① 완료 → 접기
@@ -418,7 +431,7 @@ $("#btnUseTrim").onclick = () => {
   if(!trimAvail) return;
   videoPath=trimAvail.path; duration=trimAvail.dur;
   vid.src=`/video/stream?path=${encodeURIComponent(trimAvail.path)}&t=${Date.now()}`;
-  excludes=[]; pendingIn=null; renderEx(); setCurFile();
+  excludes=[]; pendingIn=null; renderEx(); setCurFile(); resetScanMarks();
   log(`✔ 이전에 잘라낸 결과 사용: ${trimAvail.path} (${hhmmss(duration)}). 품번 넣고 ① 전사부터 진행하세요.`,"ok");
   $("#btnUseTrim").style.display="none";
 };
