@@ -1239,6 +1239,21 @@ async def queue_item_action(iid: str, req: Request):
             raise HTTPException(409, "진행 중인 항목은 삭제할 수 없습니다(일시정지 후 현재 단계 종료를 기다리세요).")
     elif act == "set_code":
         QUEUE.set_code(iid, body.get("code") or "")
+    elif act == "set_pipeline":
+        # 검수대기 항목 '마저 완성' — 남은 단계(TTS·번인 등)를 켜고 다시 큐에 태운다.
+        # TTS를 켜는데 보이스가 없으면 스테이지에서 죽으므로 여기서 config 기본값을 채운다.
+        c = load_cfg()
+        opts = dict(body.get("opts") or {})
+        pipe = body.get("pipeline") or {}
+        if pipe.get("tts"):
+            opts.setdefault("tts_profile", c.get("tts_profile"))
+            opts.setdefault("tts_base", c.get("tts_base"))
+            opts.setdefault("tts_language", c.get("tts_language", "ko"))
+            opts.setdefault("tts_mux", True)
+            if not opts.get("tts_profile"):
+                raise HTTPException(400, "TTS 보이스가 설정되지 않았습니다 — ③에서 보이스를 고르세요.")
+        if not QUEUE.set_pipeline(iid, pipe, opts):
+            raise HTTPException(409, "진행 중인 항목은 변경할 수 없습니다(일시정지 후 다시 시도).")
     elif act == "move":
         # 큐 순서 = 묶음 영상의 편집 순서 → 먼저/다음은/마지막으로 판정에 그대로 쓰인다
         if not QUEUE.move(iid, int(body.get("delta", 0))):

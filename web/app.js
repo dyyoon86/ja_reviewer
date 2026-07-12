@@ -925,6 +925,15 @@ function renderQueue(snap){
     if(it.status!=="running" && i>0)            mk("▲","위로 (영상에서 앞 순서로)",()=>qAction(it.id,"move",{delta:-1}));
     if(it.status!=="running" && i<items.length-1) mk("▼","아래로 (영상에서 뒷 순서로)",()=>qAction(it.id,"move",{delta:1}));
     if(["queued","running"].includes(it.status)) mk("⏸","일시정지(현재 단계 후 중단)",()=>qAction(it.id,"hold"));
+    // ★ 검수대기에서 '마저 완성' — TTS·번인이 꺼진 채 등록된 항목은 resume 해도 켜진 단계가
+    //   다 끝나 있어 즉시 검수대기로 되돌아온다(= 아무것도 안 되는 상태). 남은 단계를 켜서 태운다.
+    if(it.status==="review" && !(it.pipeline||{}).burn)
+      mk("🎬 마저 완성","남은 단계(TTS 음성 + 자막·배너 번인)까지 마저 진행해 완성본을 만듭니다",
+         ()=>{
+           if(!confirm(`${it.code}: 내레이션 음성(TTS) + 번인까지 마저 진행할까요?\n(앞 단계는 건너뛰고 이어서만 돕니다)`)) return;
+           qAction(it.id,"set_pipeline",{pipeline:{...(it.pipeline||{}), tts:true, burn:true}})
+             .then(()=>log(`🎬 [큐] ${it.code} 마저 완성 시작 — TTS → 번인`,"ok"));
+         });
     if(["held","error","review","done"].includes(it.status)) mk("▶","이어서/다시 실행(완료 단계는 건너뜀)",()=>qAction(it.id,"resume"));
     if(it.status!=="running") mk("✕","목록에서 제거(파일은 유지)",()=>qAction(it.id,"remove"));
     li.onclick=()=>qOpen(it);

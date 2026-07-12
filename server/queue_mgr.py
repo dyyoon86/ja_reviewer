@@ -178,6 +178,25 @@ class QueueManager:
             it["status"] = "queued"; it["error"] = None; it["stage_label"] = "대기 중"
             self._touch()
 
+    def set_pipeline(self, iid, pipeline, opts=None):
+        """검수대기 항목에 남은 단계를 켜서 마저 진행 — 예: TTS·번인 없이 등록된 항목을
+        검수 후 '마저 완성'. 완료된 앞 단계는 파일 존재로 자동 스킵되므로 이어서만 돈다.
+        (이게 없으면 review 상태에서 resume 해도 켜진 스테이지가 다 끝나 있어 즉시 review로
+        되돌아온다 — 사용자 입장에선 '아무것도 안 되는' 상태였다.)"""
+        it = self._find(iid)
+        if not it:
+            return False
+        if it["status"] == "running":
+            return False
+        it["pipeline"] = {k: bool((pipeline or {}).get(k, it["pipeline"].get(k)))
+                          for k in STAGE_ORDER}
+        if opts:
+            it["opts"] = {**(it.get("opts") or {}), **opts}
+        if it["status"] in ("review", "done", "held", "error"):
+            it["status"] = "queued"; it["error"] = None; it["stage_label"] = "대기 중"
+        self._touch()
+        return True
+
     def remove(self, iid):
         with self._lock:
             it = self._find(iid)
