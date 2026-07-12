@@ -60,9 +60,12 @@ DEFAULTS = {"meta_api": "http://172.30.1.40:8770", "llm": "claude",
             "banner_hold": 4.0,   # 인포카드 유지시간(초)
             # 비주얼 노출 가드(NudeNet) — keep 구간 프레임을 NN으로 검사해 노출 장면 제외
             "nsfw_guard": True, "nsfw_step": 2.0, "nsfw_threshold": 0.35,
-            # 원본 전체 노출 스캔(2시간 ≈ 3.6분) — AI에 노출 구간 대사를 안 보여주고,
-            # 고른 구간에 노출이 스치면 그 부분만 도려낸다. {code}_노출지도.json 캐시
-            "nsfw_full_scan": True, "nsfw_scan_step": 2.0,
+            # ⓪ 노출 제거(클린본) — 원본에서 노출을 물리적으로 잘라낸 뒤 파이프라인 시작.
+            # NudeNet은 프레임마다 점수가 요동쳐 1패스로는 0이 안 되므로 수렴할 때까지 반복.
+            "nsfw_scan_step": 1.0, "nsfw_clean_threshold": 0.22, "nsfw_pad": 3.0,
+            "nsfw_merge_gap": 12.0, "nsfw_min_clip": 3.0, "nsfw_max_pass": 3,
+            # 클린 단계를 안 쓸 때의 폴백(keep 구간만 스캔)
+            "nsfw_full_scan": False,
             # 완성본 전수 검사(최후 방어선) — 검출 시 _완성/ 대신 _검수필요/ 로 격리
             "nsfw_final_check": True, "nsfw_final_step": 0.25,
             "fullauto_mode": "summary",   # 자동 모드 방식: summary | highlight

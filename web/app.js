@@ -821,7 +821,8 @@ function origAudio(){ return $("#ttsOrig") ? $("#ttsOrig").value : "duck"; }
 function duckLevel(){ return $("#ttsDuck") ? parseFloat($("#ttsDuck").value) : 0.3; }
 
 function qPipeline(){
-  return { transcribe:$("#qpTranscribe").checked, ai:$("#qpAi").checked,
+  return { clean:$("#qpClean")?$("#qpClean").checked:false,
+           transcribe:$("#qpTranscribe").checked, ai:$("#qpAi").checked,
            subs:$("#qpSubs").checked, banner:$("#qpBanner").checked,
            tts:$("#qpTts").checked, burn:$("#qpBurn").checked };
 }
@@ -1281,7 +1282,7 @@ if(dz){
     }
     if(!paths.length) return;
     const j = await fetch("/queue/add",{method:"POST",headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({paths, pipeline:{transcribe:true,ai:true,subs:true,banner:true,tts:true,burn:true},
+      body:JSON.stringify({paths, pipeline:{clean:true,transcribe:true,ai:true,subs:true,banner:true,tts:true,burn:true},
                            opts:{fullauto:true}})}).then(r=>r.json()).catch(()=>({added:[]}));
     if(j.added && j.added.length) log(`🔮 풀오토 큐에 ${j.added.length}개 투입 — 완성본까지 자동 진행`,"ok");
   });

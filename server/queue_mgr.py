@@ -21,12 +21,12 @@ from pathlib import Path
 
 from . import stages as S
 
-STAGE_ORDER = ["transcribe", "ai", "subs", "banner", "tts", "burn"]
-STAGE_LABEL = {"transcribe": "① 전사", "ai": "② AI 처리", "subs": "③ 자막",
+STAGE_ORDER = ["clean", "transcribe", "ai", "subs", "banner", "tts", "burn"]
+STAGE_LABEL = {"clean": "⓪ 노출 제거", "transcribe": "① 전사", "ai": "② AI 처리", "subs": "③ 자막",
                "banner": "④ 배너", "tts": "⑤ TTS", "burn": "⑥ 자막번인"}
 # 스테이지 → 리소스 레인 (ai는 LLM 호출이 주업이라 ai 레인, 내부 컷만 gpu 세마포어로 감쌈)
 # banner는 HTML→PNG 렌더라 인코딩이 없어 레인 불필요
-STAGE_LANE = {"transcribe": "gpu", "ai": "ai", "subs": None, "banner": None,
+STAGE_LANE = {"clean": "gpu", "transcribe": "gpu", "ai": "ai", "subs": None, "banner": None,
               "tts": "tts", "burn": "gpu"}
 LOG_KEEP = 40      # 아이템별 로그 보관 줄 수
 MAX_ITEM_WORKERS = 4
@@ -356,7 +356,13 @@ class QueueManager:
     def _exec_stage(self, c, it, stg, em):
         code, video = it["code"], it["video"]
         o = it.get("opts") or {}
-        if stg == "transcribe":
+        if stg == "clean":
+            r = S.stage_clean(c, code, video, em, gpu=self._lane("gpu"))
+            # ★ 이후 모든 스테이지(전사·AI·컷·번인)는 클린본만 본다 — 노출이 샐 여지 제거
+            if r.get("clean"):
+                it["video"] = r["clean"]
+                self._touch()
+        elif stg == "transcribe":
             # 원샷 리뷰(/review)처럼 메타를 Whisper 힌트로 활용 — 실패해도 전사는 계속
             init = None
             try:

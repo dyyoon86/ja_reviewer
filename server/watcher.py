@@ -101,7 +101,8 @@ class Watcher:
                 code = self.guess_code(f.name)
                 self.queue.add(
                     [{"path": p, "code": code}],
-                    {k: True for k in ("transcribe", "ai", "subs", "banner", "tts", "burn")},
+                    {k: True for k in ("clean", "transcribe", "ai", "subs",
+                                       "banner", "tts", "burn")},
                     self._fullauto_opts(c))
                 seen.add(p); self._save_seen(c)
                 self._pending.pop(p, None)

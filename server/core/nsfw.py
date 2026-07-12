@@ -116,7 +116,21 @@ def scan_ranges(video, ranges, step=DEFAULT_STEP, threshold=DEFAULT_THRESHOLD, l
     return hits
 
 
-def build_map(video, step=2.0, threshold=DEFAULT_THRESHOLD, pad=1.5, cache=None, log=print):
+def complement(spans, total, min_len=3.0):
+    """노출 구간(spans)의 여집합 = 클린 구간. min_len 미만 조각은 버린다(컷 파편화 방지).
+    '노출을 싹 제거한 클린본'을 만들 때 남길 구간이 바로 이것."""
+    out, cur = [], 0.0
+    for a, b in sorted(spans):
+        if a - cur >= min_len:
+            out.append((cur, a))
+        cur = max(cur, b)
+    if total - cur >= min_len:
+        out.append((cur, float(total)))
+    return out
+
+
+def build_map(video, step=2.0, threshold=DEFAULT_THRESHOLD, pad=1.5, cache=None, log=print,
+              merge_gap=6.0):
     """원본 **전체**를 훑어 노출 구간 지도를 만든다. 반환: [(a, b), ...] (병합된 노출 구간).
 
     사후 필터(고른 뒤 버리기)와 달리, 이 지도가 있으면
@@ -136,7 +150,9 @@ def build_map(video, step=2.0, threshold=DEFAULT_THRESHOLD, pad=1.5, cache=None,
     spans = []
     for t, _cls, _sc in hits:
         a, b = max(0.0, t - pad), t + pad
-        if spans and a <= spans[-1][1]:      # 인접/겹침 → 병합
+        # merge_gap 이내로 떨어진 노출은 하나로 합친다 — 사이의 짧은 틈을 남겨봐야
+        # 컷이 파편화될 뿐이고, 그 틈도 사실상 같은 장면이다.
+        if spans and a - spans[-1][1] <= merge_gap:
             spans[-1] = (spans[-1][0], max(spans[-1][1], b))
         else:
             spans.append((a, b))

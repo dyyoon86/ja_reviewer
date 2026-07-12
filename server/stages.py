@@ -61,7 +61,10 @@ def steps_status(outdir, code):
     o = Path(outdir)
     # 배너 레이어는 작업폴더가 아니라 {out_dir}/_infocard_{code}/ 에 모인다
     ic = o.parent / f"_infocard_{code}"
-    return {"transcribe": (o / f"{code}_전사.json").is_file(),
+    # clean: 클린본이 있거나, 스캔 결과 노출이 없어 원본을 그대로 쓰기로 한 경우(state.cleaned)
+    return {"clean": (o / f"{code}_클린.mp4").is_file()
+                     or bool(load_state(outdir, code).get("cleaned")),
+            "transcribe": (o / f"{code}_전사.json").is_file(),
             "ai": (o / f"{code}_plan.json").is_file(),
             "subs": (o / f"{code}_대사.srt").is_file(),
             "banner": (ic / f"{code}_워터마크.png").is_file(),
@@ -116,6 +119,90 @@ class NullLock:
 
 
 # ─── 스테이지 코어 ───────────────────────────────────────────────────────────
+def stage_clean(c, code, video, em, gpu=None):
+    """⓪ 노출 제거 — 원본을 NN(NudeNet)으로 전수 스캔해 노출 구간을 **물리적으로 잘라낸**
+    클린본 {code}_클린.mp4 을 만든다. 이후 모든 단계(전사·AI·컷·자막·번인)는 이 클린본만
+    본다 — 노출이 뒤 단계로 새어나갈 여지 자체가 사라진다.
+
+    ★ 반복 제거(수렴): NudeNet은 프레임 단위라 같은 장면에서도 점수가 요동친다
+      (한 프레임 0.45, 옆 프레임 0.30). 그래서 1패스로는 절대 0이 안 된다 — 실측에서
+      171분 원본 1패스 후에도 18~345프레임이 남았다. 검출이 0이 되거나 더 이상 줄지
+      않을 때까지 스캔→컷을 반복한다.
+    부수 효과: 전사·AI가 다룰 길이도 줄어 전체가 더 빨라진다."""
+    from server.core import nsfw
+    gpu = gpu or NullLock()
+    outdir = work_dir(c, code)
+    clean = outdir / f"{code}_클린.mp4"
+    if clean.is_file():
+        em.log(f"클린본 재사용: {clean}")
+        save_state(outdir, code, video=str(clean), source_video=str(video), cleaned=True)
+        return {"step": "clean", "code": code, "clean": str(clean), "reused": True}
+
+    step = float(c.get("nsfw_scan_step", 1.0))
+    thr = float(c.get("nsfw_clean_threshold", 0.22))   # 클린 단계는 공격적으로(경계선 포착)
+    pad = float(c.get("nsfw_pad", 3.0))
+    gap = float(c.get("nsfw_merge_gap", 12.0))
+    min_clip = float(c.get("nsfw_min_clip", 3.0))
+    max_pass = int(c.get("nsfw_max_pass", 3))
+
+    src = str(video)
+    orig_total = P.video_duration(video)
+    tmp_prev = None
+    prev_bad_sec = None
+    for p in range(1, max_pass + 1):
+        em.step(p, max_pass, f"노출 스캔·제거 {p}패스")
+        total = P.video_duration(src)
+        with gpu:
+            bad = nsfw.build_map(src, step=step, threshold=thr, pad=pad, merge_gap=gap,
+                                 cache=(str(outdir / f"{code}_노출지도.json") if p == 1 else None),
+                                 log=em.log)
+        if not bad:
+            em.log(f"✔ {p}패스: 노출 검출 0 — 수렴 완료")
+            break
+        bad_sec = sum(b - a for a, b in bad)
+        # ★ 수렴 정지 — NudeNet 점수는 임계 근처에서 요동쳐서(같은 장면 0.45↔0.30) 패스를
+        #   거듭해도 경계선 검출이 계속 나온다(실측: 2패스 31프레임 → 3패스 36프레임으로 오히려 증가).
+        #   더 자르면 멀쩡한 장면만 깎여나가므로, 줄지 않으면 멈추고 완성본 전수 검사에 맡긴다.
+        if prev_bad_sec is not None and bad_sec > prev_bad_sec * 0.7:
+            em.log(f"※ {p}패스: 검출이 더 줄지 않습니다({prev_bad_sec / 60:.1f}→{bad_sec / 60:.1f}분) "
+                   f"— 경계선 오검출로 보고 반복을 멈춥니다. "
+                   f"최종 안전은 완성본 전수 검사(⑥)가 담당합니다")
+            break
+        prev_bad_sec = bad_sec
+        keep = nsfw.complement(bad, total, min_len=min_clip)
+        if not keep:
+            raise RuntimeError("노출을 제거하고 나면 남는 영상이 없습니다 "
+                               "— 전편이 노출입니다(자동화 부적합).")
+        kept = sum(b - a for a, b in keep)
+        em.log(f"{p}패스: 노출 {len(bad)}구간({(total - kept) / 60:.1f}분) 제거 "
+               f"→ {kept / 60:.1f}분 유지")
+        dst = outdir / (f"{code}_클린.mp4" if p == max_pass else f"{code}_클린_p{p}.mp4")
+        with gpu:
+            P.cut_video(src, keep, str(dst), em.log, lambda fr: em.prog(fr, f"제거 {p}패스"))
+        if tmp_prev:                      # 이전 패스 중간본 정리
+            try:
+                Path(tmp_prev).unlink()
+            except OSError:
+                pass
+        tmp_prev = str(dst) if dst.name != f"{code}_클린.mp4" else None
+        src = str(dst)
+    # 마지막 패스 산출물을 최종 클린본 이름으로 확정
+    if src != str(clean):
+        if Path(src) == Path(video):      # 노출이 애초에 없어 컷을 한 번도 안 함
+            em.log("노출 검출 0 — 원본을 그대로 씁니다(컷 생략)")
+            save_state(outdir, code, video=str(video), source_video=str(video), cleaned=True)
+            return {"step": "clean", "code": code, "clean": str(video), "cut": False}
+        shutil.move(src, clean)
+    final_sec = P.video_duration(clean)
+    # 이후 단계는 전부 클린본을 본다(state.video 교체). 원본 경로는 source_video로 보존.
+    save_state(outdir, code, video=str(clean), source_video=str(video), cleaned=True)
+    em.file("클린본(노출 제거)", clean)
+    em.log(f"클린본 확정: {final_sec / 60:.1f}분 (원본 {orig_total / 60:.0f}분에서 "
+           f"{(orig_total - final_sec) / 60:.1f}분 제거)")
+    return {"step": "clean", "code": code, "clean": str(clean),
+            "removed_sec": round(orig_total - final_sec, 1), "kept_sec": round(final_sec, 1)}
+
+
 def stage_transcribe(c, code, video, model, em, initial_prompt=None):
     """① 전사 — 영상 → 일본어 STT. {code}_전사.srt/.json 저장.
     two_pass(기본 on)면 작은 모델로 러프 스캔만 한다(구간 선정용) — 최종 대사자막은
@@ -228,8 +315,11 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
     m = P.fetch_meta(c["meta_api"], code, em.log)
     # ★ 전체 노출 지도 — LLM에 보내기 전에 만든다. 노출 구간 대사를 아예 빼고 주면
     #   AI가 처음부터 클린 구간에서만 고른다(사후에 버려서 재료가 마르는 것보다 낫다).
+    #   ⓪ 노출 제거를 이미 거쳤다면(cleaned) 영상에 노출이 없으므로 스캔 자체가 불필요.
     nsfw_map = []
-    if c.get("nsfw_full_scan", True):
+    if st.get("cleaned"):
+        em.log("⓪ 노출 제거를 거친 클린본 — 추가 스캔 생략")
+    elif c.get("nsfw_full_scan", True):
         try:
             from server.core import nsfw
             with gpu:   # ffmpeg 디코딩 — GPU 레인과 함께 묶어 과부하 방지
