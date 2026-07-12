@@ -548,7 +548,14 @@ def stage_banner(c, code, em, hold=2.0, preview=True):
         r = GIC.generate(code, outdir=str(icdir), hold=hold, assets_only=True,
                          preview_anim=preview, log=em.log)
     except GIC.MetaNotFound as e:
-        raise RuntimeError(f"배너 생성 불가 — {e}. DB(works)에 품번이 있어야 합니다.")
+        # ★ 신작은 로컬 DB에도, 아직 크롤링 전이면 우분투 meta_api에도 없을 수 있다.
+        #   그렇다고 배너 하나 때문에 파이프라인 전체를 죽이면 안 된다 — 배너만 건너뛰고
+        #   자막·TTS·번인은 그대로 진행한다(⑥ 굽기의 banner_layers가 None을 받아 자막만 굽는다).
+        #   나중에 크롤링되면 이 단계만 다시 돌려 배너를 붙일 수 있다.
+        em.log(f"⚠ 배너 생략 — {e}")
+        em.log("   아직 크롤링되지 않은 신작으로 보입니다. 자막·음성·번인은 그대로 진행합니다.")
+        em.log("   나중에 DB에 올라오면 ④ 배너만 다시 실행해 붙이면 됩니다.")
+        return {"step": "banner", "code": code, "skipped": True, "reason": str(e)}
     a = r["assets"]
     em.file("프레임(상시)", a["frame"])
     em.file("인포카드", a["info"])

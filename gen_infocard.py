@@ -54,18 +54,55 @@ class MetaNotFound(Exception):
     호출측의 except Exception 을 뚫고 나가 큐 워커까지 죽는다."""
 
 
+def _meta_api_base():
+    """studio_config.json의 meta_api(우분투 DB 서버). 없으면 기본값."""
+    try:
+        cfg = json.load(open(os.path.join(HERE, "studio_config.json"), encoding="utf-8"))
+        return (cfg.get("meta_api") or "").rstrip("/")
+    except Exception:
+        return "http://172.30.1.40:8770"
+
+
+def _fetch_remote(code: str):
+    """로컬 DB(복사본)는 신작이 없다 — 크롤링은 우분투에서 매일 돌고 로컬은 뒤처진다.
+    파이프라인의 다른 단계는 이미 meta_api를 쓰므로 배너도 같은 소스로 폴백한다.
+    (배우 사진·썸네일은 우분투 로컬 파일이라 못 받는다 → 사진 없이 카드를 만든다)"""
+    import urllib.request
+    base = _meta_api_base()
+    if not base:
+        return None
+    url = f"{base}/work/{urllib.parse.quote(code)}"
+    with urllib.request.urlopen(url, timeout=15) as r:
+        m = json.loads(r.read().decode("utf-8"))
+    if not m or m.get("error") or not m.get("code"):
+        return None
+    return m
+
+
 def fetch_meta(code: str) -> dict:
     db = sqlite3.connect(DB); db.row_factory = sqlite3.Row
     w = db.execute("SELECT * FROM works WHERE code=?", (code,)).fetchone()
-    if not w:
-        raise MetaNotFound(f"[gen_infocard] '{code}' 를 works 테이블에서 찾지 못했습니다.")
-    w = dict(w)
     a = None
-    if w.get("actress_ja"):
-        a = db.execute("SELECT * FROM actresses WHERE name_ja=?",
-                       (w["actress_ja"],)).fetchone()
-    a = dict(a) if a else {}
+    if w:
+        w = dict(w)
+        if w.get("actress_ja"):
+            a = db.execute("SELECT * FROM actresses WHERE name_ja=?",
+                           (w["actress_ja"],)).fetchone()
     db.close()
+    if not w:
+        # 로컬 DB에 없음 = 신작. 우분투 meta_api(매일 크롤링)로 폴백.
+        try:
+            w = _fetch_remote(code)
+        except Exception as e:
+            raise MetaNotFound(
+                f"[gen_infocard] '{code}' 가 로컬 DB에 없고 meta_api 조회도 실패했습니다({e}). "
+                f"우분투 meta_api(8770)가 떠 있는지 확인하세요.")
+        if not w:
+            raise MetaNotFound(
+                f"[gen_infocard] '{code}' 를 로컬 DB·meta_api 어디서도 찾지 못했습니다. "
+                f"아직 크롤링되지 않은 품번일 수 있습니다.")
+        print(f"[gen_infocard] '{code}' 로컬 DB에 없음 → meta_api에서 가져옴(신작)")
+    a = dict(a) if a else {}
 
     likes = w.get("likes") or 0
     dis   = w.get("dislikes") or 0
