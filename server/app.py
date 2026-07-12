@@ -1187,6 +1187,11 @@ def _queue_snap():
             p = d / name
             if p.is_file():
                 it[key] = str(p)
+        # 단계별 완료 상태(파일 존재 기준) — GUI가 '어디까지 됐는지'를 점으로 보여준다
+        try:
+            it["steps"] = steps_status(str(d), code)
+        except Exception:
+            pass
     return s
 
 

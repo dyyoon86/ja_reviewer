@@ -849,6 +849,23 @@ $("#btnQAdd").onclick = async () => {
   log(`📋 작업 큐에 ${j.added.length}개 추가 — 수작업하는 동안 자동 처리됩니다`,"ok");
 };
 
+// 단계별 진행 표시 — 파이프라인에 켜진 단계만, 완료(✓)·진행중(●)·대기(·)를 한 줄로.
+// 자동 모드에선 이게 '지금 어디까지 됐는지' 알 수 있는 유일한 창이다.
+const Q_STEPS = [["clean","⓪노출"],["transcribe","①전사"],["ai","②AI"],["subs","③자막"],
+                 ["banner","④배너"],["tts","⑤음성"],["burn","⑥번인"]];
+function qSteps(it){
+  const pipe = it.pipeline || {}, done = it.steps || {};
+  const on = Q_STEPS.filter(([k])=>pipe[k]);
+  if(!on.length) return "";
+  const cells = on.map(([k,label])=>{
+    let cls = "s-wait", mark = "·";
+    if(done[k]){ cls="s-done"; mark="✓"; }
+    if(it.status==="running" && it.stage===k){ cls="s-run"; mark="●"; }
+    return `<span class="q-step ${cls}" title="${label}">${mark}${label.slice(1)}</span>`;
+  }).join("");
+  return `<div class="q-steps">${cells}</div>`;
+}
+
 function qAction(id, action, extra){
   return fetch("/queue/item/"+id,{method:"POST",headers:{'Content-Type':'application/json'},
     body:JSON.stringify(Object.assign({action}, extra||{}))})
@@ -916,6 +933,7 @@ function renderQueue(snap){
       `<div class="q-name" title="${it.video}">${it.name}</div>`+
       (it.status==="running"?`<div class="prog q-prog"><div class="prog-fill" style="width:${pct}%"></div></div>`:"")+
       `<div class="q-stage">${it.stage_label||""}</div>`+
+      qSteps(it)+
       `<div class="q-actions"></div>`;
     const acts=li.querySelector(".q-actions");
     const mk=(t,title,fn)=>{ const b=document.createElement("button"); b.textContent=t; b.title=title;

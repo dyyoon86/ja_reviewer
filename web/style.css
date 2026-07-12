@@ -290,3 +290,10 @@ body[data-mode="manual"] .auto-only{display:none !important}
 .bigtoggle{display:inline-flex;align-items:center;gap:7px;font-size:14px;cursor:pointer;
   padding:7px 13px;border:1px solid var(--line);border-radius:9px;background:var(--panel2);flex:0 0 auto}
 .bigtoggle input{height:auto;vertical-align:middle}
+
+/* 큐 항목의 단계별 진행 표시 — 자동 모드에서 '어디까지 됐는지' 한눈에 */
+.q-steps{display:flex;flex-wrap:wrap;gap:3px;margin:5px 0 2px}
+.q-step{font-size:10px;line-height:1;padding:3px 5px;border-radius:5px;border:1px solid var(--line);
+  color:var(--dim);background:var(--panel2);white-space:nowrap}
+.q-step.s-done{color:#3ec46d;border-color:#2c6b43;background:rgba(62,196,109,.10)}
+.q-step.s-run{color:#fff;border-color:var(--acc,#c33);background:var(--acc,#c33);font-weight:700}
