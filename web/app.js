@@ -856,8 +856,16 @@ function qAction(id, action, extra){
 }
 
 function qOpen(it){
-  // 큐 항목 클릭 → 우측 상세 화면에 로드(백그라운드 잡은 계속 돌아감)
-  openVideo(it.video);
+  // 큐 항목 클릭 → 우측 상세 화면에 로드(백그라운드 잡은 계속 돌아감).
+  // ★ 자동 모드에선 플레이어·작업 패널이 숨겨져 있어 클릭해도 아무것도 안 보인다
+  //   → 검수/이어작업은 수동 모드의 화면이 필요하므로 자동으로 전환한다.
+  if(document.body.dataset.mode === "auto"){
+    setMode("manual");
+    log(`🛠 수동 모드로 전환 — ${it.code||""} 검수/이어작업 화면입니다 (자동으로 돌아가려면 상단 🔮자동)`, "ok");
+  }
+  // 검수는 '완성에 가까운 것'부터 본다: 자막 번인본 > 음성 입힌 것 > 컷 결과 > 원본
+  const pick = it.subbed || it.voiced || it.final || it.video;
+  openVideo(pick);
   setTimeout(()=>{  // openVideo의 파일명 자동추정을 큐의 확정 품번으로 덮어씀
     if(it.code){ $("#code").value=it.code; $("#codeA").value=it.code; refreshSteps(it.code); }
   }, 300);

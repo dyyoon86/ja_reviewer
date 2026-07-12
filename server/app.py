@@ -1173,6 +1173,20 @@ WATCHER = Watcher(load_cfg, QUEUE, guess_code)
 def _queue_snap():
     s = QUEUE.snapshot()
     s["watch"] = WATCHER.status()
+    # 검수/재생용 산출물 경로를 붙인다 — GUI가 큐 항목을 클릭했을 때
+    # '가장 완성에 가까운 것'(번인본 > 음성본 > 컷 결과)을 바로 열 수 있게.
+    c = load_cfg()
+    for it in s.get("items", []):
+        code = it.get("code")
+        if not code:
+            continue
+        d = Path(c["out_dir"]) / re.sub(r"[^0-9A-Za-z._-]", "_", code)
+        for key, name in (("subbed", f"{code}_final_subbed.mp4"),
+                          ("voiced", f"{code}_final_voiced.mp4"),
+                          ("final", f"{code}_final.mp4")):
+            p = d / name
+            if p.is_file():
+                it[key] = str(p)
     return s
 
 
