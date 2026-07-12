@@ -6,13 +6,71 @@
 <title>리뷰 편집 스튜디오</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+<body data-mode="auto">
 <header>
   <span class="title">🎬 리뷰 편집 스튜디오</span>
-  <button id="btnBrowse">영상 선택</button>
-  <input id="path" placeholder="또는 영상 경로 붙여넣기 (C:\…\video.mp4)" style="flex:1;min-width:200px">
-  <button id="btnOpen">열기</button>
+  <div class="modesw" id="modesw">
+    <button class="m" data-mode="auto" title="영상만 던지면 완성본까지 — 감시 폴더 + 큐">🔮 자동</button>
+    <button class="m" data-mode="manual" title="구간 마킹·단계별 실행·TTS·굽기를 직접 제어">🛠 수동</button>
+  </div>
+  <span class="manual-only" style="display:contents">
+    <button id="btnBrowse">영상 선택</button>
+    <input id="path" placeholder="또는 영상 경로 붙여넣기 (C:\…\video.mp4)" style="flex:1;min-width:200px">
+    <button id="btnOpen">열기</button>
+  </span>
 </header>
+
+<!-- ══ 자동 모드 ══ -->
+<div class="autowrap auto-only">
+  <div class="card">
+    <div class="sec"><span class="num">1</span> 감시 폴더 <span class="muted">· 여기에 영상을 떨구면 알아서 완성본까지</span></div>
+    <div class="acc-body">
+      <div class="dropzone" id="dropzone">
+        <div class="dz-ico">🔮</div>
+        <div class="dz-main">영상 파일을 이 창에 끌어다 놓으세요</div>
+        <div class="dz-sub">또는 아래 감시 폴더를 켜두면 그 폴더에 들어오는 영상을 자동으로 처리합니다</div>
+      </div>
+      <div class="formrow" style="margin-top:12px">
+        <label class="bigtoggle"><input type="checkbox" id="watchOn"> <b>🔮 폴더 감시 켜기</b></label>
+        <span class="fld grow"><span class="lbl">감시 폴더</span>
+          <input id="watchDir" placeholder="예) C:\Users\yoon\Desktop\감시폴더" style="width:100%"></span>
+        <button id="btnWatchDir">폴더 선택</button>
+      </div>
+      <div class="hint" id="watchStat" style="display:none"></div>
+      <div class="hint">영상이 들어오면 <b>전사 → AI 구간선정 → 노출가드 → 컷 → 자막 → 배너 → TTS → 번인</b>까지 전부 자동으로 돌고,
+        완성본은 <code>{출력폴더}\_완성\</code> 에 모입니다. 2시간짜리 한 편에 약 10~20분.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="sec"><span class="num">2</span> 자동 처리 설정 <span class="muted">· 기본값 그대로 써도 됩니다</span></div>
+    <div class="acc-body">
+      <div class="formrow" style="margin-top:10px">
+        <span class="fld"><span class="lbl">길이</span><select id="faTarget">
+          <option value="60" selected>1분</option><option value="120">2분</option>
+          <option value="300">5분</option><option value="600">10분</option></select></span>
+        <span class="fld"><span class="lbl">방식</span><select id="faMode" style="width:200px">
+          <option value="summary" selected>요약형 (줄거리 골고루)</option>
+          <option value="highlight">하이라이트형 (후킹 몰아서)</option></select></span>
+        <span class="fld"><span class="lbl">LLM</span><select id="faLlm"><option>claude</option><option>codex</option></select></span>
+      </div>
+      <div class="formrow">
+        <span class="fld"><span class="lbl">인포카드 유지</span><select id="faHold" style="width:90px">
+          <option value="3">3초</option><option value="4" selected>4초</option>
+          <option value="5">5초</option><option value="6">6초</option></select></span>
+        <label class="muted" title="keep 구간 프레임을 NudeNet으로 검사해 노출 장면을 자동 제외합니다">
+          <input type="checkbox" id="faNsfw" checked style="height:auto;vertical-align:middle"> 🛡 비주얼 노출 가드 (권장)</label>
+        <label class="muted" title="작은 모델로 빠르게 훑고, 고른 구간만 정밀 재전사 — 2시간 영상 전사가 20분→2분">
+          <input type="checkbox" id="faTwoPass" checked style="height:auto;vertical-align:middle"> ⚡ 2단계 전사 (권장)</label>
+      </div>
+      <div class="actions">
+        <button id="btnOpenDone" class="spacer">📂 완성본 폴더 열기</button>
+        <button class="go" id="btnFaSave">설정 저장</button>
+      </div>
+      <div class="hint" id="faStat"></div>
+    </div>
+  </div>
+</div>
 
 <div class="layout">
   <!-- 최좌: 작업 큐 (병렬 자동 처리) -->
@@ -25,7 +83,7 @@
       </div>
       <div class="qbody">
         <button class="primary" id="btnQAdd" style="width:100%">＋ 영상 여러 개 추가</button>
-        <div class="qpipe">
+        <div class="qpipe manual-only">
           <span class="muted">자동 진행</span>
           <label><input type="checkbox" id="qpTranscribe" checked>전사</label>
           <label><input type="checkbox" id="qpAi" checked>AI</label>
@@ -38,12 +96,7 @@
           동시 실행 · GPU <input id="qLaneGpu" type="number" min="1" max="4" value="1">
           AI <input id="qLaneAi" type="number" min="1" max="6" value="2">
         </div>
-        <div class="qlanes muted" style="margin-top:4px">
-          <label title="이 폴더에 영상 파일이 생기면 자동으로 큐에 넣고 끝까지(1분 단독·TTS·번인) 처리합니다. 완성본은 {출력폴더}\_완성\ 에 모입니다"><input type="checkbox" id="watchOn"> 🔮 폴더 감시 (풀오토)</label>
-        </div>
-        <input id="watchDir" placeholder="감시 폴더 경로 (여기 떨구면 알아서 완성)" style="width:100%;margin-top:2px">
-        <div class="hint" id="watchStat" style="margin:2px 0 0;display:none"></div>
-        <div class="hint" style="margin:6px 0 0">묶음 리뷰 위치(먼저/다음은/마지막으로)는 <b>큐 순서대로 자동 판정</b>됩니다. 편집 순서대로 <b>한 번에 추가</b>하세요 — 도중에 추가·삭제하면 순서가 바뀝니다.</div>
+        <div class="hint manual-only" style="margin:6px 0 0">묶음 리뷰 위치(먼저/다음은/마지막으로)는 <b>큐 순서대로 자동 판정</b>됩니다. 편집 순서대로 <b>한 번에 추가</b>하세요 — 도중에 추가·삭제하면 순서가 바뀝니다.</div>
         <ul id="qlist" class="qlist"><li class="qempty muted">비어 있음 — 영상을 추가하면<br>수작업하는 동안 자동 처리됩니다</li></ul>
         <div class="qfoot">
           <span class="hint" style="margin:0;flex:1">✋검수대기 항목 클릭 → 우측에서 이어서 작업</span>
@@ -54,7 +107,7 @@
   </aside>
 
   <!-- 좌: 플레이어 -->
-  <div class="col">
+  <div class="col manual-only">
     <div class="card">
       <video id="vid" controls preload="metadata"></video>
       <div class="tl" id="tl"><div class="cur" id="cur"></div></div>
@@ -98,7 +151,7 @@
       </details>
     </div>
 
-    <div class="card">
+    <div class="card manual-only">
       <div class="tabs">
         <div class="t active" data-pane="manual">직접 컷 편집</div>
         <div class="t" data-pane="auto">자동 (AI 분석)</div>
@@ -237,7 +290,7 @@
     </div>
 
     <!-- ── TTS ── -->
-    <div class="card">
+    <div class="card manual-only">
       <details class="acc" open>
       <summary class="sec"><span class="num">3</span> 내레이션 음성 <span class="muted">· voicebox TTS</span></summary>
       <div class="acc-body">
@@ -285,7 +338,7 @@
     </div>
 
     <!-- ── 자막 입히기(하드섭) ── -->
-    <div class="card">
+    <div class="card manual-only">
       <details class="acc" open>
       <summary class="sec"><span class="num">4</span> 자막 입히기 <span class="muted">· 영상에 박기(하드섭)</span></summary>
       <div class="acc-body">
@@ -425,7 +478,7 @@
     </div>
 
     <!-- ── 인포배너(품번 → 인포카드/워터마크 자동 오버레이) ── -->
-    <div class="card">
+    <div class="card manual-only">
       <details class="acc" open>
       <summary class="sec"><span class="num">▶</span> 렌더 전 미리보기 <span class="muted">· 배너·워터마크·자막을 얹은 결과를 재생바로 확인 (인코딩 0초)</span></summary>
       <div class="acc-body">
@@ -460,7 +513,7 @@
       </details>
     </div>
 
-    <div class="card">
+    <div class="card manual-only">
       <details class="acc">
       <summary class="sec"><span class="num">✎</span> 자막 편집 <span class="muted">· ③ 결과의 내레이션·대사를 직접 고치고 저장 → 다시 굽기</span></summary>
       <div class="acc-body">
@@ -482,7 +535,7 @@
       </details>
     </div>
 
-    <div class="card">
+    <div class="card manual-only">
       <details class="acc" open>
       <summary class="sec"><span class="num">5</span> 인포배너 <span class="muted">· 품번만 넣으면 인포카드+워터마크 자동 생성·오버레이</span></summary>
       <div class="acc-body">

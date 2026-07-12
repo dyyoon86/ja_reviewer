@@ -51,9 +51,11 @@ class Watcher:
         return dict(self.last)
 
     def _fullauto_opts(self, c):
-        """풀오토 프리셋 — 단독(solo) 오프닝 + 1분 + TTS 덕킹 먹싱 + 번인까지."""
+        """풀오토 프리셋 — 단독(solo) 오프닝 + 1분 + TTS 덕킹 먹싱 + 번인까지.
+        GUI 자동 모드 설정(config)에서 길이·방식·LLM을 읽는다."""
         return {"model": c["whisper_model"], "llm": c["llm"],
-                "target_sec": int(c.get("target_sec", 60)), "mode": "summary",
+                "target_sec": int(c.get("target_sec", 60)),
+                "mode": c.get("fullauto_mode", "summary"),
                 "style": "3min", "pos": "solo", "orig_audio": "duck", "duck_level": 0.3,
                 "tts_profile": c.get("tts_profile"), "tts_base": c.get("tts_base"),
                 "tts_language": c.get("tts_language", "ko"), "tts_mux": True,

@@ -60,6 +60,7 @@ DEFAULTS = {"meta_api": "http://172.30.1.40:8770", "llm": "claude",
             "banner_hold": 4.0,   # 인포카드 유지시간(초)
             # 비주얼 노출 가드(NudeNet) — keep 구간 프레임을 NN으로 검사해 노출 장면 제외
             "nsfw_guard": True, "nsfw_step": 2.0, "nsfw_threshold": 0.35,
+            "fullauto_mode": "summary",   # 자동 모드 방식: summary | highlight
             "target_sec": 60,
             "tts_base": "http://127.0.0.1:17493", "tts_profile": "", "tts_language": "ko",
             "queue_gpu": 1, "queue_ai": 2, "queue_tts": 1,
@@ -363,6 +364,23 @@ def browse_dir():
         return {"path": d or ""}
     except Exception as e:
         return JSONResponse({"path": "", "error": str(e)}, status_code=200)
+
+
+@app.post("/open_dir")
+async def open_dir(req: Request):
+    """{sub?} — 출력 폴더(하위 sub)를 탐색기로 연다. 자동 모드 '완성본 폴더 열기'."""
+    body = await req.json() if await req.body() else {}
+    c = load_cfg()
+    d = Path(c["out_dir"]) / (body.get("sub") or "")
+    d.mkdir(parents=True, exist_ok=True)
+    try:
+        if os.name == "nt":
+            os.startfile(str(d))            # noqa: S606 — 로컬 GUI 편의기능
+        else:
+            subprocess.Popen(["xdg-open", str(d)])
+        return {"ok": True, "dir": str(d)}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=200)
 
 
 @app.post("/browse_multi")
@@ -1171,12 +1189,15 @@ async def queue_events():
 
 @app.post("/queue/add")
 async def queue_add(req: Request):
-    """{paths:[..], pipeline:{transcribe,ai,subs,tts,burn}, opts:{model,llm,target_sec,mode,hint,tts_*}}"""
+    """{paths:[..], pipeline:{transcribe,ai,subs,tts,burn}, opts:{model,llm,target_sec,mode,hint,tts_*}}
+    opts.fullauto=true 로만 보내면(자동 모드 드롭) 나머지 옵션은 config의 풀오토 프리셋으로 채운다."""
     body = await req.json()
+    opts = body.get("opts") or {}
+    if opts.get("fullauto"):
+        opts = {**WATCHER._fullauto_opts(load_cfg()), **opts}
     videos = [{"path": p, "code": guess_code(p)} for p in body.get("paths", [])]
     ids = QUEUE.add(videos, body.get("pipeline") or
-                    {"transcribe": True, "ai": True, "subs": True},
-                    body.get("opts") or {})
+                    {"transcribe": True, "ai": True, "subs": True}, opts)
     return {"ok": True, "added": ids}
 
 

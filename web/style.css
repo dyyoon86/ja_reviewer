@@ -269,3 +269,24 @@ summary.sec:hover{opacity:.85}
 .subs-row input,.subs-row select{padding:5px 7px}
 button.mini{padding:4px 9px;font-size:12px}
 button.mini.x{background:transparent;border:1px solid #c44;color:#c44;line-height:1}
+
+/* ══ 자동/수동 모드 전환 ══ */
+.modesw{display:flex;gap:0;border:1px solid var(--line);border-radius:9px;overflow:hidden;flex:0 0 auto}
+.modesw .m{border:none;border-radius:0;background:var(--panel2);color:var(--dim);
+  padding:7px 15px;font-weight:700;font-size:13px;cursor:pointer;transition:background .15s,color .15s}
+.modesw .m:hover{color:var(--txt)}
+.modesw .m.on{background:var(--acc,#c33);color:#fff}
+body[data-mode="auto"] .manual-only{display:none !important}
+body[data-mode="manual"] .auto-only{display:none !important}
+
+/* 자동 모드 화면 */
+.autowrap{display:flex;flex-direction:column;gap:14px;padding:16px 16px 0;max-width:980px;margin:0 auto;width:100%}
+.dropzone{border:2px dashed var(--line);border-radius:14px;padding:34px 20px;text-align:center;
+  background:var(--panel2);transition:border-color .15s,background .15s}
+.dropzone.hot{border-color:var(--acc,#c33);background:rgba(204,51,51,.08)}
+.dz-ico{font-size:38px;line-height:1;margin-bottom:10px}
+.dz-main{font-weight:700;font-size:15px;color:var(--txt)}
+.dz-sub{margin-top:6px;font-size:12.5px;color:var(--dim)}
+.bigtoggle{display:inline-flex;align-items:center;gap:7px;font-size:14px;cursor:pointer;
+  padding:7px 13px;border:1px solid var(--line);border-radius:9px;background:var(--panel2);flex:0 0 auto}
+.bigtoggle input{height:auto;vertical-align:middle}

@@ -1208,3 +1208,82 @@ $("#btnSubsSave").onclick=()=>{
       log("✔ 자막 저장 — ⑤ 굽기를 다시 하면 반영됩니다(내레이션 바꿨으면 ④ TTS도 재생성)","ok");
     }).catch(e=>{ $("#subsStatus").textContent=""; log("✖ "+e,"warn"); });
 };
+
+// ══ 자동/수동 모드 전환 ═══════════════════════════════════════════════════════
+// 자동 = 영상만 던지면 완성본까지(감시폴더/드롭 + 큐). 수동 = 구간마킹·단계별·TTS·굽기.
+// body[data-mode]를 CSS가 읽어 .manual-only / .auto-only 를 감춘다.
+function setMode(m){
+  document.body.dataset.mode = m;
+  document.querySelectorAll("#modesw .m").forEach(b=>b.classList.toggle("on", b.dataset.mode===m));
+  try{ localStorage.setItem("ja_mode", m); }catch(_){}
+}
+document.querySelectorAll("#modesw .m").forEach(b=> b.onclick=()=>setMode(b.dataset.mode));
+setMode((()=>{ try{ return localStorage.getItem("ja_mode")||"auto"; }catch(_){ return "auto"; } })());
+
+// ── 풀오토 설정(자동 모드 전용) ──────────────────────────────────────────────
+// 풀오토 파이프라인 옵션 = watcher._fullauto_opts 가 config에서 읽는 값들과 같은 키.
+function faSave(){
+  const body = {
+    target_sec: +$("#faTarget").value || 60,
+    fullauto_mode: $("#faMode").value,
+    llm: $("#faLlm").value,
+    banner_hold: +$("#faHold").value || 4,
+    nsfw_guard: $("#faNsfw").checked,
+    two_pass: $("#faTwoPass").checked,
+  };
+  fetch("/config",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+    .then(()=>{ const s=$("#faStat"); if(s) s.textContent="✓ 저장됨 — 다음 영상부터 적용됩니다."; });
+}
+if($("#btnFaSave")) $("#btnFaSave").onclick = faSave;
+["#faTarget","#faMode","#faLlm","#faHold","#faNsfw","#faTwoPass"].forEach(sel=>{
+  const el=$(sel); if(el) el.addEventListener("change", faSave);
+});
+fetch("/config").then(r=>r.json()).then(c=>{
+  if($("#faTarget") && c.target_sec) $("#faTarget").value = c.target_sec;
+  if($("#faMode") && c.fullauto_mode) $("#faMode").value = c.fullauto_mode;
+  if($("#faLlm") && c.llm) $("#faLlm").value = c.llm;
+  if($("#faHold") && c.banner_hold) $("#faHold").value = c.banner_hold;
+  if($("#faNsfw")) $("#faNsfw").checked = c.nsfw_guard !== false;
+  if($("#faTwoPass")) $("#faTwoPass").checked = c.two_pass !== false;
+}).catch(()=>{});
+
+if($("#btnWatchDir")) $("#btnWatchDir").onclick = () => {
+  fetch("/browse_dir",{method:"POST"}).then(r=>r.json()).then(r=>{
+    if(r.path){ $("#watchDir").value = r.path; saveWatch(); }
+  }).catch(()=>{});
+};
+if($("#btnOpenDone")) $("#btnOpenDone").onclick = () => {
+  fetch("/open_dir",{method:"POST",headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({sub:"_완성"})}).catch(()=>{});
+};
+
+// ── 드래그&드롭 → 풀오토 큐 투입 ────────────────────────────────────────────
+// 브라우저 보안상 File 객체에는 전체 경로가 없다 → 파일명을 감시폴더 규약 대신
+// 서버 /queue/add 는 경로가 필요하므로, 드롭은 '경로 텍스트'만 지원한다.
+// (탐색기에서 파일을 끌면 대부분 text/plain 또는 text/uri-list 로 경로가 함께 온다)
+const dz = $("#dropzone");
+if(dz){
+  const stop = e => { e.preventDefault(); e.stopPropagation(); };
+  ["dragenter","dragover"].forEach(ev=> dz.addEventListener(ev, e=>{ stop(e); dz.classList.add("hot"); }));
+  ["dragleave","drop"].forEach(ev=> dz.addEventListener(ev, e=>{ stop(e); dz.classList.remove("hot"); }));
+  dz.addEventListener("drop", async e => {
+    let paths = [];
+    const uri = e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain") || "";
+    uri.split(/[\r\n]+/).forEach(u=>{
+      u = u.trim(); if(!u) return;
+      if(u.startsWith("file:///")) u = decodeURIComponent(u.slice(8));
+      paths.push(u);
+    });
+    if(!paths.length && e.dataTransfer.files.length){
+      log("⚠ 브라우저가 파일 경로를 넘겨주지 않았습니다 — 아래 '폴더 선택'으로 감시 폴더를 지정하거나, "
+          + "경로를 복사해 큐의 '＋ 영상 여러 개 추가'를 쓰세요","warn");
+      return;
+    }
+    if(!paths.length) return;
+    const j = await fetch("/queue/add",{method:"POST",headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({paths, pipeline:{transcribe:true,ai:true,subs:true,banner:true,tts:true,burn:true},
+                           opts:{fullauto:true}})}).then(r=>r.json()).catch(()=>({added:[]}));
+    if(j.added && j.added.length) log(`🔮 풀오토 큐에 ${j.added.length}개 투입 — 완성본까지 자동 진행`,"ok");
+  });
+  dz.onclick = () => { if($("#btnQAdd")) $("#btnQAdd").click(); };
+}
