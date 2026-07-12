@@ -9,6 +9,7 @@
 프레임 추출 후 배치 판정. 프레임당 ~0.025s라 실제 비용은 수 초.
 NudeNet은 완전 로컬 ONNX 추론 — 프레임이 외부로 나가지 않는다.
 """
+import json
 import os
 import subprocess
 import tempfile
@@ -113,6 +114,67 @@ def scan_ranges(video, ranges, step=DEFAULT_STEP, threshold=DEFAULT_THRESHOLD, l
             if found:
                 hits[i] = found
     return hits
+
+
+def build_map(video, step=2.0, threshold=DEFAULT_THRESHOLD, pad=1.5, cache=None, log=print):
+    """원본 **전체**를 훑어 노출 구간 지도를 만든다. 반환: [(a, b), ...] (병합된 노출 구간).
+
+    사후 필터(고른 뒤 버리기)와 달리, 이 지도가 있으면
+      · AI에게 노출 구간의 대사를 아예 안 보여줘 처음부터 클린 구간만 고르게 하고
+      · 고른 구간에 노출이 스치면 그 부분만 도려낸다(구간 통째로 버리지 않음)
+    171분 원본 실측 ≈ 3.6분(추출 1.5 + 추론 2.1). cache 경로를 주면 재실행 시 재사용.
+    pad: 검출 시점 앞뒤 여유(초) — 샘플 간격 사이로 새는 프레임 대비."""
+    if cache and Path(cache).is_file():
+        try:
+            data = json.loads(Path(cache).read_text(encoding="utf-8"))
+            log(f"노출 지도 재사용: {len(data)}구간 ({cache})")
+            return [(float(a), float(b)) for a, b in data]
+        except Exception:
+            pass
+    log(f"전체 노출 스캔(NudeNet, {step}s 간격) — 원본 전 구간. 2시간이면 3~4분…")
+    hits = scan_video(video, step, threshold, log)
+    spans = []
+    for t, _cls, _sc in hits:
+        a, b = max(0.0, t - pad), t + pad
+        if spans and a <= spans[-1][1]:      # 인접/겹침 → 병합
+            spans[-1] = (spans[-1][0], max(spans[-1][1], b))
+        else:
+            spans.append((a, b))
+    total = sum(b - a for a, b in spans)
+    log(f"노출 지도: {len(spans)}구간 / 합계 {total / 60:.1f}분 (검출 {len(hits)}프레임)")
+    if cache:
+        try:
+            Path(cache).write_text(json.dumps([[round(a, 2), round(b, 2)] for a, b in spans]),
+                                   encoding="utf-8")
+        except Exception:
+            pass
+    return spans
+
+
+def subtract(ranges, bad, min_len=2.0):
+    """구간 차집합 — ranges에서 bad(노출)를 도려낸다. min_len 미만 조각은 버린다.
+    구간 통째로 버리는 것보다 재료 손실이 적다(목표 길이를 채울 확률↑)."""
+    out = []
+    for a, b in ranges:
+        cur = [(float(a), float(b))]
+        for x, y in bad:
+            nxt = []
+            for s, e in cur:
+                if y <= s or x >= e:          # 안 겹침
+                    nxt.append((s, e)); continue
+                if s < x:                      # 앞쪽 남는 조각
+                    nxt.append((s, min(x, e)))
+                if e > y:                      # 뒤쪽 남는 조각
+                    nxt.append((max(y, s), e))
+            cur = nxt
+        out += [(s, e) for s, e in cur if e - s >= min_len]
+    return out
+
+
+def drop_segments(segs, bad):
+    """노출 구간과 겹치는 전사 라인을 제거 — AI가 그 대사를 아예 못 보게 한다.
+    (프롬프트에 '금지구간' 목록을 넣는 것보다 토큰이 안 들고 확실하다)"""
+    return [s for s in segs if not any(s[0] < y and s[1] > x for x, y in bad)]
 
 
 def guard_keep_visual(keep, video, log=print, step=DEFAULT_STEP, threshold=DEFAULT_THRESHOLD):

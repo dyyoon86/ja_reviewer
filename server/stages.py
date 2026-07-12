@@ -226,6 +226,25 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
             for d in json.loads(tj.read_text(encoding="utf-8"))]
     em.step(1, 3, "메타 조회")
     m = P.fetch_meta(c["meta_api"], code, em.log)
+    # ★ 전체 노출 지도 — LLM에 보내기 전에 만든다. 노출 구간 대사를 아예 빼고 주면
+    #   AI가 처음부터 클린 구간에서만 고른다(사후에 버려서 재료가 마르는 것보다 낫다).
+    nsfw_map = []
+    if c.get("nsfw_full_scan", True):
+        try:
+            from server.core import nsfw
+            with gpu:   # ffmpeg 디코딩 — GPU 레인과 함께 묶어 과부하 방지
+                nsfw_map = nsfw.build_map(
+                    video, step=float(c.get("nsfw_scan_step", 2.0)),
+                    threshold=float(c.get("nsfw_threshold", nsfw.DEFAULT_THRESHOLD)),
+                    cache=str(outdir / f"{code}_노출지도.json"), log=em.log)
+            if nsfw_map:
+                before = len(segs)
+                segs = nsfw.drop_segments(segs, nsfw_map)
+                em.log(f"노출 구간 대사 제외: {before}→{len(segs)}줄 (AI는 클린 구간만 봅니다)")
+        except ImportError:
+            em.log("※ NudeNet 미설치 — 전체 노출 스캔 생략(pip install nudenet)")
+        except Exception as e:
+            em.log(f"※ 전체 노출 스캔 실패({type(e).__name__}: {e}) — keep 단위 가드만 적용됩니다")
     label = "하이라이트형(알파컷식)" if mode == "highlight" else "요약형(짜집기)"
     em.step(2, 3, f"AI {label} 압축·번역·내레이션 ({llm} 추론, 보통 1~3분)")
     pf = P.prompt_highlight if mode == "highlight" else P.prompt_manual
@@ -273,20 +292,33 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
         except Exception as e:
             em.log(f"※ 정밀 재전사 실패({type(e).__name__}: {e}) — 러프 대사자막으로 진행")
     # ★ 비주얼 노출 가드 — 대사 기반 가드가 못 잡는 '대사하며 노출' 케이스를 화면으로 직접 판정.
-    #   keep 구간만 검사하므로 수 초. 모델 없음/실패는 가드 생략(결과는 항상 나온다).
     if c.get("nsfw_guard", True) and keep:
         try:
             from server.core import nsfw
-            keep2 = nsfw.guard_keep_visual(
-                keep, video, em.log,
-                step=float(c.get("nsfw_step", nsfw.DEFAULT_STEP)),
-                threshold=float(c.get("nsfw_threshold", nsfw.DEFAULT_THRESHOLD)))
+            if nsfw_map:
+                # 전체 지도가 있으면 '도려내기' — 구간 통째로 버리지 않아 재료 손실이 적다
+                keep2 = nsfw.subtract(keep, nsfw_map)
+                cut = sum(b - a for a, b in keep) - sum(b - a for a, b in keep2)
+                if cut > 0.5:
+                    em.log(f"노출 지도로 keep 정리: {len(keep)}→{len(keep2)}구간 "
+                           f"(노출 {cut:.0f}초 도려냄)")
+                if not keep2:
+                    raise RuntimeError("고른 구간이 전부 노출이라 남는 게 없습니다 "
+                                       "— 대사 없는 본편형 작품으로 보입니다(수동 모드 권장).")
+            else:
+                # 전체 스캔이 꺼져 있으면 keep 구간만 샘플 검사(구간 단위 제외)
+                keep2 = nsfw.guard_keep_visual(
+                    keep, video, em.log,
+                    step=float(c.get("nsfw_step", nsfw.DEFAULT_STEP)),
+                    threshold=float(c.get("nsfw_threshold", nsfw.DEFAULT_THRESHOLD)))
             if keep2 != keep:
                 keep = keep2
                 res["keep"] = [[a, b] for a, b in keep]
                 # 제외된 구간의 대사/내레이션은 stage_subs의 retime이 keep 기준으로 정리한다
         except ImportError:
             em.log("※ NudeNet 미설치 — 비주얼 노출 가드 생략(pip install nudenet). 대사 가드만 적용됨")
+        except RuntimeError:
+            raise
         except Exception as e:
             em.log(f"※ 비주얼 노출 가드 실패({type(e).__name__}: {e}) — 대사 가드만 적용됨")
     # ★ 대사 부족 조기 중단 — 대사 없는 본편형(신음 위주) 작품은 keep 재료가 없어
