@@ -603,6 +603,43 @@ async def nsfw_scan(req: Request):
     return {"job": jid}
 
 
+@app.post("/intimacy/scan")
+async def intimacy_scan(req: Request):
+    """③단계(수동) — CLIP zero-shot으로 '스킨십(애무·키스)' 장면을 찾아 삭제 후보로
+    준다. NN(노출 부위)·STT(대사) 둘 다 못 잡는 '옷 입은 채 어두운 조명 애무'가
+    표적. 자르지는 않는다: GUI가 삭제 목록에 채우면 사람이 확인 후 자른다.
+    {path, step?, threshold?, min_dur?} → {ranges}"""
+    body = await req.json(); c = load_cfg()
+    path = body["path"]
+    if not Path(path).is_file():
+        raise HTTPException(400, f"영상을 찾을 수 없습니다: {path}")
+    jid = new_job()
+
+    def work():
+        try:
+            from server.core import intimacy
+            total = P.video_duration(path)
+            jstep(jid, 1, 1, f"스킨십 장면 스캔 (CLIP · {total / 60:.0f}분 — 2시간 ≈ 3분)")
+            spans = intimacy.scan_intimacy(
+                path,
+                step=float(body.get("step", c.get("intimacy_step", 2.0))),
+                threshold=float(body.get("threshold", c.get("intimacy_threshold", 0.02))),
+                min_dur=float(body.get("min_dur", c.get("intimacy_min_dur", 14.0))),
+                log=lambda m: jlog(jid, m), duration=total,
+                progress=lambda fr: jprog(jid, fr, "스킨십 스캔"))
+            bad = sum(b - a for a, b in spans)
+            jlog(jid, "※ 자동으로 자르지 않았습니다 — 삭제 구간 목록을 확인·수정한 뒤 "
+                      "'① 선택 구간 잘라내기'를 누르세요.")
+            jdone(jid, {"mode": "intimacy_scan",
+                        "ranges": [[round(a, 2), round(b, 2)] for a, b in spans],
+                        "total": total, "bad_sec": round(bad, 1)})
+        except Exception as e:
+            jerr(jid, e)
+
+    run_bg(work)
+    return {"job": jid}
+
+
 @app.post("/audio/scan")
 async def audio_scan(req: Request):
     """②단계(수동) — 전사(small)로 '내용 대사 없는' 구간(신음/흥분속삭임/무음)을 찾아

@@ -312,6 +312,33 @@ $("#btnAudioScan").onclick = () => {
     .catch(e=>{ log("요청 실패: "+e,"warn"); btn.disabled=false; btn.textContent=old; });
 };
 
+// 3️⃣ 의미 — CLIP zero-shot으로 스킨십(애무·키스) 장면 찾기.
+// 옷 입은 채 어두운 조명 애무는 NN(노출 부위)도 STT(대사)도 못 잡는다 → 장면 의미로 판정.
+$("#btnIntimacyScan").onclick = () => {
+  if(!needVideo()) return;
+  const btn = $("#btnIntimacyScan"); btn.disabled = true;
+  const old = btn.textContent; btn.textContent = "3️⃣ 스캔 중…";
+  log("── 3️⃣ 스킨십·애무 장면 스캔 시작 (CLIP — 장면 의미 판정) ──");
+  fetch("/intimacy/scan",{method:"POST",headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({path:videoPath, threshold:parseFloat($("#intimacyTh").value)})})
+    .then(r=>r.json()).then(j=>{
+      if(!j.job){ log("스캔 시작 실패","warn"); btn.disabled=false; btn.textContent=old; return; }
+      runJob(j.job,
+        (res)=>{
+          btn.disabled=false; btn.textContent=old;
+          const rs = (res && res.ranges) || [];
+          if(!rs.length){ log("✔ 스킨십 장면이 검출되지 않았습니다","ok"); return; }
+          rs.forEach(([a,b])=>excludes.push([a,b]));
+          excludes.sort((x,y)=>x[0]-y[0]);
+          renderEx();
+          log(`✔ 스킨십 ${rs.length}구간(${((res.bad_sec||0)/60).toFixed(1)}분)을 삭제 목록에 추가. `
+             +`목록을 확인·수정한 뒤 잘라내세요.`, "ok");
+        },
+        ()=>{ btn.disabled=false; btn.textContent=old; });
+    })
+    .catch(e=>{ log("요청 실패: "+e,"warn"); btn.disabled=false; btn.textContent=old; });
+};
+
 $("#btnTrim").onclick = () => {
   if(!needVideo()) return;
   if(!excludes.length){ log("삭제할 구간을 하나 이상 추가하세요","warn"); return; }

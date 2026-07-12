@@ -194,10 +194,21 @@
               </select></span>
             <span class="muted">2시간 ≈ 1~2분</span>
           </div>
+          <div class="formrow" style="margin-top:6px">
+            <button id="btnIntimacyScan" title="CLIP이 장면의 '의미'를 봅니다 — 옷을 입은 채 어두운 조명에서 진행되는 애무·키스처럼, 노출 부위(1️⃣)도 대사(2️⃣)도 못 잡는 장면이 표적입니다. 최초 1회 모델 다운로드(~150MB)">3️⃣ 의미 — 스킨십·애무 장면</button>
+            <span class="fld"><span class="lbl">민감도</span>
+              <select id="intimacyTh" title="낮을수록 많이 잡습니다" style="width:110px">
+                <option value="0.015">민감 0.015</option>
+                <option value="0.02" selected>표준 0.02</option>
+                <option value="0.03">둔감 0.03</option>
+              </select></span>
+            <span class="muted">2시간 ≈ 3분</span>
+          </div>
           <div class="hint" style="margin:7px 0 0">
-            <b>화면(1️⃣)</b>은 노출 부위를 보고, <b>소리(2️⃣)</b>는 대사 유무를 봅니다.
-            NN만 쓰면 <u>노출 있는 옷으로 대화하는 장면</u>도 정사로 오판하므로(실측: 식사 대화 39분이 잘림),
-            <b>둘 다 돌린 뒤 목록을 보고 판단</b>하는 것을 권합니다. 2️⃣는 <b>대사가 있는 구간은 절대 자르지 않습니다.</b>
+            <b>화면(1️⃣)</b>은 노출 부위, <b>소리(2️⃣)</b>는 대사 유무, <b>의미(3️⃣)</b>는 장면 자체(키스·애무 vs 대화)를 봅니다.
+            NN만 쓰면 <u>노출 있는 옷으로 대화하는 장면</u>도 정사로 오판하고(실측: 식사 대화 39분),
+            1️⃣·2️⃣만 쓰면 <u>옷 입은 채 속삭이는 애무씬</u>이 통과합니다(실측: 89초).
+            <b>셋 다 돌린 뒤 목록을 보고 판단</b>하는 것을 권합니다.
           </div>
         </div>
         <ul class="ex" id="exList"></ul>
