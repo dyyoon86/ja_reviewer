@@ -15,8 +15,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-# 유튜브에 나가면 안 되는 노출 클래스(NudeNet 3.x 라벨).
-# 가슴·성기·항문·남성기 노출만 차단한다. BELLY/FEET/ARMPIT 등 일상 노출은 무시.
+# ── 노출 판정 규칙 ───────────────────────────────────────────────────────────
+# 1) 직접 노출 — 이게 잡히면 그 프레임은 무조건 노출.
 NSFW_CLASSES = {
     "FEMALE_BREAST_EXPOSED",
     "FEMALE_GENITALIA_EXPOSED",
@@ -24,6 +24,16 @@ NSFW_CLASSES = {
     "ANUS_EXPOSED",
     "BUTTOCKS_EXPOSED",
 }
+# 2) ★ 정사신 판정 — NudeNet은 '부위 노출'만 보고 '정사 행위'는 모른다. 각도·체위·이불로
+#    부위가 가려지면 EXPOSED가 안 뜨고 COVERED로 분류돼 통과해버린다(실측: 정사신이 남은
+#    클린본에서 BREAST_COVERED 272프레임 vs EXPOSED 2프레임).
+#    그런데 BREAST_COVERED는 '옷 입은 대화 장면'에서도 100% 뜨므로 신호로 못 쓴다.
+#    쓸 수 있는 신호는 **살 노출의 지속 비율**이다 — 옷을 벗었다는 뜻이라, 실측에서
+#    정사 구간만 45~100%로 치솟고 대화 구간은 0%였다. 이걸 구간(윈도우) 단위로 판정한다.
+SKIN_CLASSES = {"ARMPITS_EXPOSED", "BELLY_EXPOSED"}
+SKIN_WINDOW = 20.0    # 판정 윈도우(초)
+SKIN_RATIO = 0.30     # 윈도우 안 살노출 프레임 비율이 이 이상이면 정사 구간으로 본다
+
 DEFAULT_THRESHOLD = 0.35   # 실측: 본편 노출 0.42~0.48 / 인터뷰 구간 검출 0 — 안전하게 낮게 잡음
 DEFAULT_STEP = 2.0         # 프레임 샘플 간격(초)
 
@@ -39,8 +49,9 @@ def _detector():
 
 
 def scan_video(video, step=0.25, threshold=DEFAULT_THRESHOLD, log=print, progress=None,
-               duration=None):
+               duration=None, want_skin=False):
     """영상 **전 구간**을 step 간격으로 전수 검사. 반환: [(t, class, score), ...].
+    want_skin=True면 (노출프레임, 살노출시각들, 총프레임수) — 정사신 윈도우 판정용.
     ffmpeg 1회 호출(fps 필터, 순차 디코딩) + detect_batch — 71초 완성본 0.25s 간격이 5초.
 
     progress(frac 0~1) 콜백을 주면 진행률을 보고한다 — 2시간 영상 스캔은 수 분이 걸려서
@@ -48,7 +59,7 @@ def scan_video(video, step=0.25, threshold=DEFAULT_THRESHOLD, log=print, progres
     프레임 추출을 0~55%, NN 판정을 55~100%로 나눠 보고한다."""
     import glob
     det = _detector()
-    found = []
+    found, skins, n_frames = [], [], 0
     with tempfile.TemporaryDirectory() as td:
         # ffmpeg -progress 로 추출 진행률을 실시간으로 읽는다(out_time_ms / 전체길이)
         p = subprocess.Popen(
@@ -71,7 +82,8 @@ def scan_video(video, step=0.25, threshold=DEFAULT_THRESHOLD, log=print, progres
         p.wait(timeout=3600)
         files = sorted(glob.glob(os.path.join(td, "*.jpg")))
         if not files:
-            return found
+            return ([], [], 0) if want_skin else []
+        n_frames = len(files)
         log(f"   프레임 {len(files)}장 추출 완료 → NN 판정 시작")
         # 청크로 나눠 판정 — 진행률을 흘리기 위해(한 번에 다 넣으면 몇 분간 깜깜)
         CHUNK = 200
@@ -83,15 +95,21 @@ def scan_video(video, step=0.25, threshold=DEFAULT_THRESHOLD, log=print, progres
                 batch = [det.detect(f) for f in part]
             for k, res in enumerate(batch):
                 t = (i + k) * step
+                skin = False
                 for x in (res or []):
-                    if x.get("class") in NSFW_CLASSES and float(x.get("score", 0)) >= threshold:
-                        found.append((round(t, 2), x["class"], round(float(x["score"]), 2)))
+                    cls, sc = x.get("class"), float(x.get("score", 0))
+                    if cls in NSFW_CLASSES and sc >= threshold:
+                        found.append((round(t, 2), cls, round(sc, 2)))
+                    elif cls in SKIN_CLASSES and sc >= 0.30:
+                        skin = True
+                if skin:
+                    skins.append(round(t, 2))
             if progress:
                 progress(0.55 + 0.45 * min(1.0, (i + len(part)) / len(files)))
             log(f"   NN 판정 {min(i + CHUNK, len(files))}/{len(files)}장 (노출 {len(found)}프레임)")
     if progress:
         progress(1.0)
-    return found
+    return (found, skins, n_frames) if want_skin else found
 
 
 def check_final(video, step=0.25, threshold=DEFAULT_THRESHOLD, log=print):
@@ -176,10 +194,30 @@ def build_map(video, step=2.0, threshold=DEFAULT_THRESHOLD, pad=1.5, cache=None,
         except Exception:
             pass
     log(f"전체 노출 스캔(NudeNet, {step}s 간격) — 원본 전 구간. 2시간이면 3~4분…")
-    hits = scan_video(video, step, threshold, log, progress=progress, duration=duration)
+    hits, skins, _n = scan_video(video, step, threshold, log, progress=progress,
+                                 duration=duration, want_skin=True)
+    raw = [(max(0.0, t - pad), t + pad) for t, _c, _s in hits]
+
+    # ★ 정사신 윈도우 판정 — 살 노출(겨드랑이·배)이 지속되는 구간은 '옷을 벗은 상태'다.
+    #   부위가 가려져 EXPOSED가 안 떠도 여기서 잡힌다(NudeNet 단독의 최대 구멍).
+    if skins:
+        skinset = sorted(skins)
+        win = max(SKIN_WINDOW, step * 4)
+        per_win = max(1, int(win / step))          # 윈도우 안 최대 프레임 수
+        need = max(2, int(per_win * SKIN_RATIO))   # 정사로 볼 최소 살노출 프레임 수
+        i = 0
+        for w0 in range(0, int((duration or (skinset[-1] + win)) ) , int(win)):
+            w1 = w0 + win
+            cnt = sum(1 for t in skinset if w0 <= t < w1)
+            if cnt >= need:
+                raw.append((max(0.0, w0 - pad), w1 + pad))
+                i += 1
+        if i:
+            log(f"   정사신 판정(살 노출 지속): {i}개 윈도우 추가 검출 "
+                f"— 부위가 가려져 EXPOSED가 안 뜬 구간")
+
     spans = []
-    for t, _cls, _sc in hits:
-        a, b = max(0.0, t - pad), t + pad
+    for a, b in sorted(raw):
         # merge_gap 이내로 떨어진 노출은 하나로 합친다 — 사이의 짧은 틈을 남겨봐야
         # 컷이 파편화될 뿐이고, 그 틈도 사실상 같은 장면이다.
         if spans and a - spans[-1][1] <= merge_gap:
@@ -187,7 +225,8 @@ def build_map(video, step=2.0, threshold=DEFAULT_THRESHOLD, pad=1.5, cache=None,
         else:
             spans.append((a, b))
     total = sum(b - a for a, b in spans)
-    log(f"노출 지도: {len(spans)}구간 / 합계 {total / 60:.1f}분 (검출 {len(hits)}프레임)")
+    log(f"노출 지도: {len(spans)}구간 / 합계 {total / 60:.1f}분 "
+        f"(직접노출 {len(hits)}프레임 · 살노출 {len(skins)}프레임)")
     if cache:
         try:
             Path(cache).write_text(json.dumps([[round(a, 2), round(b, 2)] for a, b in spans]),
