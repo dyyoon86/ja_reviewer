@@ -559,6 +559,48 @@ async def pick_load(req: Request):
 
 
 # ─── ① 잘라내기 (품번 불필요) — 선택 구간 삭제 후 트림 영상 생성 ─────────────
+@app.post("/nsfw/scan")
+async def nsfw_scan(req: Request):
+    """수동 모드용 — 영상 전체를 NN(NudeNet)으로 훑어 노출 구간을 찾아 돌려준다.
+    자동으로 자르지 않는다: GUI가 이 구간들을 '삭제 구간' 목록에 채워 넣으면
+    사람이 보고 고친 뒤 기존 '① 선택 구간 잘라내기'로 자른다(검토 가능한 자동화).
+    {path, step?, threshold?, pad?, merge_gap?} → 잡 결과 {ranges:[[a,b],...]}"""
+    body = await req.json(); c = load_cfg()
+    path = body["path"]
+    if not Path(path).is_file():
+        raise HTTPException(400, f"영상을 찾을 수 없습니다: {path}")
+    jid = new_job()
+
+    def work():
+        try:
+            from server.core import nsfw
+            total = P.video_duration(path)
+            jstep(jid, 1, 1, f"노출 구간 스캔 (NudeNet · {total / 60:.0f}분 — 수 분 걸립니다)")
+            spans = nsfw.build_map(
+                path,
+                step=float(body.get("step", c.get("nsfw_scan_step", 1.0))),
+                threshold=float(body.get("threshold", c.get("nsfw_clean_threshold", 0.22))),
+                pad=float(body.get("pad", c.get("nsfw_pad", 3.0))),
+                merge_gap=float(body.get("merge_gap", c.get("nsfw_merge_gap", 12.0))),
+                cache=None, log=lambda m: jlog(jid, m), duration=total,
+                progress=lambda fr: jprog(jid, fr, "노출 스캔"))
+            bad_sec = sum(b - a for a, b in spans)
+            jlog(jid, f"노출 {len(spans)}구간 / {bad_sec / 60:.1f}분 검출 "
+                      f"(원본 {total / 60:.0f}분의 {bad_sec / total * 100:.0f}%)")
+            jlog(jid, "※ 자동으로 자르지 않았습니다 — 삭제 구간 목록을 확인·수정한 뒤 "
+                      "'① 선택 구간 잘라내기'를 누르세요.")
+            jdone(jid, {"mode": "nsfw_scan",
+                        "ranges": [[round(a, 2), round(b, 2)] for a, b in spans],
+                        "total": total, "bad_sec": round(bad_sec, 1)})
+        except ImportError:
+            jerr(jid, RuntimeError("NudeNet이 설치되지 않았습니다 (pip install nudenet)"))
+        except Exception as e:
+            jerr(jid, e)
+
+    run_bg(work)
+    return {"job": jid}
+
+
 @app.post("/trim")
 async def trim(req: Request):
     body = await req.json(); c = load_cfg()

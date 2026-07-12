@@ -236,6 +236,35 @@ function runTrimJob(job){
   es.onerror = () => { es.close(); };
 }
 
+// 🛡 NN 노출 자동 찾기 — 스캔만 하고 '삭제 구간' 목록에 채운다(자르지는 않는다).
+// 사람이 목록을 보고 고친 뒤 기존 '① 선택 구간 잘라내기'로 자르는 흐름 = 검토 가능한 자동화.
+$("#btnNsfwScan").onclick = () => {
+  if(!needVideo()) return;
+  const thr = parseFloat($("#nsfwThr").value);
+  const btn = $("#btnNsfwScan"); btn.disabled = true;
+  const old = btn.textContent; btn.textContent = "🛡 스캔 중…";
+  log("── 🛡 NN 노출 구간 스캔 시작 (영상이 길면 수 분 걸립니다) ──");
+  fetch("/nsfw/scan",{method:"POST",headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({path:videoPath, threshold:thr})})
+    .then(r=>r.json()).then(j=>{
+      if(!j.job){ log("스캔 시작 실패","warn"); btn.disabled=false; btn.textContent=old; return; }
+      runJob(j.job,
+        (res)=>{
+          btn.disabled=false; btn.textContent=old;
+          const rs = (res && res.ranges) || [];
+          if(!rs.length){ log("✔ 노출 구간이 검출되지 않았습니다 — 자를 게 없습니다","ok"); return; }
+          rs.forEach(([a,b])=>excludes.push([a,b]));
+          excludes.sort((x,y)=>x[0]-y[0]);
+          renderEx();
+          const mins = (res.bad_sec/60).toFixed(1);
+          log(`✔ 노출 ${rs.length}구간(${mins}분)을 삭제 목록에 추가했습니다. `
+             +`확인·수정 후 '① 선택 구간 잘라내기'를 누르세요.`, "ok");
+        },
+        ()=>{ btn.disabled=false; btn.textContent=old; });
+    })
+    .catch(e=>{ log("요청 실패: "+e,"warn"); btn.disabled=false; btn.textContent=old; });
+};
+
 $("#btnTrim").onclick = () => {
   if(!needVideo()) return;
   if(!excludes.length){ log("삭제할 구간을 하나 이상 추가하세요","warn"); return; }

@@ -168,6 +168,17 @@
             placeholder="텍스트로 구간 입력 (여러 줄 가능)&#10;12:30-18:00&#10;45:00-52:00" style="flex:1"></textarea>
           <button id="btnAddText">추가</button>
         </div>
+        <div class="formrow" style="margin:8px 0">
+          <button id="btnNsfwScan" title="영상 전체를 NudeNet으로 훑어 노출 구간을 찾아 아래 삭제 목록에 자동으로 채웁니다. 자동으로 자르지는 않으니 확인·수정 후 잘라내세요">🛡 NN으로 노출 구간 자동 찾기</button>
+          <span class="fld"><span class="lbl">민감도</span>
+            <select id="nsfwThr" title="낮을수록 공격적으로 잡습니다(오검출도 늘어남). 기본 0.22" style="width:140px">
+              <option value="0.15">아주 강하게 (0.15)</option>
+              <option value="0.22" selected>강하게 (0.22·권장)</option>
+              <option value="0.35">보통 (0.35)</option>
+              <option value="0.5">약하게 (0.5)</option>
+            </select></span>
+          <span class="muted">2시간 영상 ≈ 4분 소요</span>
+        </div>
         <ul class="ex" id="exList"></ul>
         <div class="actions">
           <button id="btnClear">전체삭제</button>
