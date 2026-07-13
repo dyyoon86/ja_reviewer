@@ -37,8 +37,12 @@
         <button id="btnWatchDir">폴더 선택</button>
       </div>
       <div class="hint" id="watchStat" style="display:none"></div>
-      <div class="hint">영상이 들어오면 <b>전사 → AI 구간선정 → 노출가드 → 컷 → 자막 → 배너 → TTS → 번인</b>까지 전부 자동으로 돌고,
-        완성본은 <code>{출력폴더}\_완성\</code> 에 모입니다. 2시간짜리 한 편에 약 10~20분.</div>
+      <div class="hint">영상이 들어오면 수동 모드와 <b>똑같은 순서</b>로 전부 자동으로 돕니다:<br>
+        <b>⓪ 3중 필터 클린</b>(2️⃣소리 → 3️⃣의미 → 1️⃣화면, 순차로 잘라냄) →
+        <b>① 전사 → ② AI</b>(1분 내외 구간선정 + 내레이션) →
+        <b>③ 자막 → ④ 배너 → ⑤ TTS → ⑥ 한 번에 굽기</b> → 자체 검사.<br>
+        완성본은 <code>{출력폴더}\_완성\</code>, 노출이 검출되면 <code>_검수필요\</code> 로 격리됩니다.
+        2시간짜리 한 편에 약 10~20분.</div>
     </div>
   </div>
 
@@ -164,7 +168,7 @@
       <!-- ── 수동 ── -->
       <div class="pane active" id="pane-manual">
         <details class="acc" open>
-        <summary class="sec"><span class="num">1</span> 구간 잘라내기 <span class="muted">· 품번 불필요</span></summary>
+        <summary class="sec"><span class="num">1</span> 구간 잘라내기 <span class="muted">· 품번 불필요</span><span class="sec-badge" id="secTrim"></span></summary>
         <div class="acc-body">
         <div class="formrow" style="align-items:flex-start;margin-top:10px">
           <textarea id="exText" class="exText" rows="3"
@@ -229,7 +233,7 @@
         </details>
 
         <details class="acc" open>
-        <summary class="sec"><span class="num">2</span> 단계별 리뷰 생성 <span class="muted">· 품번 필요 · 단계별 저장/재실행</span></summary>
+        <summary class="sec"><span class="num">2</span> 단계별 리뷰 생성 <span class="muted">· 품번 필요 · 단계별 저장/재실행</span><span class="sec-badge" id="secReview"></span></summary>
         <div class="acc-body">
         <div class="formrow" style="margin-top:10px">
           <span class="fld"><span class="lbl">품번</span><input id="code" placeholder="SNOS-183" style="width:120px"></span>
@@ -341,7 +345,7 @@
     <!-- ── TTS ── -->
     <div class="card manual-only">
       <details class="acc" open>
-      <summary class="sec"><span class="num">3</span> 내레이션 음성 <span class="muted">· voicebox TTS</span></summary>
+      <summary class="sec"><span class="num">3</span> 내레이션 음성 <span class="muted">· voicebox TTS</span><span class="sec-badge" id="secTts"></span></summary>
       <div class="acc-body">
       <div class="hint" style="margin:6px 0 12px">리뷰 후 <code>품번_내레이션.srt</code>를 한국어 음성으로 → <code>품번_내레이션.wav</code> (Qwen3-TTS 한국어 보이스 권장).</div>
       <div class="formrow">
@@ -389,7 +393,7 @@
     <!-- ── 자막 입히기(하드섭) ── -->
     <div class="card manual-only">
       <details class="acc" open>
-      <summary class="sec"><span class="num">4</span> 자막 입히기 <span class="muted">· 영상에 박기(하드섭)</span></summary>
+      <summary class="sec"><span class="num">4</span> 자막 입히기 <span class="muted">· 영상에 박기(하드섭)</span><span class="sec-badge" id="secBurn"></span></summary>
       <div class="acc-body">
       <div class="formrow" style="margin-top:10px">
         <span class="fld grow"><span class="lbl">템플릿</span><select id="subTpl"></select></span>
@@ -586,7 +590,7 @@
 
     <div class="card manual-only">
       <details class="acc" open>
-      <summary class="sec"><span class="num">5</span> 인포배너 <span class="muted">· 품번만 넣으면 인포카드+워터마크 자동 생성·오버레이</span></summary>
+      <summary class="sec"><span class="num">5</span> 인포배너 <span class="muted">· 품번만 넣으면 인포카드+워터마크 자동 생성·오버레이</span><span class="sec-badge" id="secBanner"></span></summary>
       <div class="acc-body">
       <div class="formrow" style="margin-top:10px">
         <span class="fld"><span class="lbl">품번</span><input id="icCode" placeholder="예: SNOS-152" style="width:150px"></span>

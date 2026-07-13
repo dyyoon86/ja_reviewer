@@ -218,6 +218,7 @@ function appendTrimLog(msg){
 }
 function showTrimResult(res){
   trimResultPath = res.video; trimResultDur = res.duration || 0;
+  refreshSteps();   // ① 섹션 배지 '✓ 잘라냄'
   $("#trimTitle").textContent = "✅ 잘라낸 결과 미리보기";
   $("#trimProgress").style.display = "none";
   $("#trimResult").style.display = "block";
@@ -483,16 +484,53 @@ function setBadge(id, state){  // state: done|run|err|idle
   b.textContent=sym[state]||"—";
   b.className="st-badge"+(state&&state!=="idle"?" "+state:"");
 }
+// 섹션 헤더 처리여부 배지 — 접힌 상태에서도 '이 단계 결과물이 나왔는지' 보이게.
+// state=done|part|run|err|idle, text=배지에 쓸 짧은 말(비면 배지 숨김)
+function setSecBadge(id, state, text, title){
+  const b=$("#"+id); if(!b) return;
+  b.textContent = text || "";
+  b.className = "sec-badge" + (state && state!=="idle" ? " "+state : "");
+  b.title = title || "";
+}
+function clearSecBadges(){
+  ["secTrim","secReview","secTts","secBurn","secBanner"].forEach(id=>setSecBadge(id,"idle",""));
+}
+
 let trimAvail = null;
 function refreshSteps(code){
   code=(code||$("#code").value||"").trim();
   if(!code){ setBadge("badgeTranscribe","idle"); setBadge("badgeAi","idle"); setBadge("badgeSubs","idle");
+    clearSecBadges();
     $("#btnUseTrim").style.display="none"; trimAvail=null; return; }
   fetch("/state/"+encodeURIComponent(code)).then(r=>r.json()).then(s=>{
     const st=s.steps||{};
     setBadge("badgeTranscribe", st.transcribe?"done":"idle");
     setBadge("badgeAi", st.ai?"done":"idle");
     setBadge("badgeSubs", st.subs?"done":"idle");
+
+    // ── 섹션별 처리여부 ─────────────────────────────────────────────
+    // ① 잘라내기: 이 품번 폴더에 _trim.mp4가 있으면 완료
+    if(s.trim_exists) setSecBadge("secTrim","done",`✓ 잘라냄 ${hhmmss(s.trim_sec||0)}`,
+                                  s.trim_name||"");
+    else setSecBadge("secTrim","idle","");
+    // ② 리뷰 생성: 전사·AI·자막 3단계 중 몇 개 끝났나
+    const n=[st.transcribe,st.ai,st.subs].filter(Boolean).length;
+    if(n===3) setSecBadge("secReview","done",
+                `✓ 완료${s.final_sec?" "+hhmmss(s.final_sec):""}${s.stars?" ★"+s.stars:""}`,
+                s.summary||"");
+    else if(n) setSecBadge("secReview","part",`${n}/3 진행`,"전사·AI·자막 중 남은 단계가 있습니다");
+    else setSecBadge("secReview","idle","");
+    // ③ TTS / ⑤ 배너
+    setSecBadge("secTts", st.tts?"done":"idle", st.tts?"✓ 음성 생성됨":"");
+    setSecBadge("secBanner", st.banner?"done":"idle", st.banner?"✓ 배너 생성됨":"");
+    // ④ 굽기 — 자체 검사(self-eval) 결과까지 배지에 싣는다.
+    //    완성본이 나왔어도 팝·정지·무음·자막 결함이 있으면 '⚠ 결함 N건'으로 알린다.
+    if(!st.burn) setSecBadge("secBurn","idle","");
+    else if(s.eval_issues>0)
+      setSecBadge("secBurn","part",`⚠ 완성 · 결함 ${s.eval_issues}건`,
+                  s.eval_detail||"자체 검사에서 결함이 나왔습니다");
+    else setSecBadge("secBurn","done",
+                     s.eval_ok?"✓ 완성 · 검사통과":"✓ 완성본 있음", s.subbed||"");
     // 이전에 잘라낸 결과가 있고, 지금 연 영상이 그 trim 자체가 아니면 → 사용 버튼 노출
     // "이전 결과" = 이 품번 폴더에서 가장 최근에 만들어진 _trim.mp4 (⚡ 직후엔
     // 지금 보고 있는 파일 그 자체 → 숨긴다). 어떤 파일·언제 것인지 라벨에 박는다.
@@ -871,6 +909,7 @@ function runTts(){
       (r.voiced?`<div>입힌 영상: ${r.voiced}</div>`:'');
     log("✔ 내레이션 음성 완료","ok");
     collapseAcc("#btnTts");   // ③ 완료 → 접기
+    refreshSteps(code);       // 섹션 배지 '✓ 음성 생성됨'
   }));
 }
 $("#btnTts").onclick = runTts;
@@ -925,6 +964,7 @@ $("#btnBurn").onclick=()=>{
     $("#result").innerHTML=`<div class="ok">✔ 자막${r.banner?"·배너":""} 입힌 영상</div><div>${r.subbed}</div>`;
     log("✔ 자막 영상 완료"+(r.banner?" (배너 포함)":""),"ok");
     collapseAcc("#btnBurn");   // ④ 완료 → 접기
+    refreshSteps(code);        // 섹션 배지 '✓ 완성본' + 자체 검사 결과
   }));
 };
 
@@ -989,6 +1029,7 @@ $("#btnInfocard").onclick=()=>{
       log(r.overlay?"✔ 완료 — 투명 오버레이 .mov를 편집기 상위 트랙에 얹으세요(원본 재인코딩 없음)"
                    :"✔ 완료 — PNG를 편집 타임라인에 얹으세요(재인코딩 없음)","ok");
       collapseAcc("#btnInfocard");   // ⑤ 완료 → 접기
+      refreshSteps(code);            // 섹션 배지 '✓ 배너 생성됨'
     });
   }).catch(e=>log("✖ 오류: "+e,"warn"));
 };

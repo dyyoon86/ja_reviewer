@@ -765,6 +765,20 @@ def state(code: str):
     final = outdir / f"{code}_final.mp4"
     if final.is_file():
         st["final"] = str(final); st["final_sec"] = P.video_duration(final)
+    # 완성본(굽기 결과) + 자체 검사 리포트 — GUI 섹션 배지가 '결함 N건'까지 보여준다
+    subbed = outdir / f"{code}_final_subbed.mp4"
+    if subbed.is_file():
+        st["subbed"] = str(subbed)
+    ev = outdir / f"{code}_검사.json"
+    if ev.is_file():
+        try:
+            data = json.loads(ev.read_text(encoding="utf-8"))
+            st["eval_ok"] = bool(data.get("ok"))
+            st["eval_issues"] = len(data.get("issues") or [])
+            st["eval_detail"] = "; ".join(i.get("detail", "")
+                                          for i in (data.get("issues") or [])[:3])
+        except (OSError, ValueError):
+            pass
     # 이전에 잘라낸(_trim.mp4) 결과가 있으면 알려줘서 바로 쓰게 함 (가장 최근 것)
     trims = sorted(outdir.glob("*_trim.mp4"), key=lambda p: p.stat().st_mtime)
     if trims:

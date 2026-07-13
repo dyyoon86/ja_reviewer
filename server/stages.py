@@ -156,16 +156,92 @@ class NullLock:
 
 
 # ─── 스테이지 코어 ───────────────────────────────────────────────────────────
-def stage_clean(c, code, video, em, gpu=None):
-    """⓪ 노출 제거 — 원본을 NN(NudeNet)으로 전수 스캔해 노출 구간을 **물리적으로 잘라낸**
-    클린본 {code}_클린.mp4 을 만든다. 이후 모든 단계(전사·AI·컷·자막·번인)는 이 클린본만
-    본다 — 노출이 뒤 단계로 새어나갈 여지 자체가 사라진다.
+def _chain_clean(c, code, video, em, gpu, outdir, clean):
+    """⓪-A **3중 필터 순차 클린** — 수동 모드의 '⚡ 순차 자동 클린'과 같은 흐름을 자동에서도.
 
-    ★ 반복 제거(수렴): NudeNet은 프레임 단위라 같은 장면에서도 점수가 요동친다
-      (한 프레임 0.45, 옆 프레임 0.30). 그래서 1패스로는 절대 0이 안 된다 — 실측에서
-      171분 원본 1패스 후에도 18~345프레임이 남았다. 검출이 0이 되거나 더 이상 줄지
-      않을 때까지 스캔→컷을 반복한다.
-    부수 효과: 전사·AI가 다룰 길이도 줄어 전체가 더 빨라진다."""
+    순서 2️⃣소리 → 3️⃣의미 → 1️⃣화면 (실측 근거, 123분 원본):
+      분당 스캔 비용이 STT 0.69s < CLIP 1.06s < NN 1.44s라 **제일 싼 스캔에게 제일 긴
+      영상을 맡기고**, 제일 비싼 NN은 마지막에 남은 몇 분만 보게 한다(총 6:32 → 2:03).
+    각 단계: 스캔 → 검출되면 그 자리에서 컷 → 잘린 영상으로 다음 스캔.
+    NN 단독(구 방식)이 못 잡던 '옷 입은 채 어두운 조명 애무'를 3️⃣ CLIP이 잡고,
+    NN이 정사로 오판하던 '노출 의상 대화'를 2️⃣ 소리가 되살린다."""
+    from server.core import moan, nsfw, intimacy
+    src = str(video)
+    orig_total = P.video_duration(video) or 0.0
+    n_all = 0
+
+    stages = [
+        ("2️⃣ 소리(신음·정사)", lambda v, t: moan.scan_audio(
+            v, model_name=c.get("scan_model", "small"), log=em.log,
+            progress=lambda fr: em.prog(fr, "소리 스캔"),
+            pad=float(c.get("cut_pad_moan", 5.0)))[0]),
+        ("3️⃣ 의미(스킨십·애무)", lambda v, t: intimacy.scan_intimacy(
+            v, step=float(c.get("intimacy_step", 2.0)),
+            threshold=float(c.get("intimacy_threshold", 0.02)),
+            min_dur=float(c.get("intimacy_min_dur", 14.0)),
+            log=em.log, duration=t,
+            progress=lambda fr: em.prog(fr, "의미 스캔"))),
+        ("1️⃣ 화면(NN 노출)", lambda v, t: nsfw.build_map(
+            v, step=float(c.get("nsfw_scan_step", 1.0)),
+            threshold=float(c.get("nsfw_clean_threshold", 0.22)),
+            pad=float(c.get("nsfw_pad", 3.0)),
+            merge_gap=float(c.get("nsfw_merge_gap", 12.0)),
+            cache=None, log=em.log, duration=t,
+            progress=lambda fr: em.prog(fr, "화면 스캔"))),
+    ]
+    tmp_prev = None
+    for i, (label, scan) in enumerate(stages, 1):
+        total = P.video_duration(src) or 0.0
+        em.step(i, len(stages), f"⓪ {label} — {total / 60:.0f}분")
+        with gpu:
+            bad = scan(src, total)
+        if not bad:
+            em.log(f"  {label}: 검출 0 — 자를 것 없음")
+            continue
+        keep = nsfw.complement(bad, total, min_len=float(c.get("nsfw_min_clip", 3.0)))
+        if not keep:
+            raise RuntimeError(f"{label}에서 전부 제거돼 남는 영상이 없습니다 "
+                               f"— 대사 없는 본편형으로 보입니다(자동화 부적합).")
+        cut_sec = total - sum(b - a for a, b in keep)
+        em.log(f"  {label}: {len(bad)}구간 {cut_sec / 60:.1f}분 제거 "
+               f"→ {sum(b - a for a, b in keep) / 60:.1f}분 유지")
+        dst = outdir / (f"{code}_클린.mp4" if i == len(stages) else f"{code}_클린_s{i}.mp4")
+        with gpu:
+            P.cut_video(src, keep, str(dst), em.log, lambda fr: em.prog(fr, f"{label} 컷"))
+        if tmp_prev:
+            try:
+                Path(tmp_prev).unlink()
+            except OSError:
+                pass
+        tmp_prev = str(dst) if dst.name != f"{code}_클린.mp4" else None
+        src = str(dst)
+        n_all += len(bad)
+
+    if src == str(video):          # 세 스캔 모두 검출 0 — 원본 그대로
+        em.log("3중 필터 검출 0 — 원본을 그대로 씁니다(컷 생략)")
+        save_state(outdir, code, video=str(video), source_video=str(video), cleaned=True)
+        return {"step": "clean", "code": code, "clean": str(video), "cut": False}
+    if src != str(clean):
+        shutil.move(src, clean)
+    final_sec = P.video_duration(clean) or 0.0
+    save_state(outdir, code, video=str(clean), source_video=str(video), cleaned=True)
+    worklog(outdir, code, f"⓪ 3중 필터 클린 — {n_all}구간 제거, "
+                          f"{orig_total / 60:.0f}분 → {final_sec / 60:.1f}분")
+    em.file("클린본(3중 필터)", clean)
+    em.log(f"✔ 클린본 확정: {final_sec / 60:.1f}분 "
+           f"(원본 {orig_total / 60:.0f}분에서 {(orig_total - final_sec) / 60:.1f}분 제거)")
+    return {"step": "clean", "code": code, "clean": str(clean),
+            "removed_sec": round(orig_total - final_sec, 1), "kept_sec": round(final_sec, 1)}
+
+
+def stage_clean(c, code, video, em, gpu=None):
+    """⓪ 노출 제거 — 부적절 구간을 **물리적으로 잘라낸** 클린본 {code}_클린.mp4 을 만든다.
+    이후 모든 단계(전사·AI·컷·자막·번인)는 이 클린본만 본다 — 노출이 뒤 단계로 새어나갈
+    여지 자체가 사라진다. 부수 효과: 전사·AI가 다룰 길이가 줄어 전체가 빨라지고
+    LLM 호출도 준다(map-reduce 생략).
+
+    기본은 **3중 필터 순차 클린**(수동 ⚡와 동일: 2️⃣소리 → 3️⃣의미 → 1️⃣화면).
+    config `clean_mode="nn"`으로 두면 옛 NN 반복 방식으로 되돌아간다."""
     from server.core import nsfw
     gpu = gpu or NullLock()
     outdir = work_dir(c, code)
@@ -175,6 +251,11 @@ def stage_clean(c, code, video, em, gpu=None):
         save_state(outdir, code, video=str(clean), source_video=str(video), cleaned=True)
         return {"step": "clean", "code": code, "clean": str(clean), "reused": True}
 
+    if c.get("clean_mode", "chain") == "chain":
+        return _chain_clean(c, code, video, em, gpu, outdir, clean)
+
+    # ── (구) NN 반복 방식 — NudeNet 점수가 임계 근처에서 요동쳐 1패스로는 0이 안 된다.
+    #    검출이 0이 되거나 더 줄지 않을 때까지 스캔→컷을 반복.
     step = float(c.get("nsfw_scan_step", 1.0))
     thr = float(c.get("nsfw_clean_threshold", 0.22))   # 클린 단계는 공격적으로(경계선 포착)
     pad = float(c.get("nsfw_pad", 3.0))

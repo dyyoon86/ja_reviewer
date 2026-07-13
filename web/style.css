@@ -219,6 +219,14 @@ ul.steps li button{min-width:62px;margin-left:auto}
 .st-badge.done{background:rgba(34,197,94,.18);color:var(--ok)}
 .st-badge.run{background:rgba(59,130,246,.22);color:#8ab4ff}
 .st-badge.err{background:rgba(226,59,90,.22);color:var(--accent)}
+/* 섹션 헤더 처리여부 배지 — '이 단계 결과물이 있나'를 접힌 상태에서도 보여준다 */
+.sec-badge{margin-left:auto;flex:0 0 auto;padding:2px 9px;border-radius:999px;
+  font-size:11.5px;font-weight:700;white-space:nowrap;background:#2a2a33;color:var(--dim)}
+.sec-badge:empty{display:none}
+.sec-badge.done{background:rgba(34,197,94,.16);color:var(--ok)}
+.sec-badge.part{background:rgba(232,181,77,.16);color:#e8b54d}
+.sec-badge.run{background:rgba(59,130,246,.22);color:#8ab4ff}
+.sec-badge.err{background:rgba(226,59,90,.20);color:var(--accent)}
 /* 진행률 미수신 시(인코딩 시작 전) 살짝 흐르는 느낌 */
 .prog-fill.pulse{background:linear-gradient(90deg,var(--blue),#7aa7ff,var(--blue));
   background-size:200% 100%;animation:progpulse 1.1s linear infinite}
