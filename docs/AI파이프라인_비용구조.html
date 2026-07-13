@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>② AI 파이프라인 · 비용 구조</title>
+<style>
+  :root{--bg:#12141a;--card:#1a1e27;--line:#2a3040;--fg:#dfe4ee;--mut:#8b93a7;
+        --acc:#5b8cff;--ok:#7fd18a;--warn:#e8b54d;--money:#f5c451;}
+  *{box-sizing:border-box}
+  body{margin:0;padding:32px 16px 80px;background:var(--bg);color:var(--fg);
+       font:15px/1.75 "Pretendard","Malgun Gothic",system-ui,sans-serif}
+  main{max-width:880px;margin:0 auto}
+  h1{font-size:25px;margin:0 0 4px}
+  h2{font-size:19px;margin:44px 0 12px;padding-top:20px;border-top:1px solid var(--line)}
+  .sub{color:var(--mut);font-size:13px;margin-bottom:8px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;
+        padding:16px 20px;margin:14px 0}
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px}
+  th,td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+  th{background:#20263380;color:var(--mut);font-weight:600}
+  code{background:#242a38;border-radius:4px;padding:1px 6px;font-size:13px;
+       font-family:Consolas,monospace}
+  .ok{color:var(--ok)} .warn{color:var(--warn)} .money{color:var(--money);font-weight:700}
+  ul,ol{padding-left:22px} li{margin:4px 0}
+  a{color:var(--acc)}
+</style>
+</head>
+<body>
+<main>
+<h1>💰 ② AI 파이프라인 · 비용 구조</h1>
+<div class="sub">2026-07-13 정리 · <code>server/stages.py</code>(stage_transcribe·stage_ai), <code>server/core/llm.py</code> 기준<br>
+LLM = codex CLI(ChatGPT 구독) 또는 claude CLI(Claude 구독) — API 토큰 과금이 아니라
+<b>구독 사용량 한도</b>를 소모한다. 한도 초과 시 "레이트리밋" 에러로 표면화.</div>
+
+<h2>① 전사 (stage_transcribe) — 전부 로컬, 비용 0</h2>
+<ul>
+<li><code>two_pass</code>(기본 on): <b>small 모델 러프 스캔</b>만 (3.6시간 영상 실측 95초).
+    구간 선정용이지 최종 자막용이 아니다 — 최종 대사는 ②의 정밀 재전사가 만든다.</li>
+<li>결과: <code>{품번}_전사.json/.srt</code> + 대사 밀도 경보(10분당 1줄 미만 = 본편형 의심)</li>
+<li class="warn">★ 배치 전사(BatchedInferencePipeline) 금지 — 세그먼트가 뭉개져 타임스탬프 파괴</li>
+</ul>
+
+<h2>② AI 처리 (stage_ai) — 실행 순서</h2>
+<table>
+<tr><th>순서</th><th>단계</th><th>비용</th><th>설명</th></tr>
+<tr><td>1</td><td>메타 조회</td><td>무료</td><td>우분투 meta_api → 제목·배우·레이블</td></tr>
+<tr><td>2</td><td>노출지도 (NN 전체 스캔)</td><td>무료</td>
+    <td>노출 구간 <b>대사를 전사에서 미리 삭제</b> 후 LLM에 전달 — 금지구간 목록을
+        프롬프트에 넣는 것보다 토큰 절약+확실. ⓪클린본이면 생략</td></tr>
+<tr><td>3</td><td class="money">💰 호출 A — map-reduce 블록 요약</td><td>0~N회</td>
+    <td>전사 <b>25,000자 초과 시만</b>. 20분 블록별 "줄거리+핵심 대사 후보 12줄".
+        2시간 ≈ 6회. 블록 실패 시 앞 12줄 폴백(진행은 계속)</td></tr>
+<tr><td>4</td><td class="money">💰 호출 B — 메인 선정</td><td><b>항상 1회</b></td>
+    <td>메타+후보(또는 전사 통짜)+목표길이+줄거리 힌트 → keep+한국어 대사+내레이션+요약+별점
+        JSON. reasoning <b>high</b>, 1~3분. map-reduce 덕에 입력 ≤25K자 고정</td></tr>
+<tr><td>5</td><td>대사 가드 (_guard_keep)</td><td>무료</td>
+    <td>대사 0줄 keep 자동 제외(노출 의심). 전부 걸리면 원본 유지=검수行</td></tr>
+<tr><td>6</td><td class="money">정밀 재전사 + 💰 호출 C</td><td>0~1회</td>
+    <td>two_pass일 때. keep 구간(1~3분)만 large-v3 재전사(로컬, 100s=34s) →
+        <code>prompt_dialogue_fix</code>로 대사 교체. <b>keep 대사만 보내니 아주 작음</b>.
+        실패 시 러프 유지</td></tr>
+<tr><td>7</td><td>비주얼 노출가드</td><td>무료</td><td>노출지도로 keep에서 노출만 도려냄(subtract)</td></tr>
+<tr><td>8</td><td>컷(NVENC)+plan.json+파생물 무효화</td><td>무료</td>
+    <td>새 컷 생성 시 이전 컨셉의 voiced/subbed/TTS 조각 자동 삭제</td></tr>
+</table>
+
+<h2>비용 요약</h2>
+<table>
+<tr><th>호출</th><th>횟수</th><th>프롬프트 크기</th><th>발생 조건</th></tr>
+<tr><td>A. 블록 요약</td><td>0~6회</td><td>소 (블록 대사만)</td><td>전사 25K자 초과</td></tr>
+<tr><td>B. 메인 선정</td><td>1회</td><td>대 (≤25K자 고정)</td><td>항상</td></tr>
+<tr><td>C. 대사 교체</td><td>0~1회</td><td>소 (keep 대사만)</td><td>two_pass on</td></tr>
+</table>
+<div class="card"><b>선컷된 짧은 영상: 총 2회</b>(B+C) / 2시간 통짜: <b>약 8회</b></div>
+
+<h2>★ 3중 필터 선컷 = LLM 비용 절감</h2>
+<div class="card">
+⚡ 순차 자동 클린(2️⃣→3️⃣→1️⃣)으로 123분 → 수십 분으로 줄인 뒤 ①②를 돌리면:
+<ol>
+<li>전사가 짧아져 25K자 미만 → <b>map-reduce 호출들(A) 통째로 생략</b></li>
+<li>클린본이라 노출지도 스캔(2번)도 생략</li>
+<li>메인 호출(B) 입력도 작아짐</li>
+</ol>
+→ 사실상 <b class="ok">LLM 호출 8회 → 2회</b>. <a href="3중_노출필터.html">3중_노출필터</a> 참고.
+</div>
+
+<h2>조절 손잡이 (studio_config.json)</h2>
+<table>
+<tr><th>키</th><th>기본</th><th>효과</th></tr>
+<tr><td><code>map_reduce_chars</code></td><td>25000</td><td>낮추면 메인 호출↓ 블록 호출↑</td></tr>
+<tr><td><code>two_pass</code></td><td>true</td><td>off = 호출 C 소멸, 대신 대사자막이 러프 품질로</td></tr>
+<tr><td><code>scan_model</code></td><td>small</td><td>러프 스캔 모델</td></tr>
+<tr><td><code>nsfw_full_scan</code></td><td>true</td><td>노출지도(대사 사전 삭제) on/off</td></tr>
+<tr><td><code>min_keep_ratio</code></td><td>0.5</td><td>keep 합계 &lt; 목표×비율이면 중단(TTS·번인 낭비 방지)</td></tr>
+</table>
+
+<h2>함정 (기존 확정 사항)</h2>
+<ul>
+<li><b>프롬프트는 반드시 stdin</b> — argv로 넘기면 본문이 잘려 "자막을 보내달라"는 헛응답(거부로 오인)</li>
+<li>codex: <code>exec --ephemeral -c model_reasoning_effort="high" -o out</code> + stdin</li>
+<li>빈 응답 시 stderr에서 401(로그인)/429(레이트리밋)을 구분해 에러 표면화</li>
+<li>러프 스캔은 신음 구간에 환청 대사를 지어내 가드를 뚫을 수 있다 → 정밀 재전사 후 가드 재검증(6번)</li>
+</ul>
+</main>
+</body>
+</html>
