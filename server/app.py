@@ -77,6 +77,11 @@ DEFAULTS = {"meta_api": "http://172.30.1.40:8770", "llm": "claude",
             "nsfw_full_scan": True,
             # 완성본 전수 검사(최후 방어선) — 검출 시 _완성/ 대신 _검수필요/ 로 격리
             "nsfw_final_check": True, "nsfw_final_step": 0.25,
+            # 강조·정보 자막 연출 (nar_rich=True 로 켰을 때만 의미 있음)
+            #   screen_flash: 강조 자막이 박히는 순간 화면 붉은 플래시(0.22초 만에 식음)
+            #   flash_intensity: 0.30은 화면이 통째로 새빨개져 못 씀 — 0.14~0.18 권장
+            #   sfx: 강조=impact(쿵) / 정보=blip(띡). {out_dir}/_sfx/에 직접 넣으면 그걸 씀
+            "nar_rich": False, "screen_flash": True, "flash_intensity": 0.14, "sfx": True,
             "fullauto_mode": "summary",   # 자동 모드 방식: summary | highlight
             # keep 합계가 목표의 이 비율 미만이면 ②에서 중단(대사 없는 본편형 = 자동화 부적합)
             "min_keep_ratio": 0.5,

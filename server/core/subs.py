@@ -9,6 +9,11 @@ from .common import FFMPEG_TIMEOUT, _part_path, _finalize, srt_parse, video_dura
 from .cutter import has_nvenc, _vcodec_args
 
 def _ass_color(hexstr, alpha="00"):
+    """#RRGGBB → ASS &HAABBGGRR. alpha는 "80" 같은 hex 문자열 또는 0~255 정수.
+    ASS alpha는 00=불투명, FF=완전투명이다(반대로 알기 쉬우니 주의)."""
+    if isinstance(alpha, (int, float)):
+        alpha = f"{max(0, min(255, int(alpha))):02X}"
+    alpha = str(alpha)[:2].zfill(2)
     h = str(hexstr or "").lstrip("#")
     if len(h) != 6:
         return f"&H{alpha}FFFFFF"
@@ -43,12 +48,27 @@ STYLE_DEFAULT = {
     "narration": {"font": "Malgun Gothic", "size": 38, "color": "#FFD400", "outline_color": "#000000",
                   "outline": 2.2, "shadow": 0.4, "bold": True, "v": "bottom", "h": "center", "margin": 138,
                   "anim": "pop"},
-    "emphasis":  {"font": "Malgun Gothic", "size": 52, "color": "#FF3B3B", "outline_color": "#000000",
-                  "outline": 2.8, "shadow": 0.6, "bold": True, "v": "middle", "h": "center", "margin": 60,
-                  "anim": "punch"},
-    "info":      {"font": "Malgun Gothic", "size": 32, "color": "#8FE3FF", "outline_color": "#00243A",
-                  "outline": 2.0, "shadow": 0.3, "bold": True, "v": "top", "h": "right", "margin": 30,
-                  "anim": "slide"},
+    # ★ 강조·정보 = 무도식(예능) 자막 (2026-07-13 — 사용자 지정: '무한도전식')
+    #   기존엔 '색만 다른 글씨'라 아무 효과가 없었다. 예능 자막의 3요소를 넣는다:
+    #     ① 두꺼운 외곽선 + 그림자로 배경과 분리 (어떤 화면에서도 읽힌다)
+    #     ② 임팩트 등장 애니메이션(쾅 박히고 부르르)
+    #     ③ 정보자막은 **반투명 박스 배경**(border_style=3) — 괄호 상황설명 톤
+    #   강조는 대사·내레이션(하단)과 겹치지 않게 화면 중상단에 크게 띄운다.
+    # 강조 = 노랑 + 두꺼운 검정 외곽, 화면 중앙에 크게 '쾅' 박힌다(smash).
+    #   대사(하단 흰)·내레이션(하단 노랑 작게)과 크기·위치로 확실히 구분된다.
+    "emphasis":  {"font": "Malgun Gothic", "size": 66, "color": "#FFE500",
+                  "outline_color": "#141414", "outline": 6.0, "shadow": 3.0, "bold": True,
+                  "v": "middle", "h": "center", "margin": 40, "spacing": 1,
+                  "anim": "flame", "sfx": "impact"},
+    # 정보 = 상단 중앙 **반투명 검정 박스 + 흰 글씨**, 위에서 툭 떨어진다(drop).
+    #   ★BorderStyle=3에서는 outline 값이 '박스 여백'이고 박스 색은 outline_color다
+    #     (back_color는 그림자) — 0으로 두면 판이 안 생긴다. 9 정도가 적당.
+    #   상황설명은 괄호로 감싸는 게 이 톤의 관습: ( 친구 커플의 술자리 )
+    "info":      {"font": "Malgun Gothic", "size": 34, "color": "#FFFFFF",
+                  "outline_color": "#0D0D0D", "outline": 9.0, "shadow": 0.0, "bold": True,
+                  "v": "top", "h": "center", "margin": 34,
+                  "border_style": 3, "back_color": "#000000", "back_alpha": 0x30,
+                  "anim": "shimmer", "sfx": "blip"},
 }
 
 # LLM이 붙이는 내레이션 유형 → ASS 스타일명
@@ -60,22 +80,35 @@ SPEAKER_TAGNAME = {"여": "Dialogue", "여자": "Dialogue", "f": "Dialogue", "fe
 
 
 def _style_line(name, st):
+    """ASS Style 한 줄.
+    border_style: 1=외곽선(기본) / 3=**불투명 박스 배경**(무도식 정보자막의 핵심 —
+      텍스트 뒤에 반투명 판을 깔아 배경이 복잡해도 읽힌다. BackColour가 그 판 색).
+    back_color/back_alpha: 박스(또는 그림자) 색·투명도. angle: 글자 기울기(도)."""
     st = {**STYLE_DEFAULT["dialogue"], **(st or {})}
     align = _ALIGN.get((st.get("v", "bottom"), st.get("h", "center")), 2)
+    bs = int(st.get("border_style", 1))
+    back = _ass_color(st.get("back_color", "#000000"), st.get("back_alpha", 0x64))
     return (f"Style: {name},{st.get('font','Malgun Gothic')},{int(st.get('size',40))},"
             f"{_ass_color(st.get('color','#FFFFFF'))},&H000000FF,"
-            f"{_ass_color(st.get('outline_color','#000000'))},&H64000000,"
-            f"{-1 if st.get('bold') else 0},0,0,0,100,100,0,0,1,"
+            f"{_ass_color(st.get('outline_color','#000000'))},{back},"
+            f"{-1 if st.get('bold') else 0},0,0,0,100,100,"
+            f"{st.get('spacing',0)},{st.get('angle',0)},{bs},"
             f"{st.get('outline',2)},{st.get('shadow',0)},{align},40,40,{int(st.get('margin',40))},1")
 
 
 def _ass_anim(kind, dur_ms):
     """자막 등장 효과 → ASS 인라인 오버라이드 태그. \\t(t1,t2,...)의 시각은 이벤트 시작 기준(ms).
-    none  : 없음(그냥 뜸)
-    pop   : 작게 나타나 살짝 커졌다가(오버슈트) 제자리 — '휙' 튀어나오는 느낌
-    punch : pop보다 강하게. 강조 문구용
-    fade  : 부드럽게 페이드
-    slide : 아래에서 살짝 밀려 올라옴
+    none    : 없음(그냥 뜸)
+    pop     : 작게 나타나 살짝 커졌다가(오버슈트) 제자리 — '휙' 튀어나오는 느낌
+    punch   : pop보다 강하게. 강조 문구용
+    fade    : 부드럽게 페이드
+    slide   : 아래에서 살짝 밀려 올라옴
+    ─ 무도식(예능) 자막용 (2026-07-13) ─
+    smash   : 크게 들어와 쾅 박히고 미세하게 흔들린다 — 임팩트 강조의 정석
+    shake   : 좌우로 부르르 떨림(짧게 3회) — 놀람·경악
+    drop    : 위에서 툭 떨어져 살짝 튕김 — 상황 설명 등장
+    stamp   : 도장처럼 기울어져 찍힌다(회전+축소) — 판정·낙인
+    typein  : 좌→우로 쓸려 나타남(\\clip 애니) — 정보자막 타이핑 느낌
     """
     if kind == "pop":
         return r"{\fad(0,120)\fscx70\fscy70\t(0,110,\fscx108\fscy108)\t(110,190,\fscx100\fscy100)}"
@@ -85,9 +118,79 @@ def _ass_anim(kind, dur_ms):
     if kind == "fade":
         return r"{\fad(180,180)}"
     if kind == "slide":
-        # 아래에서 위로 24px — \move는 절대좌표라 여기선 원점 이동(\org) 대신 fad+scaleY로 대체
         return r"{\fad(0,120)\fscy60\t(0,150,\fscy105)\t(150,230,\fscy100)}"
+    if kind == "smash":
+        # 180%에서 쾅 → 92% 반동 → 100%. 마지막에 미세 흔들림(회전 ±1.5도)
+        return (r"{\fad(0,120)\fscx180\fscy180\blur3"
+                r"\t(0,70,\fscx92\fscy92\blur0)\t(70,130,\fscx104\fscy104)"
+                r"\t(130,180,\fscx100\fscy100)"
+                r"\t(180,240,\frz1.5)\t(240,300,\frz-1.5)\t(300,350,\frz0)}")
+    if kind == "shake":
+        return (r"{\fad(0,100)\fscx105\fscy105\t(0,80,\fscx100\fscy100)"
+                r"\t(80,140,\frz2)\t(140,200,\frz-2)\t(200,260,\frz1)\t(260,320,\frz0)}")
+    if kind == "drop":
+        # 위에서 떨어지는 느낌 — \move는 절대좌표가 필요해 세로 스케일+블러로 대체
+        return (r"{\fad(0,110)\fscy40\blur2\t(0,110,\fscy112\blur0)"
+                r"\t(110,180,\fscy94)\t(180,240,\fscy100)}")
+    if kind == "stamp":
+        return (r"{\fad(0,90)\fscx160\fscy160\frz-9\blur4"
+                r"\t(0,90,\fscx100\fscy100\frz-3\blur0)\t(90,150,\frz0)}")
+    if kind == "typein":
+        # 좌→우 쓸어 나타남. \clip 사각형을 가로로 넓힌다(PlayRes 기준 넉넉히)
+        return (r"{\fad(0,80)\clip(0,0,0,2000)\t(0,260,\clip(0,0,2000,2000))}")
+    if kind == "soft":
+        # 흐릿하게 번져 있다가 부드럽게 맺힌다 — 정보 자막용(사용자 지정: '부드럽게 나타나는')
+        return r"{\fad(320,260)\blur8\fscy94\t(0,340,\blur0\fscy100)}"
+    if kind == "shimmer":
+        # soft + 은은한 일렁임(블러·크기가 파도처럼 미세하게 오르내린다)
+        return (r"{\fad(320,260)\blur8\fscy94"
+                r"\t(0,340,\blur0\fscy100)"
+                r"\t(600,1100,\blur1.2\fscx101\fscy101)"
+                r"\t(1100,1600,\blur0\fscx100\fscy100)"
+                r"\t(1600,2100,\blur1.2\fscx101\fscy101)"
+                r"\t(2100,2600,\blur0\fscx100\fscy100)}")
+    if kind == "flame":
+        # 불꽃이 일렁이듯 — 글자가 미세하게 흔들리며 외곽이 번졌다 선명해졌다 반복
+        return (r"{\fad(0,120)\fscx170\fscy170\blur4"
+                r"\t(0,70,\fscx96\fscy96\blur0)\t(70,130,\fscx103\fscy103)"
+                r"\t(130,180,\fscx100\fscy100)"
+                r"\t(200,340,\blur1.6\frz1.2)\t(340,480,\blur0\frz-1.2)"
+                r"\t(480,620,\blur1.6\frz0.8)\t(620,760,\blur0\frz0)}")
     return ""
+
+
+def screen_fx(events, w, h, log=print, intensity=0.16):
+    """자막 등장 순간 **화면 자체**에 거는 효과 — ffmpeg 필터 조각을 돌려준다.
+
+    왜 — 자막만 커지고 색이 바뀌는 건 '색만 다른 글씨'와 다를 게 없다(사용자 피드백).
+    강조가 박히는 순간 화면이 붉게 확 달아올랐다 식으면 타격감이 생긴다.
+
+    events=[(time_sec, kind)] — kind='red'(붉은 마스킹 플래시)
+    구현: 전체 화면 빨간 drawbox를 알파를 낮춰가며 짧게 여러 겹 깔아 감쇠를 만든다
+      (drawbox는 시간에 따른 알파 보간이 안 되므로 계단식으로 흉내낸다).
+
+    ★강도 주의(2026-07-13 실측): 알파 0.30·0.30초로 했더니 **화면이 통째로 새빨개져
+      영상이 안 보였다**. 확 달아올랐다 바로 식어야 타격감이 나온다
+      → 0.16에서 시작해 0.22초 만에 사라지도록 낮췄다. intensity로 조절 가능.
+    """
+    base = [(0.00, 0.05, 1.00), (0.05, 0.10, 0.62),
+            (0.10, 0.16, 0.31), (0.16, 0.22, 0.12)]
+    parts = []
+    n = 0
+    for t, kind in (events or []):
+        if kind != "red":
+            continue
+        for s0, s1, k in base:
+            a = round(intensity * k, 3)
+            if a < 0.01:
+                continue
+            parts.append(
+                f"drawbox=x=0:y=0:w={w}:h={h}:color=red@{a}:t=fill:"
+                f"enable='between(t,{t + s0:.3f},{t + s1:.3f})'")
+        n += 1
+    if n:
+        log(f"화면 효과: 붉은 플래시 {n}개 (강조 자막이 박히는 순간, 강도 {intensity})")
+    return ",".join(parts)
 
 
 def build_ass(dialogue, narration, out_ass, width, height, styles=None):
@@ -221,7 +324,8 @@ def _banner_filter(prep, anim):
 
 def burn_subs(video, dialogue_srt, narration_srt, out_video, styles=None,
               narration_json=None, dialogue_json=None, log=print,
-              banner=None, banner_anim=None, subs=True):
+              banner=None, banner_anim=None, subs=True, screen_flash=True,
+              flash_intensity=0.16):
     """자막(+선택: 배너·워터마크)을 영상에 굽는다.
     banner={'frame':png,'info':png,'wm':png} 를 주면 자막과 같은 인코딩 1패스에서
     함께 합성한다(따로 굽는 2패스 대비 인코딩 1회 절약).
@@ -250,6 +354,15 @@ def burn_subs(video, dialogue_srt, narration_srt, out_video, styles=None,
         ass_path.parent.mkdir(parents=True, exist_ok=True)
         log(f"자막 없이 배너만 굽기 ({w}x{h})...")
 
+    # 강조 자막이 박히는 순간 → 화면 붉은 플래시. 자막(ass)보다 **먼저** 걸어야
+    # 자막까지 빨갛게 물들지 않는다(화면만 달아오르고 글자는 선명하게 남는다).
+    flash = ""
+    if screen_flash and subs:
+        # 유형(style)은 narration_json에서만 온다(SRT는 3튜플이라 유형이 없다)
+        ev = [(n[0], "red") for n in nar
+              if len(n) >= 4 and STYLE_TAGNAME.get(n[3], "Narration") == "Emphasis"]
+        flash = screen_fx(ev, w, h, log, intensity=float(flash_intensity))
+
     inputs, fc, last = [], "", "0:v"
     if banner:
         prep = _prep_banner_layers(banner, ass_path.parent,
@@ -260,9 +373,13 @@ def burn_subs(video, dialogue_srt, narration_srt, out_video, styles=None,
             log(f"배너 동시 굽기: {', '.join(prep)} (재인코딩 1패스 — 추가 비용 적음)")
 
     if fc:
-        # 자막(ass)은 배너 오버레이 뒤에 얹는다 — 배너가 자막을 가리지 않게
-        fc += (f"[{last}]ass={ass_path.name}[out]" if subs
+        # 순서: 배너 → 화면 플래시 → 자막(ass). 자막이 맨 위에 와야 안 가려진다.
+        tail_f = (f"{flash}," if flash else "")
+        fc += (f"[{last}]{tail_f}ass={ass_path.name}[out]" if subs
                else f"[{last}]null[out]")
+    elif flash:
+        # 배너가 없어도 플래시는 걸어야 하므로 필터그래프를 만든다
+        fc = f"[0:v]{flash},ass={ass_path.name}[out]"
 
     # -loop 1 로 넣은 배너 PNG는 무한 스트림이라 원본이 끝나도 인코딩이 계속된다.
     # 원본 길이로 명시적으로 끊어준다.

@@ -781,7 +781,31 @@ def stage_burn(c, code, styles, em, source=None, banner=True, parts=None):
     P.burn_subs(str(src), str(dsrt), str(nsrt), out, styles,
                 str(njson) if njson.is_file() else None,
                 str(djson) if djson.is_file() else None, em.log,
-                banner=bl, banner_anim=anim, subs=want_subs)
+                banner=bl, banner_anim=anim, subs=want_subs,
+                screen_flash=bool(c.get("screen_flash", True)),
+                flash_intensity=float(c.get("flash_intensity", 0.14)))
+    # 강조·정보 자막이 뜨는 순간에 효과음 — 등장 애니(쾅/일렁임)와 짝이 되어야 임팩트가 산다
+    if c.get("sfx", True) and want_subs and njson.is_file():
+        try:
+            from server.core import sfx as SFX
+            from server.core.subs import STYLE_DEFAULT, STYLE_TAGNAME
+            st_all = {**STYLE_DEFAULT, **(styles or {})}
+            key = {"Emphasis": "emphasis", "Info": "info"}
+            events = []
+            for d in json.loads(njson.read_text(encoding="utf-8")):
+                tag = STYLE_TAGNAME.get(d.get("style", "기본"), "Narration")
+                k = key.get(tag)
+                if not k:
+                    continue
+                name = (st_all.get(k) or {}).get("sfx")
+                if name:
+                    events.append((float(d["start"]), name))
+            if events:
+                mixed = str(outdir / f"{code}_final_subbed_sfx.mp4")
+                if SFX.mix_events(out, events, mixed, c["out_dir"], log=em.log):
+                    shutil.move(mixed, out)
+        except Exception as e:
+            em.log(f"※ 효과음 삽입 실패({type(e).__name__}: {e}) — 효과음 없이 진행")
     em.file("완성 영상", out)
     # ★ 최후 방어선 — 실제로 나가는 완성본을 전수 검사(0.25s 간격).
     #   keep 가드는 2초 샘플이라 컷 경계에 스치는 노출을 놓칠 수 있다. 여기서 잡는다.
