@@ -45,9 +45,15 @@ STYLE_DEFAULT = {
     "dialogue_m": {"font": "Malgun Gothic", "size": 42, "color": "#7FD0FF", "outline_color": "#000000",
                    "outline": 2.2, "shadow": 0.4, "bold": True, "v": "bottom", "h": "center", "margin": 46,
                    "anim": "none"},
-    "narration": {"font": "Malgun Gothic", "size": 38, "color": "#FFD400", "outline_color": "#000000",
-                  "outline": 2.2, "shadow": 0.4, "bold": True, "v": "bottom", "h": "center", "margin": 138,
-                  "anim": "pop"},
+    # 내레이션 (2026-07-13 사용자 지정): 페이퍼로지 · 흰 글씨 · **노란 둥근 배경판** · 투명도 30%
+    #   ★ASS는 박스(BorderStyle=3) 모서리를 둥글게 못 한다 → plate=True면 둥근 사각형을
+    #     드로잉 이벤트로 직접 그려 자막 아래 레이어에 깐다(_plate_events).
+    #   plate_alpha 0x4D ≈ 30% 투명(00=불투명, FF=완전투명).
+    "narration": {"font": "Paperlogy 7 Bold", "size": 38, "color": "#FFFFFF",
+                  "outline_color": "#000000", "outline": 1.4, "shadow": 0.0, "bold": True,
+                  "v": "bottom", "h": "center", "margin": 138, "anim": "pop",
+                  "plate": True, "plate_color": "#FFD400", "plate_alpha": 0x4D,
+                  "plate_radius": 16, "plate_pad_x": 24, "plate_pad_y": 8},
     # ★ 강조·정보 = 무도식(예능) 자막 (2026-07-13 — 사용자 지정: '무한도전식')
     #   기존엔 '색만 다른 글씨'라 아무 효과가 없었다. 예능 자막의 3요소를 넣는다:
     #     ① 두꺼운 외곽선 + 그림자로 배경과 분리 (어떤 화면에서도 읽힌다)
@@ -88,8 +94,9 @@ def _style_line(name, st):
     align = _ALIGN.get((st.get("v", "bottom"), st.get("h", "center")), 2)
     bs = int(st.get("border_style", 1))
     back = _ass_color(st.get("back_color", "#000000"), st.get("back_alpha", 0x64))
+    # alpha: 글자(또는 배경판) 투명도. ASS는 00=불투명, FF=투명
     return (f"Style: {name},{st.get('font','Malgun Gothic')},{int(st.get('size',40))},"
-            f"{_ass_color(st.get('color','#FFFFFF'))},&H000000FF,"
+            f"{_ass_color(st.get('color','#FFFFFF'), st.get('alpha', '00'))},&H000000FF,"
             f"{_ass_color(st.get('outline_color','#000000'))},{back},"
             f"{-1 if st.get('bold') else 0},0,0,0,100,100,"
             f"{st.get('spacing',0)},{st.get('angle',0)},{bs},"
@@ -159,6 +166,106 @@ def _ass_anim(kind, dur_ms):
     return ""
 
 
+_FONT_CACHE = {}
+
+
+def _font_file(name, bold=True):
+    """ASS 폰트명 → 실제 TTF 경로(윈도우 Fonts 폴더). 글자 폭을 재려면 파일이 필요하다."""
+    key = (name, bold)
+    if key in _FONT_CACHE:
+        return _FONT_CACHE[key]
+    import glob
+    import os
+    fd = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")
+    base = str(name or "").replace(" ", "")
+    cands = []
+    for p in glob.glob(os.path.join(fd, "*.ttf")) + glob.glob(os.path.join(fd, "*.otf")):
+        stem = os.path.basename(p).rsplit(".", 1)[0].replace(" ", "").replace("-", "")
+        if stem.lower() == base.replace("-", "").lower():
+            cands.insert(0, p)
+        elif base.lower() and base.split("-")[0].lower() in stem.lower():
+            cands.append(p)
+    _FONT_CACHE[key] = cands[0] if cands else None
+    return _FONT_CACHE[key]
+
+
+def _text_width(text, font_name, size, bold=True):
+    """자막 한 줄의 픽셀 폭(대략). PIL로 실제 폰트를 재고, 실패하면 글자수로 추정한다."""
+    try:
+        from PIL import ImageFont
+        fp = _font_file(font_name, bold)
+        if fp:
+            f = ImageFont.truetype(fp, int(size))
+            return f.getbbox(text)[2] - f.getbbox(text)[0]
+    except Exception:
+        pass
+    # 폴백: 한글은 대략 size, 영문/숫자는 size*0.55
+    w = 0.0
+    for ch in text:
+        w += size if ord(ch) > 0x1100 else size * 0.55
+    return w
+
+
+def _rounded_rect_drawing(w, h, r):
+    """ASS 드로잉 명령(\\p1) — 모서리 둥근 사각형. 좌표는 **(0,0)~(w,h)** 절대좌표.
+    ASS 박스(BorderStyle=3)는 **모서리가 각지고 둥글게 못 한다** → 직접 그린다.
+    ★드로잉은 \\an7(좌상단 기준)+\\pos와 함께 써야 위치가 예측대로 잡힌다
+      (중심 기준 좌표로 그렸더니 판이 왼쪽 위로 밀렸다 — 2026-07-13 실측).
+    베지어(b)로 네 모서리를 굴린다."""
+    x0, y0, x1, y1 = 0.0, 0.0, w, h
+    r = max(0.0, min(r, w / 2, h / 2))
+    k = r * 0.5523   # 원에 가까운 베지어 손잡이 길이
+    return (
+        f"m {x0 + r:.0f} {y0:.0f} "
+        f"l {x1 - r:.0f} {y0:.0f} "
+        f"b {x1 - r + k:.0f} {y0:.0f} {x1:.0f} {y0 + r - k:.0f} {x1:.0f} {y0 + r:.0f} "
+        f"l {x1:.0f} {y1 - r:.0f} "
+        f"b {x1:.0f} {y1 - r + k:.0f} {x1 - r + k:.0f} {y1:.0f} {x1 - r:.0f} {y1:.0f} "
+        f"l {x0 + r:.0f} {y1:.0f} "
+        f"b {x0 + r - k:.0f} {y1:.0f} {x0:.0f} {y1 - r + k:.0f} {x0:.0f} {y1 - r:.0f} "
+        f"l {x0:.0f} {y0 + r:.0f} "
+        f"b {x0:.0f} {y0 + r - k:.0f} {x0 + r - k:.0f} {y0:.0f} {x0 + r:.0f} {y0:.0f}")
+
+
+def _plate_events(rows, st, w, h, style_name):
+    """자막 뒤에 깔 '둥근 배경판' 이벤트들 — rows=[(start, end, text)].
+
+    ASS는 박스 모서리를 둥글게 못 하므로(BorderStyle=3은 각진 사각형), 배경판을
+    **드로잉 이벤트로 직접 그려** 자막보다 아래 레이어에 깐다.
+    글자 폭은 실제 폰트로 재서(PIL) 텍스트에 딱 맞는 판을 만든다.
+    """
+    if not st.get("plate"):
+        return []
+    pad_x = float(st.get("plate_pad_x", 22))
+    pad_y = float(st.get("plate_pad_y", 8))
+    radius = float(st.get("plate_radius", 14))
+    size = int(st.get("size", 38))
+    font = st.get("font", "Malgun Gothic")
+    v = st.get("v", "bottom")
+    margin = float(st.get("margin", 40))
+    line_h = size * 1.25          # libass 줄높이 ≈ 폰트크기의 1.2~1.3배
+    out = []
+    for (a, b, text) in rows:
+        lines = str(text).split("\\N")
+        tw = max((_text_width(ln, font, size, st.get("bold", True)) for ln in lines), default=0)
+        text_h = line_h * len(lines)
+        bw = tw + pad_x * 2
+        bh = text_h + pad_y * 2
+        # 판의 좌상단 좌표(\an7 기준) — 텍스트 블록을 감싸도록 패딩만큼 바깥으로.
+        #   libass는 MarginV를 '화면 끝 ~ 텍스트 끝' 거리로 쓴다.
+        x = (w - bw) / 2
+        if v == "top":
+            y = margin - pad_y
+        elif v == "middle":
+            y = (h - bh) / 2
+        else:
+            y = h - margin - text_h - pad_y
+        draw = _rounded_rect_drawing(bw, bh, radius)
+        out.append((a, b, style_name,
+                    f"{{\\an7\\pos({x:.0f},{y:.0f})\\p1}}{draw}{{\\p0}}"))
+    return out
+
+
 def screen_fx(events, w, h, log=print, intensity=0.16):
     """자막 등장 순간 **화면 자체**에 거는 효과 — ffmpeg 필터 조각을 돌려준다.
 
@@ -213,9 +320,18 @@ def build_ass(dialogue, narration, out_ass, width, height, styles=None):
          _style_line("DialogueM", S["dialogue_m"]),
          _style_line("Narration", S["narration"]),
          _style_line("Emphasis", S["emphasis"]),
-         _style_line("Info", S["info"]),
-         "", "[Events]",
-         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"]
+         _style_line("Info", S["info"])]
+    # 둥근 배경판 전용 스타일 — 판 색은 PrimaryColour로 칠한다(드로잉은 1차색으로 채워짐).
+    #   plate_alpha: 0=불투명 … 255=완전투명. 사용자가 말하는 '투명도 30%' = alpha 약 0x4D.
+    for key, sname in (("narration", "NarPlate"), ("emphasis", "EmpPlate"), ("info", "InfoPlate")):
+        st = S[key]
+        if st.get("plate"):
+            L.append(_style_line(sname, {
+                **st, "color": st.get("plate_color", "#FFE500"),
+                "outline": 0, "shadow": 0, "border_style": 1,
+                "alpha": st.get("plate_alpha", 0x4D)}))
+    L += ["", "[Events]",
+          "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"]
     evs = []
     for it in dialogue:                        # (s,e,text) 또는 (s,e,text,speaker)
         spk = it[3] if len(it) > 3 else "여"
@@ -224,10 +340,22 @@ def build_ass(dialogue, narration, out_ass, width, height, styles=None):
         tag = it[3] if len(it) > 3 else "기본"
         evs.append((it[0], it[1], STYLE_TAGNAME.get(tag, "Narration"), it[2]))
     evs.sort(key=lambda x: x[0])
+
+    # 배경판 이벤트 — Layer 0(자막보다 아래). 자막은 Layer 1로 올린다.
+    PLATE_OF = {"Narration": ("narration", "NarPlate"),
+                "Emphasis": ("emphasis", "EmpPlate"),
+                "Info": ("info", "InfoPlate")}
+    for style, (skey, sname) in PLATE_OF.items():
+        if not S[skey].get("plate"):
+            continue
+        rows = [(s, e, str(t).replace("\n", "\\N")) for s, e, stl, t in evs if stl == style]
+        for a, b, _sn, body in _plate_events(rows, S[skey], width, height, sname):
+            L.append(f"Dialogue: 0,{_ass_time(a)},{_ass_time(b)},{sname},,0,0,0,,{body}")
+
     for s, e, style, t in evs:
         txt = str(t).replace("\n", "\\N")
         tag = _ass_anim(ANIM.get(style, "none"), int((e - s) * 1000))
-        L.append(f"Dialogue: 0,{_ass_time(s)},{_ass_time(e)},{style},,0,0,0,,{tag}{txt}")
+        L.append(f"Dialogue: 1,{_ass_time(s)},{_ass_time(e)},{style},,0,0,0,,{tag}{txt}")
     Path(out_ass).write_text("\n".join(L) + "\n", encoding="utf-8")
     return out_ass
 
