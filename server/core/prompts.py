@@ -248,6 +248,26 @@ def prompt_block(meta, segs, bi, nb, t0, t1):
             f'[출력 JSON만] {{"summary":"2~3줄","picks":[라인번호,...]}}')
 
 
+def _dialogue_out(with_dialogue):
+    """1회차(선정) 프롬프트의 dialogue 출력 스펙. 2-pass면 대사는 2회차(정밀 전사 기반)가
+    만들므로 1회차에서 번역시키지 않는다 — 어차피 통째로 교체될 러프 번역이라 출력 토큰
+    낭비였다(2026-07-13). 단 **타이밍 인식은 그대로 필요**하다: 내레이션은 대사와 겹치면
+    안 되고 대사 사이 빈 구간에 놓여야 하는데, 그 시각은 입력 일본어 자막에 있으므로
+    출력만 빼도 배치 규칙은 지킬 수 있다."""
+    if with_dialogue:
+        return "\"dialogue\":[{\"start\":초,\"end\":초,\"ko\":\"\",\"speaker\":\"여|남\"}],"
+    return ""
+
+
+def _dialogue_note(with_dialogue):
+    if with_dialogue:
+        return ""
+    return ("[★대사자막은 출력하지 마라] 한국어 대사자막은 다음 단계에서 **정밀 전사본으로 따로** "
+            "번역한다. 너는 dialogue를 출력하지 않는다(출력해도 버려진다). "
+            "다만 **위 일본어 자막의 시각이 곧 대사가 흐르는 시각**이다 — narration은 그 대사들과 "
+            "겹치지 않게, 대사 사이 빈 구간에 배치해야 한다(대사 원음이 들려야 한다).\n")
+
+
 def prompt_dialogue_fix(meta, segs):
     """2차 정밀 전사(keep 구간만) → 최종 대사자막 번역. 시간은 원본 영상 기준 초 그대로."""
     body = "\n".join(f"{a:.2f}\t{b:.2f}\t{t}" for a, b, t in segs)
@@ -274,14 +294,17 @@ def prompt_auto(meta, segs, target_sec=60, hint="", pos="mid", style="3min"):
             f"\"dialogue\":[{{\"start\":초,\"end\":초,\"ko\":\"\",\"speaker\":\"여|남\"}}],\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\",\"style\":\"기본|강조|정보\"}}]}}")
 
 
-def prompt_highlight(meta, segs, target_sec=60, hint="", pos="mid", style="3min"):
+def prompt_highlight(meta, segs, target_sec=60, hint="", pos="mid", style="3min",
+                     with_dialogue=True):
     """AlphaCut식 하이라이트 추출 — '고루 분포' 대신 '가장 후킹되는 순간'만 골라 몰아 뽑는다."""
     body = "\n".join(f"{k}\t{a:.2f}\t{b:.2f}\t{t}" for k, (a, b, t) in enumerate(segs, 1))
+    make = "압축한다" if not with_dialogue else "압축하고, 한글 대사자막과 해설 내레이션을 만든다"
     return (f"너는 일본 영상 리뷰어다. 아래 영상 자막에서 **가장 후킹되는(클릭·시청유지 유발) 순간**만 골라 "
-            f"**약 {target_sec}초 내외 하이라이트**로 압축한다. 줄거리 요약이 아니라 '반전·긴장·감정 절정'의 밀도 높은 컷.\n"
+            f"**약 {target_sec}초 내외 하이라이트**로 {make}. 줄거리 요약이 아니라 '반전·긴장·감정 절정'의 밀도 높은 컷.\n"
             f"{_hint_block(hint)}"
             f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n"
             f"{_roundup_block(pos, target_sec, style)}{_timeline_rule()}{_style(style)}\n"
+            f"{_dialogue_note(with_dialogue)}"
             f"[하이라이트 규칙] "
             f"(1)잡담·무음·반복은 버린다. "
             f"(2)★고루 분포 금지★ — 앞·중간·뒤 균등이 아니라 **후킹 밀도가 가장 높은 순간에 집중**. "
@@ -291,22 +314,29 @@ def prompt_highlight(meta, segs, target_sec=60, hint="", pos="mid", style="3min"
             f"[출력 JSON만] {{\"summary\":\"3~5줄\",\"stars\":1~5,"
             f"\"picks\":[{{\"start\":초,\"end\":초,\"hook\":1~5,\"reason\":\"\"}}],"
             f"\"keep\":[[시작,끝],...],"  # picks 와 동일 구간(렌더 호환용)
-            f"\"dialogue\":[{{\"start\":초,\"end\":초,\"ko\":\"\",\"speaker\":\"여|남\"}}],"
+            f"{_dialogue_out(with_dialogue)}"
             f"\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\",\"style\":\"기본|강조|정보\"}}]}}")
 
 
-def prompt_manual(meta, segs, target_sec=60, hint="", pos="mid", style="3min"):
+def prompt_manual(meta, segs, target_sec=60, hint="", pos="mid", style="3min",
+                  with_dialogue=True):
     body = "\n".join(f"{k}\t{a:.2f}\t{b:.2f}\t{t}" for k, (a, b, t) in enumerate(segs, 1))
+    make = ("**스토리 핵심만 골라 약 {t}초 내외로 압축**하고, 해설 내레이션을 만든다"
+            if not with_dialogue else
+            "**스토리 핵심만 골라 약 {t}초 내외로 압축**하고, 한글 대사자막과 해설 내레이션을 만든다"
+            ).format(t=target_sec)
     return (f"너는 일본 영상 리뷰어다. 아래는 '정사장면을 이미 제거한' 영상의 일본어 자막이다. "
-            f"여기서 **스토리 핵심만 골라 약 {target_sec}초 내외로 압축**하고, 한글 대사자막과 해설 내레이션을 만든다.\n"
+            f"여기서 {make}.\n"
             f"{_hint_block(hint)}"
             f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n"
             f"{_roundup_block(pos, target_sec, style)}{_timeline_rule()}{_style(style)}\n"
+            f"{_dialogue_note(with_dialogue)}"
             f"[규칙] (1)무음·잡담·반복·의미없는 짧은 라인은 버린다. "
             f"(2)스토리(설정·관계·전환·갈등·결말)를 드러내는 핵심 구간만 keep으로 골라 **합쳐서 {target_sec}초 ±20% 목표**. "
             f"(3)정사 선별은 하지 말 것(이미 제거됨). 시간은 이 자막 기준 초.\n"
             f"{_must_have(style)}"
             f"[출력 JSON만] {{\"summary\":\"3~5줄\",\"stars\":1~5,\"keep\":[[시작,끝],...],"
-            f"\"dialogue\":[{{\"start\":초,\"end\":초,\"ko\":\"\",\"speaker\":\"여|남\"}}],\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\",\"style\":\"기본|강조|정보\"}}]}}")
+            f"{_dialogue_out(with_dialogue)}"
+            f"\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\",\"style\":\"기본|강조|정보\"}}]}}")
 
 

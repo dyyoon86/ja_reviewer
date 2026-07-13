@@ -341,15 +341,21 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
             em.log("※ NudeNet 미설치 — 전체 노출 스캔 생략(pip install nudenet)")
         except Exception as e:
             em.log(f"※ 전체 노출 스캔 실패({type(e).__name__}: {e}) — keep 단위 가드만 적용됩니다")
+    # ★ 2-pass면 1회차에서 대사 번역을 시키지 않는다 — 어차피 아래에서 정밀 전사본으로
+    #   통째 교체되는 러프 번역이라 출력 토큰만 버리는 셈이었다(2026-07-13).
+    #   내레이션 배치는 입력 일본어 자막의 시각으로 판단하므로 품질 손실이 없다.
+    two_pass = bool(st.get("scan"))
     label = "하이라이트형(알파컷식)" if mode == "highlight" else "요약형(짜집기)"
-    em.step(2, 3, f"AI {label} 압축·번역·내레이션 ({llm} 추론, 보통 1~3분)")
+    what = "압축·내레이션(대사는 2차 정밀본으로)" if two_pass else "압축·번역·내레이션"
+    em.step(2, 3, f"AI {label} {what} ({llm} 추론, 보통 1~3분)")
     pf = P.prompt_highlight if mode == "highlight" else P.prompt_manual
     hb = heartbeat(em, f"AI 처리({llm})")
     try:
         plan_segs, story = _reduce_transcript(m, segs, llm, em,
                                               limit=int(c.get("map_reduce_chars", 25000)))
         full_hint = "\n".join(x for x in ((hint or "").strip(), story) if x)
-        res = P.call_llm(pf(m, plan_segs, target, hint=full_hint, pos=pos, style=style),
+        res = P.call_llm(pf(m, plan_segs, target, hint=full_hint, pos=pos, style=style,
+                            with_dialogue=not two_pass),
                          llm, em.log)
     finally:
         hb.set()
@@ -360,7 +366,8 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
     res["keep"] = [[a, b] for a, b in keep]   # 제외 반영된 keep을 plan에 저장(자막 재타이밍 일치)
     # 2-pass: ①이 러프 스캔이었다면 keep 구간만 정밀 재전사 → 대사자막을 정밀본으로 교체.
     # 실패해도 러프 기반 dialogue가 남아 있으니 결과는 항상 나온다(품질만 러프로 후퇴).
-    if st.get("scan"):
+    if two_pass:
+        fine = []
         try:
             precise_model = st.get("model") or c.get("whisper_model", "large-v3")
             em.log(f"2차 정밀 전사 — keep {len(keep)}구간만 {precise_model}로 재전사")
@@ -377,16 +384,29 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
                 res["keep"] = [[a, b] for a, b in keep]
             fine = [s for s in fine
                     if any(a - 0.05 <= s[0] < b + 0.05 for a, b in keep)]
+        except Exception as e:
+            em.log(f"※ 정밀 재전사 실패({type(e).__name__}: {e}) — 러프 전사로 대사자막을 만듭니다")
+            fine = []
+        if not fine:
+            # 정밀 전사가 실패/0줄이어도 대사자막은 있어야 한다(1회차가 번역을 안 했으므로).
+            # 러프 전사에서 keep 안의 줄만 추려 같은 번역 프롬프트에 태운다 — 품질만 러프로 후퇴.
+            fine = [s for s in segs if any(a - 0.05 <= s[0] < b + 0.05 for a, b in keep)]
             if fine:
+                em.log(f"러프 전사로 대체: keep 안 {len(fine)}줄로 대사자막 생성")
+        if fine:
+            try:
                 fix = P.call_llm(P.prompt_dialogue_fix(m, fine), llm, em.log)
                 dlg = fix.get("dialogue") or []
                 if dlg:
                     res["dialogue"] = dlg
-                    em.log(f"대사자막을 정밀 전사본으로 교체: {len(dlg)}줄")
-            else:
-                em.log("※ 정밀 전사 결과 0줄 — 러프 대사자막 유지")
-        except Exception as e:
-            em.log(f"※ 정밀 재전사 실패({type(e).__name__}: {e}) — 러프 대사자막으로 진행")
+                    em.log(f"대사자막 생성(정밀 전사본): {len(dlg)}줄")
+                elif not res.get("dialogue"):
+                    em.log("⚠ 대사 번역이 0줄입니다 — 대사자막 없이 내레이션만 나갑니다")
+            except Exception as e:
+                em.log(f"⚠ 대사 번역 실패({type(e).__name__}: {e}) "
+                       f"— 대사자막 없이 진행합니다(②를 다시 실행하면 재시도)")
+        elif not res.get("dialogue"):
+            em.log("⚠ keep 구간에 대사가 없습니다 — 대사자막 없이 내레이션만 나갑니다")
     # ★ 비주얼 노출 가드 — 대사 기반 가드가 못 잡는 '대사하며 노출' 케이스를 화면으로 직접 판정.
     if c.get("nsfw_guard", True) and keep:
         try:
