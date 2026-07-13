@@ -295,6 +295,10 @@
             <label class="chk" title="원본의 배경음악(BGM)을 demucs로 걷어내고 사람 목소리만 남깁니다. 최종 컷에만 돌려서 1~3분 영상이 10~20초. 주의: 현장음(방 잡음·발소리)도 함께 사라져 매우 드라이해집니다 — 내 BGM을 따로 깔 때 유용">
               <input type="checkbox" id="rmBgm"> 원본 BGM 제거
             </label>
+            <label class="chk" title="AI가 상황(놀람·어이없음·실망 등)을 골라 내 짤을 화면 구석에 얹습니다. 에셋 폴더의 태그별 폴더에 gif/mp4/png를 넣어두면 됩니다 — 파일이 있는 태그만 쓰입니다">
+              <input type="checkbox" id="useCutins"> 상황별 짤 삽입
+            </label>
+            <button id="btnAssets" title="짤·자막 장식판을 넣는 폴더를 엽니다">📁 짤 폴더</button>
             <button class="go" id="btnStepAi">실행</button>
           </li>
           <li>

@@ -322,10 +322,39 @@ def _banner_filter(prep, anim):
     return inputs, fc, last
 
 
+def _cutin_filter(cutins, w, h, start_idx, pos="tr", scale=0.26, fade=0.2):
+    """상황별 짤(움짤) 오버레이 — (inputs, 필터조각들, 다음 입력번호).
+
+    cutins=[(start, end, path)]. 각 짤은 별도 입력으로 붙이고 enable로 구간만 보여준다.
+    · gif/webm/png의 투명 배경은 그대로 살린다(format=rgba 후 overlay).
+    · 화면의 26% 크기로 줄여 구석에 얹는다(자막·배너를 안 가리게 기본은 우상단).
+    · 등장/퇴장 0.2초 페이드 — 툭 튀어나오면 조악해 보인다.
+    """
+    STILL = (".png", ".webp", ".jpg", ".jpeg")
+    inputs, parts = [], []
+    idx = start_idx
+    for k, (s, e, p) in enumerate(cutins):
+        dur = max(0.3, float(e) - float(s))
+        # 정지 이미지는 -loop 1(계속 같은 프레임), 움짤/영상은 -stream_loop -1(구간 내내 반복)
+        if str(p).lower().endswith(STILL):
+            inputs += ["-loop", "1", "-t", f"{dur:.3f}", "-i", str(p)]
+        else:
+            inputs += ["-stream_loop", "-1", "-t", f"{dur:.3f}", "-i", str(p)]
+        fi = min(fade, dur / 3)
+        # 페이드는 짤 자신의 시간축(0부터)에서 걸고, 그 뒤 setpts로 등장 시각까지 밀어준다
+        parts.append(
+            f"[{idx}:v]scale={int(w * scale)}:-1,format=rgba,"
+            f"fade=t=in:st=0:d={fi:.2f}:alpha=1,"
+            f"fade=t=out:st={max(0.0, dur - fi):.2f}:d={fi:.2f}:alpha=1,"
+            f"setpts=PTS-STARTPTS+{float(s):.3f}/TB[g{k}]")
+        idx += 1
+    return inputs, parts, idx
+
+
 def burn_subs(video, dialogue_srt, narration_srt, out_video, styles=None,
               narration_json=None, dialogue_json=None, log=print,
               banner=None, banner_anim=None, subs=True, screen_flash=True,
-              flash_intensity=0.16):
+              flash_intensity=0.16, cutins=None, cutin_pos="tr", cutin_scale=0.26):
     """자막(+선택: 배너·워터마크)을 영상에 굽는다.
     banner={'frame':png,'info':png,'wm':png} 를 주면 자막과 같은 인코딩 1패스에서
     함께 합성한다(따로 굽는 2패스 대비 인코딩 1회 절약).
@@ -372,14 +401,41 @@ def burn_subs(video, dialogue_srt, narration_srt, out_video, styles=None,
             inputs, fc, last = _banner_filter(prep, banner_anim or BANNER_ANIM)
             log(f"배너 동시 굽기: {', '.join(prep)} (재인코딩 1패스 — 추가 비용 적음)")
 
-    if fc:
-        # 순서: 배너 → 화면 플래시 → 자막(ass). 자막이 맨 위에 와야 안 가려진다.
-        tail_f = (f"{flash}," if flash else "")
-        fc += (f"[{last}]{tail_f}ass={ass_path.name}[out]" if subs
-               else f"[{last}]null[out]")
-    elif flash:
-        # 배너가 없어도 플래시는 걸어야 하므로 필터그래프를 만든다
-        fc = f"[0:v]{flash},ass={ass_path.name}[out]"
+    # 짤(움짤) 오버레이 — 배너 입력 다음 번호부터 붙인다
+    cut_inputs, cut_parts = [], []
+    cuts = [(float(a), float(b), p) for a, b, p in (cutins or [])]
+    if cuts:
+        n_in = 1 + sum(1 for v in inputs if v == "-i")   # 0=원본, 그다음이 배너 입력들
+        cut_inputs, cut_parts, _ = _cutin_filter(cuts, w, h, n_in,
+                                                 pos=cutin_pos, scale=cutin_scale)
+        log(f"짤 오버레이 {len(cuts)}개 ({cutin_pos}, 화면의 {int(cutin_scale * 100)}%)")
+
+    if fc or flash or cut_parts:
+        # 순서: 배너 → 화면 플래시 → 짤 → 자막(ass). 자막이 맨 위에 와야 안 가려진다.
+        if not fc:
+            fc = ""
+            last = "0:v"
+        head = f"[{last}]{flash + ',' if flash else ''}null[fx];"
+        chain = head
+        cur = "fx"
+        for part in cut_parts:
+            chain += part + ";"
+        for k in range(len(cuts)):
+            s, e, _p = cuts[k]
+            nxt = f"cv{k}"
+            chain += (f"[{cur}][g{k}]overlay=x={{X}}:y={{Y}}:"
+                      f"enable='between(t,{s:.3f},{e:.3f})'[{nxt}];")
+            cur = nxt
+        # overlay 좌표는 _cutin_filter와 같은 규칙 — 여기서 치환
+        POS = {"tr": (f"W-w-{int(w * 0.03)}", f"{int(h * 0.06)}"),
+               "tl": (f"{int(w * 0.03)}", f"{int(h * 0.06)}"),
+               "br": (f"W-w-{int(w * 0.03)}", f"H-h-{int(h * 0.22)}"),
+               "bl": (f"{int(w * 0.03)}", f"H-h-{int(h * 0.22)}")}
+        px, py = POS.get(cutin_pos, POS["tr"])
+        chain = chain.replace("{X}", px).replace("{Y}", py)
+        fc = fc + chain + (f"[{cur}]ass={ass_path.name}[out]" if subs
+                           else f"[{cur}]null[out]")
+        inputs = inputs + cut_inputs
 
     # -loop 1 로 넣은 배너 PNG는 무한 스트림이라 원본이 끝나도 인코딩이 계속된다.
     # 원본 길이로 명시적으로 끊어준다.

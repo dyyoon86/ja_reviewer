@@ -581,7 +581,8 @@ $("#btnStepAi").onclick = () => {
     code, target_sec:+$("#target").value, llm:$("#llm").value,
     mode, hint:($("#hint")?$("#hint").value.trim():""), pos:segPos(), style:narStyle(),
     nar_rich: $("#narRich") ? $("#narRich").checked : false,
-    remove_bgm: $("#rmBgm") ? $("#rmBgm").checked : undefined
+    remove_bgm: $("#rmBgm") ? $("#rmBgm").checked : undefined,
+    cutins: $("#useCutins") ? $("#useCutins").checked : undefined
   })}).then(r=>r.json()).then(j=>runJob(j.job, (res)=>{
     setBadge("badgeAi","done"); showResult(res);
     log(`✔ AI 처리 완료 (최종 ${Math.round(res.final_sec||0)}초)`,"ok");
@@ -1530,7 +1531,22 @@ fetch("/config").then(r=>r.json()).then(c=>{
   if($("#narRich")) $("#narRich").checked = c.nar_rich === true;
   if($("#faRmBgm")) $("#faRmBgm").checked = c.remove_bgm === true;
   if($("#rmBgm")) $("#rmBgm").checked = c.remove_bgm === true;
+  if($("#useCutins")) $("#useCutins").checked = c.cutins === true;
 }).catch(()=>{});
+
+// 📁 짤 폴더 — 태그별 현황을 로그에 찍고 폴더를 연다(에셋만 넣으면 바로 쓰인다)
+if($("#btnAssets")) $("#btnAssets").onclick = () => {
+  fetch("/assets").then(r=>r.json()).then(a=>{
+    const have = Object.entries(a.tags||{}).filter(([,n])=>n>0);
+    const none = Object.entries(a.tags||{}).filter(([,n])=>!n).map(([t])=>t);
+    log(`📁 짤 폴더: ${a.gifs_dir}`, "ok");
+    log(have.length ? `  들어있는 짤: ${have.map(([t,n])=>`${t}(${n})`).join(", ")}`
+                    : "  아직 짤이 없습니다 — 태그 폴더에 gif/mp4/png를 넣으세요");
+    if(none.length) log(`  비어있는 태그: ${none.join(", ")}`);
+    fetch("/open_dir",{method:"POST",headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({sub:"_assets/gifs"})}).catch(()=>{});
+  }).catch(e=>log("에셋 폴더 조회 실패: "+e,"warn"));
+};
 
 if($("#btnWatchDir")) $("#btnWatchDir").onclick = () => {
   fetch("/browse_dir",{method:"POST"}).then(r=>r.json()).then(r=>{

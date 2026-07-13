@@ -421,7 +421,7 @@ def _reduce_transcript(meta, segs, llm, em, limit=25000, block_sec=1200):
 
 
 def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", style="3min",
-             nar_rich=None, remove_bgm=None):
+             nar_rich=None, remove_bgm=None, cutins=None):
     """② AI 처리 — 저장된 전사 + 메타 → LLM 압축·번역·내레이션. plan.json 저장 + 컷.
     gpu: 컷(NVENC) 구간을 감쌀 세마포어(큐 병렬 시) — None이면 잠금 없음(기존 단독 동작)."""
     gpu = gpu or NullLock()
@@ -480,8 +480,24 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
         # 강조·정보 내레이션은 기본 끔 — 색만 바뀔 뿐 등장 이펙트·크기·효과음 연출이 없어
         # 화면만 산만하다(2026-07-13). 연출을 갖춘 뒤 GUI 체크박스로 켠다.
         rich = bool(c.get("nar_rich", False) if nar_rich is None else nar_rich)
+        # 상황별 짤 — 에셋 폴더에 **실제로 파일이 있는 태그만** LLM에 알려준다.
+        #   (없는 태그를 고르게 하면 아무 짤도 안 나오는데 프롬프트만 길어진다)
+        tags = None
+        want_cutins = bool(c.get("cutins", False) if cutins is None else cutins)
+        if want_cutins:
+            try:
+                from server.core import assets
+                have = [t for t, n in assets.available(c["out_dir"]).items() if n > 0]
+                if have:
+                    tags = have
+                    em.log(f"짤 태그 {len(have)}종 사용 가능: {', '.join(have)}")
+                else:
+                    em.log("※ 짤 폴더가 비어 있어 짤 삽입을 건너뜁니다 "
+                           f"({assets.assets_dir(c['out_dir']) / 'gifs'})")
+            except Exception as e:
+                em.log(f"※ 짤 태그 조회 실패({e}) — 짤 없이 진행")
         res = P.call_llm(pf(m, plan_segs, target, hint=full_hint, pos=pos, style=style,
-                            with_dialogue=not two_pass, nar_rich=rich),
+                            with_dialogue=not two_pass, nar_rich=rich, cutin_tags=tags),
                          llm, em.log)
     finally:
         hb.set()
@@ -654,6 +670,17 @@ def stage_subs(c, code, em):
                f"— 컷 안으로 재배치합니다. 프롬프트 시간 규칙 위반이니 결과를 확인하세요.")
     write_narration(outdir, code, P.retime(nar, keep, snap=True, log=em.log))
     em.file("내레이션 자막", outdir / f"{code}_내레이션.srt")
+    # 상황별 짤 — LLM이 준 시간은 '원본 기준'이므로 keep 기준(최종 영상)으로 재타이밍한다.
+    #   자막과 같은 retime을 태워야 컷 뒤에도 같은 장면에 붙는다.
+    cut_in = res.get("cutins") or []
+    if cut_in:
+        rows = [(float(x.get("start", 0)), float(x.get("end", 0)) or float(x.get("start", 0)) + 2.5,
+                 str(x.get("tag") or "")) for x in cut_in if x.get("tag")]
+        rt = P.retime([(a, b, t) for a, b, t in rows], keep, snap=False)
+        data = [{"start": round(a, 3), "end": round(b, 3), "tag": t} for a, b, t, *_ in rt]
+        (outdir / f"{code}_짤.json").write_text(
+            json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+        em.log(f"상황 짤 {len(data)}개 (컷 기준으로 시간 재계산)")
     return {"step": "subs", "code": code,
             "srt_dialogue": str(outdir / f"{code}_대사.srt"),
             "srt_narration": str(outdir / f"{code}_내레이션.srt"),
@@ -759,7 +786,7 @@ def stage_banner(c, code, em, hold=2.0, preview=True):
             "meta": {k: r["meta"][k] for k in ("code", "actress", "title")}}
 
 
-def stage_burn(c, code, styles, em, source=None, banner=True, parts=None):
+def stage_burn(c, code, styles, em, source=None, banner=True, parts=None, cutins=None):
     """⑥ 굽기(하드섭) — voiced 우선 → final. {code}_final_subbed.mp4 생성.
     banner=True면 프레임·인포카드·워터마크를 같은 인코딩 1패스에서 함께 굽는다.
     parts={'frame','info','wm','subs': bool} 로 구울 요소를 고른다(미리보기 체크 그대로)."""
@@ -795,12 +822,26 @@ def stage_burn(c, code, styles, em, source=None, banner=True, parts=None):
         anim["wm_start"] = anim["hold"] + 0.1
     except (TypeError, ValueError):
         pass
+    # 상황별 짤 — {code}_짤.json(컷 기준 시각) + 에셋 폴더의 실제 파일을 맞춰 얹는다
+    cuts = []
+    gjson = outdir / f"{code}_짤.json"
+    want_cutins = bool(c.get("cutins", False) if cutins is None else cutins)
+    if want_cutins and gjson.is_file():
+        try:
+            from server.core import assets
+            cuts = assets.resolve_cutins(
+                c["out_dir"], json.loads(gjson.read_text(encoding="utf-8")), log=em.log)
+        except Exception as e:
+            em.log(f"※ 짤 준비 실패({type(e).__name__}: {e}) — 짤 없이 굽습니다")
+
     P.burn_subs(str(src), str(dsrt), str(nsrt), out, styles,
                 str(njson) if njson.is_file() else None,
                 str(djson) if djson.is_file() else None, em.log,
                 banner=bl, banner_anim=anim, subs=want_subs,
                 screen_flash=bool(c.get("screen_flash", True)),
-                flash_intensity=float(c.get("flash_intensity", 0.14)))
+                flash_intensity=float(c.get("flash_intensity", 0.14)),
+                cutins=cuts, cutin_pos=c.get("cutin_pos", "tr"),
+                cutin_scale=float(c.get("cutin_scale", 0.26)))
     # 강조·정보 자막이 뜨는 순간에 효과음 — 등장 애니(쾅/일렁임)와 짝이 되어야 임팩트가 산다
     if c.get("sfx", True) and want_subs and njson.is_file():
         try:

@@ -295,7 +295,7 @@ def prompt_auto(meta, segs, target_sec=60, hint="", pos="mid", style="3min"):
 
 
 def prompt_highlight(meta, segs, target_sec=60, hint="", pos="mid", style="3min",
-                     with_dialogue=True, nar_rich=False):
+                     with_dialogue=True, nar_rich=False, cutin_tags=None):
     """AlphaCut식 하이라이트 추출 — '고루 분포' 대신 '가장 후킹되는 순간'만 골라 몰아 뽑는다."""
     body = "\n".join(f"{k}\t{a:.2f}\t{b:.2f}\t{t}" for k, (a, b, t) in enumerate(segs, 1))
     make = "압축한다" if not with_dialogue else "압축하고, 한글 대사자막과 해설 내레이션을 만든다"
@@ -304,7 +304,7 @@ def prompt_highlight(meta, segs, target_sec=60, hint="", pos="mid", style="3min"
             f"{_hint_block(hint)}"
             f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n"
             f"{_roundup_block(pos, target_sec, style)}{_timeline_rule()}{_style(style)}\n"
-            f"{_dialogue_note(with_dialogue)}{_nar_style_rule(nar_rich)}"
+            f"{_dialogue_note(with_dialogue)}{_nar_style_rule(nar_rich)}{_cutin_rule(cutin_tags)}"
             f"[하이라이트 규칙] "
             f"(1)잡담·무음·반복은 버린다. "
             f"(2)★고루 분포 금지★ — 앞·중간·뒤 균등이 아니라 **후킹 밀도가 가장 높은 순간에 집중**. "
@@ -315,7 +315,9 @@ def prompt_highlight(meta, segs, target_sec=60, hint="", pos="mid", style="3min"
             f"\"picks\":[{{\"start\":초,\"end\":초,\"hook\":1~5,\"reason\":\"\"}}],"
             f"\"keep\":[[시작,끝],...],"  # picks 와 동일 구간(렌더 호환용)
             f"{_dialogue_out(with_dialogue)}"
-            f"\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\",\"style\":\"기본|강조|정보\"}}]}}")
+            f"{_cutin_out(cutin_tags)}"
+            f"\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\","
+            f"\"style\":\"{_nar_style_out(nar_rich)}\"}}]}}")
 
 
 def _nar_style_rule(rich):
@@ -334,6 +336,23 @@ def _nar_style_out(rich):
     return "기본|강조|정보" if rich else "기본"
 
 
+def _cutin_rule(tags):
+    """상황별 짤(움짤) — LLM이 '여기서 어떤 반응 짤이 어울리나'를 골라준다.
+    태그는 폴더 이름과 1:1이라 목록 밖은 쓰면 안 된다(없는 태그는 그냥 무시됨)."""
+    if not tags:
+        return ""
+    return ("[상황 짤] 시청자 반응을 대신할 짤을 넣을 자리를 고른다. "
+            f"태그는 **반드시 이 목록에서만**: {', '.join(tags)}. "
+            "리액션이 필요한 순간(반전·어이없는 대사·민망한 장면)에만 2~4개. "
+            "남발하면 촌스럽다. 각 짤은 2~3초.\n")
+
+
+def _cutin_out(tags):
+    if not tags:
+        return ""
+    return "\"cutins\":[{\"start\":초,\"end\":초,\"tag\":\"" + "|".join(tags) + "\"}],"
+
+
 def _keep_meta_out():
     """왜 그 구간을 골랐는지 근거를 쓰게 한다 — LLM이 근거를 적으면 선택이 정교해지고,
     나중에 '왜 이 컷?'을 추적할 수 있다(하이라이트 모드엔 이미 picks[].hook/reason이 있음)."""
@@ -342,7 +361,7 @@ def _keep_meta_out():
 
 
 def prompt_manual(meta, segs, target_sec=60, hint="", pos="mid", style="3min",
-                  with_dialogue=True, nar_rich=False):
+                  with_dialogue=True, nar_rich=False, cutin_tags=None):
     body = "\n".join(f"{k}\t{a:.2f}\t{b:.2f}\t{t}" for k, (a, b, t) in enumerate(segs, 1))
     make = ("**스토리 핵심만 골라 약 {t}초 내외로 압축**하고, 해설 내레이션을 만든다"
             if not with_dialogue else
@@ -353,7 +372,7 @@ def prompt_manual(meta, segs, target_sec=60, hint="", pos="mid", style="3min",
             f"{_hint_block(hint)}"
             f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n"
             f"{_roundup_block(pos, target_sec, style)}{_timeline_rule()}{_style(style)}\n"
-            f"{_dialogue_note(with_dialogue)}{_nar_style_rule(nar_rich)}"
+            f"{_dialogue_note(with_dialogue)}{_nar_style_rule(nar_rich)}{_cutin_rule(cutin_tags)}"
             f"[규칙] (1)무음·잡담·반복·의미없는 짧은 라인은 버린다. "
             f"(2)스토리(설정·관계·전환·갈등·결말)를 드러내는 핵심 구간만 keep으로 골라 **합쳐서 {target_sec}초 ±20% 목표**. "
             f"(3)정사 선별은 하지 말 것(이미 제거됨). 시간은 이 자막 기준 초.\n"
@@ -361,6 +380,7 @@ def prompt_manual(meta, segs, target_sec=60, hint="", pos="mid", style="3min",
             f"[출력 JSON만] {{\"summary\":\"3~5줄\",\"stars\":1~5,\"keep\":[[시작,끝],...],"
             f"{_keep_meta_out()}"
             f"{_dialogue_out(with_dialogue)}"
+            f"{_cutin_out(cutin_tags)}"
             f"\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\","
             f"\"style\":\"{_nar_style_out(nar_rich)}\"}}]}}")
 

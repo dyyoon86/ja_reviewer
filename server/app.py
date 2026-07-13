@@ -86,6 +86,9 @@ DEFAULTS = {"meta_api": "http://172.30.1.40:8770", "llm": "claude",
             # torch가 없는 venv 대신 **시스템 파이썬의 demucs**를 외부 호출한다(bgm_python로 지정 가능).
             # 주의: 목소리만 남기므로 방 잡음·발소리 같은 현장음도 함께 사라진다(매우 드라이해진다).
             "remove_bgm": False, "bgm_model": "htdemucs",
+            # 상황별 짤(움짤) — {out_dir}/_assets/gifs/{태그}/ 에 파일을 넣으면 그 태그만 쓰인다.
+            # LLM이 태그를 고르고(cutins), 굽기가 화면 구석에 얹는다. 파일 없으면 조용히 생략.
+            "cutins": False, "cutin_pos": "tr", "cutin_scale": 0.26,
             "fullauto_mode": "summary",   # 자동 모드 방식: summary | highlight
             # keep 합계가 목표의 이 비율 미만이면 ②에서 중단(대사 없는 본편형 = 자동화 부적합)
             "min_keep_ratio": 0.5,
@@ -619,6 +622,17 @@ async def nsfw_scan(req: Request):
     return {"job": jid}
 
 
+@app.get("/assets")
+def assets_status():
+    """에셋 현황 — 태그별 짤 개수 + 폴더 경로(GUI가 '어디에 넣는지' 보여준다)."""
+    c = load_cfg()
+    from server.core import assets
+    root = assets.ensure_layout(c["out_dir"], log=lambda *_: None)
+    return {"dir": str(root), "gifs_dir": str(root / "gifs"),
+            "tags": assets.available(c["out_dir"]),
+            "plates": {k: assets.plate(c["out_dir"], k) for k in ("emphasis", "info")}}
+
+
 @app.post("/mark_clean")
 async def mark_clean(req: Request):
     """⚡ 순차 자동 클린(2️⃣소리→3️⃣의미→1️⃣화면)이 완주한 파일에 '클린 완료' 마커를
@@ -844,7 +858,8 @@ async def step_ai(req: Request):
                                 JobEmitter(jid), pos=body.get("pos", "mid"),
                                 style=body.get("style", "3min"),
                                 nar_rich=body.get("nar_rich"),
-                                remove_bgm=body.get("remove_bgm")))
+                                remove_bgm=body.get("remove_bgm"),
+                                cutins=body.get("cutins")))
         except Exception as e:
             jerr(jid, e)
     run_bg(work)
