@@ -399,7 +399,12 @@ $("#btnChainClean").onclick = async () => {
       const tres = await runJobP(tj.job);
       if(!tres || !tres.video) throw new Error(st.label+" 잘라내기 결과 없음");
       path = tres.video; dur = tres.duration || 0; nCut += rs.length;
-      log(`✔ ${st.label} 완료 → 남은 길이 ${hhmmss(dur)}`,"ok");
+      // 단계가 끝날 때마다 플레이어·작업 대상 배지에 중간 결과를 바로 반영 —
+      // 안 그러면 체인이 도는 몇 분 내내 원본이 보여서 "안 잘린 건가?" 헷갈린다.
+      videoPath = path; duration = dur;
+      vid.src = `/video/stream?path=${encodeURIComponent(path)}&t=${Date.now()}`;
+      setCurFile();
+      log(`✔ ${st.label} 완료 → 남은 길이 ${hhmmss(dur)} (플레이어에 반영됨)`,"ok");
     }
     videoPath = path; duration = dur;
     vid.src = `/video/stream?path=${encodeURIComponent(path)}&t=${Date.now()}`;
