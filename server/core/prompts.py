@@ -318,6 +318,13 @@ def prompt_highlight(meta, segs, target_sec=60, hint="", pos="mid", style="3min"
             f"\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\",\"style\":\"기본|강조|정보\"}}]}}")
 
 
+def _keep_meta_out():
+    """왜 그 구간을 골랐는지 근거를 쓰게 한다 — LLM이 근거를 적으면 선택이 정교해지고,
+    나중에 '왜 이 컷?'을 추적할 수 있다(하이라이트 모드엔 이미 picks[].hook/reason이 있음)."""
+    return ("\"keep_meta\":[{\"start\":초,\"end\":초,\"beat\":\"도입|관계|전환|갈등|결말\","
+            "\"reason\":\"이 구간을 고른 이유 한 줄\"}],")
+
+
 def prompt_manual(meta, segs, target_sec=60, hint="", pos="mid", style="3min",
                   with_dialogue=True):
     body = "\n".join(f"{k}\t{a:.2f}\t{b:.2f}\t{t}" for k, (a, b, t) in enumerate(segs, 1))
@@ -336,6 +343,7 @@ def prompt_manual(meta, segs, target_sec=60, hint="", pos="mid", style="3min",
             f"(3)정사 선별은 하지 말 것(이미 제거됨). 시간은 이 자막 기준 초.\n"
             f"{_must_have(style)}"
             f"[출력 JSON만] {{\"summary\":\"3~5줄\",\"stars\":1~5,\"keep\":[[시작,끝],...],"
+            f"{_keep_meta_out()}"
             f"{_dialogue_out(with_dialogue)}"
             f"\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\",\"style\":\"기본|강조|정보\"}}]}}")
 

@@ -32,7 +32,7 @@ from server.core.common import (
     _BREAK_SUFFIX, _BREAK_PUNCT, _good_break, _wrap_chunks, split_entries,
     sanitize_segments, clamp_durations, write_srt, video_duration,
     parse_keep, clamp_stars, parse_lines, keep_from_exclude,
-    _fit_tail, retime, srt_parse, video_wh, invalidate_derived,
+    _fit_tail, retime, srt_parse, video_wh, invalidate_derived, snap_keep_to_lines,
 )
 from server.core.transcribe import (
     HALLUCINATION_JA, _looks_hallucinated, _ensure_cuda_dll_path,

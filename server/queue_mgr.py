@@ -304,7 +304,9 @@ class QueueManager:
                     em.log("⏸ 일시정지 요청 → 다음 스테이지 전에 중단")
                     self._touch()
                     return
-                done = S.steps_status(outdir, code)
+                # video를 넘겨 전사 캐시가 '지금 그 영상'의 것인지까지 본다
+                # (같은 품번에 다른 영상을 넣으면 옛 전사를 물려받던 문제)
+                done = S.steps_status(outdir, code, video=it.get("video"))
                 if done.get(stg):
                     em.log(f"{STAGE_LABEL[stg]} 이미 완료 → 건너뜀")
                     continue

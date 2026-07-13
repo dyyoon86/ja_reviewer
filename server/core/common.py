@@ -420,3 +420,58 @@ def invalidate_derived(outdir, code, log=print):
     if tts.is_dir():
         shutil.rmtree(tts, ignore_errors=True)
         log(f"이전 내레이션 음성 조각 삭제: {tts.name}/")
+
+
+def snap_keep_to_lines(keep, segs, total=None, pad=0.15, max_snap=1.5, log=print):
+    """keep 경계를 전사 대사(줄) 경계로 스냅하고 앞뒤에 패딩을 준다.
+
+    왜 — LLM이 준 keep 시각은 전사 타임스탬프에서 유도되지만 그대로 자르면
+    말 중간에서 끊긴다("…했습ㄴ"). 전사 타임스탬프 자체도 50~100ms 흔들린다.
+      · 경계가 어떤 대사 줄 **안쪽**에 있으면 → 그 줄을 통째로 포함하는 쪽으로 스냅
+        (단 max_snap 이내일 때. 그보다 멀면 그 줄을 버리는 쪽으로 스냅해서 구간이
+         과하게 늘어나는 것을 막는다)
+      · 스냅 후 앞뒤 pad(기본 150ms)를 더한다 — 타임스탬프 드리프트 흡수
+    겹치게 된 구간은 병합한다. 전사 줄이 없으면 패딩만 적용."""
+    keep = [(float(a), float(b)) for a, b in sorted(keep) if float(b) > float(a)]
+    if not keep:
+        return keep
+    lines = sorted((float(s), float(e)) for s, e, *_ in (segs or []))
+
+    def snap_start(a):
+        for s, e in lines:
+            if s < a < e:                      # 줄 한가운데서 시작 → 줄 시작으로 당김
+                return s if (a - s) <= max_snap else e
+        return a
+
+    def snap_end(b):
+        for s, e in lines:
+            if s < b < e:                      # 줄 한가운데서 끝 → 줄 끝까지 밀어줌
+                return e if (e - b) <= max_snap else s
+        return b
+
+    out = []
+    for a, b in keep:
+        a2, b2 = snap_start(a), snap_end(b)
+        # ★ 과도 축소 가드 — 긴 대사 줄이 양 경계에 걸리면 둘 다 '버리는' 쪽으로 스냅돼
+        #   구간이 뭉텅 사라진다(실측: 4.0s keep → 0.5s). 절반 넘게 줄어들면 스냅을
+        #   포기하고 원본 경계를 쓴다(패딩만 적용) — LLM이 고른 분량을 지키는 게 우선.
+        if b2 <= a2 or (b2 - a2) < 0.5 * (b - a):
+            a2, b2 = a, b
+        a2 = max(0.0, a2 - pad)
+        b2 = b2 + pad
+        if total:
+            b2 = min(float(total), b2)
+        if b2 - a2 > 0.05:
+            out.append((a2, b2))
+    # 패딩으로 맞닿거나 겹친 구간 병합
+    merged = []
+    for a, b in out:
+        if merged and a <= merged[-1][1] + 0.02:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], b))
+        else:
+            merged.append((a, b))
+    before = sum(b - a for a, b in keep)
+    after = sum(b - a for a, b in merged)
+    log(f"컷 경계 정리: {len(keep)}→{len(merged)}구간, {before:.1f}s→{after:.1f}s "
+        f"(대사 경계 스냅 + 앞뒤 {pad * 1000:.0f}ms 패딩 — 말 중간에서 안 끊기게)")
+    return merged

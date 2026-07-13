@@ -56,15 +56,52 @@ def save_state(outdir, code, **fields):
     return st
 
 
-def steps_status(outdir, code):
-    """단계 완료 여부는 '결과 파일 존재'로 판정 → 서버 재시작/수동삭제에도 견고."""
+def worklog(outdir, code, line):
+    """품번별 작업 로그 — '언제 뭘 했고 왜 그렇게 됐나'를 한 줄씩 append.
+    재작업 추적용(같은 품번을 컨셉 바꿔 여러 번 돌리면 뭐가 뭔지 알 수 없어진다).
+    실패해도 파이프라인을 막지 않는다(로그일 뿐)."""
+    try:
+        import datetime
+        ts = datetime.datetime.now().strftime("%m-%d %H:%M")
+        p = Path(outdir) / f"{code}_작업로그.md"
+        with p.open("a", encoding="utf-8") as f:
+            f.write(f"- `{ts}` {line}\n")
+    except OSError:
+        pass
+
+
+def src_sig(video):
+    """소스 파일 지문(크기:수정시각) — 전사 캐시가 '같은 품번, 다른 영상'에 재사용되는 것을 막는다.
+    (품번 폴더로 결과를 모으므로, 같은 품번에 다른 컷/원본을 넣으면 옛 전사를 물려받았다)"""
+    try:
+        s = Path(video).stat()
+        return f"{s.st_size}:{int(s.st_mtime)}"
+    except OSError:
+        return ""
+
+
+def transcribe_fresh(outdir, code, video):
+    """전사 결과가 '지금 그 영상'의 것인가. 지문이 없으면(구버전 state) 있는 것으로 본다."""
+    if not (Path(outdir) / f"{code}_전사.json").is_file():
+        return False
+    st = load_state(outdir, code)
+    old = st.get("src_sig")
+    if not old or not video:
+        return True          # 구버전 state — 기존 동작 유지(재전사 강요하지 않음)
+    return old == src_sig(video)
+
+
+def steps_status(outdir, code, video=None):
+    """단계 완료 여부는 '결과 파일 존재'로 판정 → 서버 재시작/수동삭제에도 견고.
+    video를 주면 전사는 '그 영상의 전사인지'까지 본다(소스가 바뀌면 재전사)."""
     o = Path(outdir)
     # 배너 레이어는 작업폴더가 아니라 {out_dir}/_infocard_{code}/ 에 모인다
     ic = o.parent / f"_infocard_{code}"
     # clean: 클린본이 있거나, 스캔 결과 노출이 없어 원본을 그대로 쓰기로 한 경우(state.cleaned)
     return {"clean": (o / f"{code}_클린.mp4").is_file()
                      or bool(load_state(outdir, code).get("cleaned")),
-            "transcribe": (o / f"{code}_전사.json").is_file(),
+            "transcribe": (transcribe_fresh(o, code, video) if video
+                           else (o / f"{code}_전사.json").is_file()),
             "ai": (o / f"{code}_plan.json").is_file(),
             "subs": (o / f"{code}_대사.srt").is_file(),
             "banner": (ic / f"{code}_워터마크.png").is_file(),
@@ -211,8 +248,9 @@ def stage_transcribe(c, code, video, model, em, initial_prompt=None):
     2시간짜리 원본도 정밀 전사는 keep 합계(1~3분)에만 들어가 전체가 수 분에 끝난다."""
     outdir = work_dir(c, code)
     two_pass = bool(c.get("two_pass", True))
+    used_model = model
     if two_pass:
-        scan_model = c.get("scan_model", "small")
+        scan_model = used_model = c.get("scan_model", "small")
         em.step(1, 1, f"전사 1차 스캔(faster-whisper {scan_model} — 러프, 구간선정용)")
         segs = P.transcribe_scan(video, scan_model, em.log, lambda fr: em.prog(fr, "스캔"),
                                  initial_prompt=initial_prompt)
@@ -230,7 +268,10 @@ def stage_transcribe(c, code, video, model, em, initial_prompt=None):
     (outdir / f"{code}_전사.json").write_text(
         json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
     P.write_srt([(s, e, t) for s, e, t in segs], outdir / f"{code}_전사.srt")
-    save_state(outdir, code, video=str(video), model=model, scan=two_pass)
+    save_state(outdir, code, video=str(video), model=model, scan=two_pass,
+               src_sig=src_sig(video))   # 소스 지문 — 다른 영상이면 다음 실행에서 재전사
+    worklog(outdir, code, f"① 전사({used_model}) — {len(segs)}줄, "
+                          f"소스 `{Path(video).name}` ({dur / 60:.0f}분)")
     em.file("전사 자막", outdir / f"{code}_전사.srt")
     return {"step": "transcribe", "code": code, "count": len(segs),
             "srt": str(outdir / f"{code}_전사.srt")}
@@ -363,6 +404,14 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
     if not keep:
         raise RuntimeError("LLM이 keep 구간을 못 골랐습니다(빈 응답 — 헤드리스 거부 가능. 아래 수동 모드 사용).")
     keep = _guard_keep(keep, segs, em.log)
+    # ★ 컷 경계를 대사 줄 경계로 스냅 + 앞뒤 패딩 — 말 중간에서 끊기는 것("…했습ㄴ") 방지.
+    #   순서가 중요하다: ① 정밀 재전사보다 **앞** (그래야 정밀 전사·대사가 최종 keep과 일치)
+    #                  ② 노출 가드보다 **앞** (패딩이 방금 도려낸 노출을 되살리면 안 되므로
+    #                     노출 가드가 마지막에 돌아야 한다)
+    if c.get("snap_cuts", True) and keep:
+        keep = P.snap_keep_to_lines(
+            keep, segs, total=P.video_duration(video),
+            pad=float(c.get("cut_pad", 0.15)), log=em.log)
     res["keep"] = [[a, b] for a, b in keep]   # 제외 반영된 keep을 plan에 저장(자막 재타이밍 일치)
     # 2-pass: ①이 러프 스캔이었다면 keep 구간만 정밀 재전사 → 대사자막을 정밀본으로 교체.
     # 실패해도 러프 기반 dialogue가 남아 있으니 결과는 항상 나온다(품질만 러프로 후퇴).
@@ -457,6 +506,17 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
         P.cut_video(video, keep, final, em.log, lambda fr: em.prog(fr, "컷"))
     # 새 컷이 만들어졌다 = 이전 컨셉의 음성본/굽기본/TTS 조각은 전부 구버전 → 삭제
     P.invalidate_derived(outdir, code, em.log)
+    # 왜 그 구간을 골랐는지 — LLM이 준 근거를 로그에 남긴다(재작업 추적)
+    km = res.get("keep_meta") or res.get("picks") or []
+    worklog(outdir, code,
+            f"② AI {'하이라이트형' if mode == 'highlight' else '요약형'}({llm}, 목표 {target}s) "
+            f"— keep {len(keep)}구간 / {sum(b - a for a, b in keep):.0f}s"
+            + (f", ★{P.clamp_stars(res.get('stars'))}" if res.get("stars") else ""))
+    for it in (km if isinstance(km, list) else [])[:12]:
+        if isinstance(it, dict) and it.get("reason"):
+            worklog(outdir, code,
+                    f"    · {float(it.get('start', 0)):.0f}~{float(it.get('end', 0)):.0f}s "
+                    f"[{it.get('beat') or ('hook' + str(it.get('hook', '')))}] {it['reason']}")
     (outdir / f"{code}_plan.json").write_text(
         json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
     save_state(outdir, code, target=target, llm=llm,
@@ -653,6 +713,30 @@ def stage_burn(c, code, styles, em, source=None, banner=True, parts=None):
             em.log("※ NudeNet 미설치 — 완성본 전수 검사 생략")
         except Exception as e:
             em.log(f"※ 완성본 전수 검사 실패({type(e).__name__}: {e}) — 검사 없이 수거")
+    # ★ 자체 검사(self-eval) — 나가는 물건의 컷 경계 팝·정지·무음·자막 커버리지를 기계로 본다.
+    #   판정만 하고 고치지 않는다(결함은 리포트로 남기고 사람이 결정).
+    if c.get("self_eval", True):
+        try:
+            from server.core import selfeval
+            plan = outdir / f"{code}_plan.json"
+            keep = P.parse_keep(json.loads(plan.read_text(encoding="utf-8")).get("keep", [])) \
+                if plan.is_file() else []
+            ev = selfeval.evaluate(out, keep=keep,
+                                   srt_files=[dsrt if dsrt.is_file() else None,
+                                              nsrt if nsrt.is_file() else None],
+                                   log=em.log, cfg=c)
+            (outdir / f"{code}_검사.json").write_text(
+                json.dumps(ev, ensure_ascii=False, indent=1), encoding="utf-8")
+            if not ev["ok"]:
+                em.file("자체 검사 리포트", outdir / f"{code}_검사.json")
+                worklog(outdir, code, f"⚠ 자체 검사 결함 {len(ev['issues'])}건 — "
+                        + "; ".join(i["detail"] for i in ev["issues"][:3]))
+            else:
+                worklog(outdir, code, f"✔ 자체 검사 통과 (자막 커버리지 "
+                                      f"{ev['sub_coverage'] * 100:.0f}%)")
+        except Exception as e:
+            em.log(f"※ 자체 검사 실패({type(e).__name__}: {e}) — 건너뜁니다")
+
     # 완성본 수거함 — 품번 폴더에 흩어진 완성본을 한 곳에 모은다(풀오토 출구).
     # 노출이 검출된 건 _검수필요/ 로 격리 — 사람이 보기 전엔 업로드 폴더에 들어가지 않는다.
     try:
