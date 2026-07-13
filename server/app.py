@@ -82,6 +82,10 @@ DEFAULTS = {"meta_api": "http://172.30.1.40:8770", "llm": "claude",
             #   flash_intensity: 0.30은 화면이 통째로 새빨개져 못 씀 — 0.14~0.18 권장
             #   sfx: 강조=impact(쿵) / 정보=blip(띡). {out_dir}/_sfx/에 직접 넣으면 그걸 씀
             "nar_rich": False, "screen_flash": True, "flash_intensity": 0.14, "sfx": True,
+            # 원본 BGM 제거(demucs) — 최종 컷(1~3분)에만 적용. GPU 실측 86초 클립에 15초.
+            # torch가 없는 venv 대신 **시스템 파이썬의 demucs**를 외부 호출한다(bgm_python로 지정 가능).
+            # 주의: 목소리만 남기므로 방 잡음·발소리 같은 현장음도 함께 사라진다(매우 드라이해진다).
+            "remove_bgm": False, "bgm_model": "htdemucs",
             "fullauto_mode": "summary",   # 자동 모드 방식: summary | highlight
             # keep 합계가 목표의 이 비율 미만이면 ②에서 중단(대사 없는 본편형 = 자동화 부적합)
             "min_keep_ratio": 0.5,
@@ -839,7 +843,8 @@ async def step_ai(req: Request):
             jdone(jid, stage_ai(c, code, body.get("path"), target, llm, mode, hint,
                                 JobEmitter(jid), pos=body.get("pos", "mid"),
                                 style=body.get("style", "3min"),
-                                nar_rich=body.get("nar_rich")))
+                                nar_rich=body.get("nar_rich"),
+                                remove_bgm=body.get("remove_bgm")))
         except Exception as e:
             jerr(jid, e)
     run_bg(work)

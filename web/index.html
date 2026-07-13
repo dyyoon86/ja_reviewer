@@ -68,6 +68,8 @@
           <input type="checkbox" id="faTwoPass" checked style="height:auto;vertical-align:middle"> ⚡ 2단계 전사 (권장)</label>
         <label class="muted" title="'강조'·'정보' 내레이션 자막을 LLM이 만들지 여부. 지금은 색만 바뀔 뿐 등장 이펙트·크기·효과음 연출이 없어 기본은 끕니다 — 연출을 갖춘 뒤 켜세요.">
           <input type="checkbox" id="faNarRich" style="height:auto;vertical-align:middle"> 🎨 강조·정보 자막 사용</label>
+        <label class="muted" title="원본 배경음악(BGM)을 demucs로 제거하고 목소리만 남깁니다(최종 컷에만, 10~20초). 현장음도 함께 사라집니다 — 내 BGM을 깔 때 유용">
+          <input type="checkbox" id="faRmBgm" style="height:auto;vertical-align:middle"> 🎵 원본 BGM 제거</label>
       </div>
       <div class="actions">
         <button id="btnOpenDone" class="spacer">📂 완성본 폴더 열기</button>
@@ -289,6 +291,9 @@
             </select>
             <label class="chk" title="'강조'(빨강 큰 글씨)·'정보'(하늘색 우상단) 내레이션을 LLM이 만들지 여부. 지금은 색만 바뀔 뿐 등장 이펙트·크기 변화·효과음 연출이 없어 기본은 끕니다 — 연출을 갖춘 뒤 켜세요.">
               <input type="checkbox" id="narRich"> 강조·정보 자막 사용
+            </label>
+            <label class="chk" title="원본의 배경음악(BGM)을 demucs로 걷어내고 사람 목소리만 남깁니다. 최종 컷에만 돌려서 1~3분 영상이 10~20초. 주의: 현장음(방 잡음·발소리)도 함께 사라져 매우 드라이해집니다 — 내 BGM을 따로 깔 때 유용">
+              <input type="checkbox" id="rmBgm"> 원본 BGM 제거
             </label>
             <button class="go" id="btnStepAi">실행</button>
           </li>

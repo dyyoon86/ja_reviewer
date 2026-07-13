@@ -421,7 +421,7 @@ def _reduce_transcript(meta, segs, llm, em, limit=25000, block_sec=1200):
 
 
 def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", style="3min",
-             nar_rich=None):
+             nar_rich=None, remove_bgm=None):
     """② AI 처리 — 저장된 전사 + 메타 → LLM 압축·번역·내레이션. plan.json 저장 + 컷.
     gpu: 컷(NVENC) 구간을 감쌀 세마포어(큐 병렬 시) — None이면 잠금 없음(기존 단독 동작)."""
     gpu = gpu or NullLock()
@@ -589,6 +589,23 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
     em.step(3, 3, "핵심 구간 컷")
     with gpu:
         P.cut_video(video, keep, final, em.log, lambda fr: em.prog(fr, "컷"))
+    # ★ 원본 BGM 제거 — 컷 결과(1~3분)에만 돌린다(원본 2시간이 아니라).
+    #   여기서 해야 뒤따르는 TTS 더킹·굽기가 '목소리만 있는' 오디오를 쓴다.
+    #   실패해도 파이프라인은 계속 간다(BGM 있는 채로 진행).
+    want_bgm = bool(c.get("remove_bgm", False) if remove_bgm is None else remove_bgm)
+    if want_bgm:
+        try:
+            from server.core import bgm
+            em.step(3, 3, "원본 BGM 제거 (demucs — 목소리만 남김)")
+            with gpu:
+                bgm.remove_bgm(final, final, log=em.log,
+                               python=c.get("bgm_python"),
+                               model=c.get("bgm_model", "htdemucs"),
+                               progress=lambda fr: em.prog(fr, "BGM 제거"))
+            worklog(outdir, code, "② BGM 제거 — 원본 배경음악 제거(목소리만)")
+        except Exception as e:
+            em.log(f"※ BGM 제거 실패({type(e).__name__}: {e}) — 원본 소리 그대로 진행")
+
     # 새 컷이 만들어졌다 = 이전 컨셉의 음성본/굽기본/TTS 조각은 전부 구버전 → 삭제
     P.invalidate_derived(outdir, code, em.log)
     # 왜 그 구간을 골랐는지 — LLM이 준 근거를 로그에 남긴다(재작업 추적)

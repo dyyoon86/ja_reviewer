@@ -580,7 +580,8 @@ $("#btnStepAi").onclick = () => {
   fetch("/step/ai",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
     code, target_sec:+$("#target").value, llm:$("#llm").value,
     mode, hint:($("#hint")?$("#hint").value.trim():""), pos:segPos(), style:narStyle(),
-    nar_rich: $("#narRich") ? $("#narRich").checked : false
+    nar_rich: $("#narRich") ? $("#narRich").checked : false,
+    remove_bgm: $("#rmBgm") ? $("#rmBgm").checked : undefined
   })}).then(r=>r.json()).then(j=>runJob(j.job, (res)=>{
     setBadge("badgeAi","done"); showResult(res);
     log(`✔ AI 처리 완료 (최종 ${Math.round(res.final_sec||0)}초)`,"ok");
@@ -1508,6 +1509,7 @@ function faSave(){
     nsfw_guard: $("#faNsfw").checked,
     two_pass: $("#faTwoPass").checked,
     nar_rich: $("#faNarRich") ? $("#faNarRich").checked : false,
+    remove_bgm: $("#faRmBgm") ? $("#faRmBgm").checked : false,
   };
   fetch("/config",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
     .then(()=>{ const s=$("#faStat"); if(s) s.textContent="✓ 저장됨 — 다음 영상부터 적용됩니다."; });
@@ -1526,6 +1528,8 @@ fetch("/config").then(r=>r.json()).then(c=>{
   // 강조·정보 자막은 기본 끔 (연출 미비 — config에 명시적으로 true일 때만 켠다)
   if($("#faNarRich")) $("#faNarRich").checked = c.nar_rich === true;
   if($("#narRich")) $("#narRich").checked = c.nar_rich === true;
+  if($("#faRmBgm")) $("#faRmBgm").checked = c.remove_bgm === true;
+  if($("#rmBgm")) $("#rmBgm").checked = c.remove_bgm === true;
 }).catch(()=>{});
 
 if($("#btnWatchDir")) $("#btnWatchDir").onclick = () => {
