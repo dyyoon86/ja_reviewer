@@ -753,6 +753,8 @@ def state(code: str):
         t = trims[-1]
         st["trim_video"] = str(t); st["trim_exists"] = True
         st["trim_sec"] = P.video_duration(t)
+        st["trim_name"] = t.name
+        st["trim_mtime"] = t.stat().st_mtime
         info = t.with_name(t.stem + "_info.txt")
         if info.is_file():
             st["trim_info"] = info.read_text(encoding="utf-8")

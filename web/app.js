@@ -411,6 +411,7 @@ $("#btnChainClean").onclick = async () => {
     excludes = []; pendingIn = null; renderEx(); setCurFile();
     log(`⚡ 순차 자동 클린 완료: 총 ${nCut}구간 제거 → ${hhmmss(dur)} `
        +`(${path.split(/[\\/]/).pop()}) — 결과를 재생해서 꼭 검수하세요`,"ok");
+    refreshSteps();   // '이전에 잘라낸 결과' 표시 갱신 — 지금 파일이 최신 trim이므로 숨겨진다
   }catch(e){
     log("⚡ 순차 자동 클린 중단: "+((e && e.message) || e),"warn");
     log(`  현재 작업 대상: ${path.split(/[\\/]/).pop()} — 여기까지는 잘려 있습니다`,"warn");
@@ -488,11 +489,18 @@ function refreshSteps(code){
     setBadge("badgeAi", st.ai?"done":"idle");
     setBadge("badgeSubs", st.subs?"done":"idle");
     // 이전에 잘라낸 결과가 있고, 지금 연 영상이 그 trim 자체가 아니면 → 사용 버튼 노출
+    // "이전 결과" = 이 품번 폴더에서 가장 최근에 만들어진 _trim.mp4 (⚡ 직후엔
+    // 지금 보고 있는 파일 그 자체 → 숨긴다). 어떤 파일·언제 것인지 라벨에 박는다.
     const tb=$("#btnUseTrim");
-    const isTrim = videoPath && /_trim\.mp4$/i.test(videoPath);
+    const isTrim = videoPath && (/_trim\.mp4$/i.test(videoPath) || videoPath===s.trim_video);
     if(s.trim_exists && s.trim_video && !isTrim){
       trimAvail={path:s.trim_video, dur:s.trim_sec||0};
-      tb.textContent=`✂ 이전에 잘라낸 결과 사용 (${hhmmss(s.trim_sec||0)})`;
+      const when = s.trim_mtime
+        ? new Date(s.trim_mtime*1000).toLocaleString("ko-KR",
+            {month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"})
+        : "";
+      tb.textContent=`✂ 이전에 잘라낸 결과 사용 — ${s.trim_name||"?"} `
+                    +`(${hhmmss(s.trim_sec||0)}${when?" · "+when:""})`;
       tb.style.display="";
     } else { trimAvail=null; tb.style.display="none"; }
   }).catch(()=>{});
