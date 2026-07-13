@@ -1162,10 +1162,16 @@ def preview_data(code: str, source: str = ""):
     # 대상 영상: 지정 → 음성입힘 → 최종컷
     src = Path(source) if source else None
     if not (src and src.is_file()):
-        for cand in (outdir / f"{code}_final_voiced.mp4", outdir / f"{code}_final.mp4"):
-            if cand.is_file():
-                src = cand
-                break
+        voiced = outdir / f"{code}_final_voiced.mp4"
+        final = outdir / f"{code}_final.mp4"
+        # 음성본은 최종컷보다 새것일 때만 — ②를 다른 컨셉으로 다시 돌리면 final만
+        # 갱신되는데, 이전 컨셉의 낡은 voiced를 집으면 미리보기가 옛것만 보여준다.
+        # (stage_ai가 파생물을 지우지만, 그 전에 만들어진 폴더를 위한 이중 안전장치)
+        if voiced.is_file() and (not final.is_file()
+                                 or voiced.stat().st_mtime >= final.stat().st_mtime):
+            src = voiced
+        elif final.is_file():
+            src = final
     if not (src and src.is_file()):
         raise HTTPException(404, f"미리볼 영상이 없습니다({code}). 먼저 ②AI 처리로 컷을 만드세요.")
 

@@ -12,7 +12,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from .common import s2srt, retime, parse_keep, video_duration
+from .common import s2srt, retime, parse_keep, video_duration, invalidate_derived
 from .llm import fetch_meta, _cli_path, call_llm
 from .prompts import prompt_manual
 from .cutter import cut_video
@@ -60,6 +60,7 @@ def replan(folder: Path, meta_api: str, llm="claude", target=60, log=print):
     final = str(folder / f"{code}_final.mp4")
     log("컷 영상 생성 중...")
     cut_video(str(vf), keep, final, log=log)
+    invalidate_derived(folder, code, log)
     dur = video_duration(final)
     log(f"완료: {final} ({dur:.1f}초)")
     return res

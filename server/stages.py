@@ -430,6 +430,8 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
     em.step(3, 3, "핵심 구간 컷")
     with gpu:
         P.cut_video(video, keep, final, em.log, lambda fr: em.prog(fr, "컷"))
+    # 새 컷이 만들어졌다 = 이전 컨셉의 음성본/굽기본/TTS 조각은 전부 구버전 → 삭제
+    P.invalidate_derived(outdir, code, em.log)
     (outdir / f"{code}_plan.json").write_text(
         json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
     save_state(outdir, code, target=target, llm=llm,

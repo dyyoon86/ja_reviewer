@@ -1294,7 +1294,7 @@ $("#btnPreview").onclick=()=>{
     const set=(el,p)=>{ if(p){ el.src=img(p); el.style.display="block"; } else el.style.display="none"; };
     set($("#pvFrame"),L.frame); set($("#pvInfo"),L.info); set($("#pvWm"),L.wm);
     if(L.error) log("※ 배너 레이어 생성 실패: "+L.error,"warn");
-    $("#pvVideo").src=`/video/stream?path=${encodeURIComponent(j.video)}`;
+    $("#pvVideo").src=`/video/stream?path=${encodeURIComponent(j.video)}&t=${Date.now()}`;
     $("#pvStage").style.display="block";
     log(`✔ 미리보기 — ${j.video} (${(j.duration||0).toFixed(1)}s, 자막 ${(j.subs||[]).length}줄)`,"ok");
     if(!pvRaf) pvLoop();

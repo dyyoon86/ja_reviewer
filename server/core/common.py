@@ -396,3 +396,27 @@ def video_wh(path):
         return 1920, 1080
 
 
+
+
+def invalidate_derived(outdir, code, log=print):
+    """②AI 처리(또는 구간 재선정)가 최종컷(final.mp4)을 새로 만들면 이전 컨셉의
+    파생물(음성본·자막굽기본·TTS 조각)은 전부 구버전이다 — 남겨두면 미리보기와
+    ⑥굽기가 옛것을 집어간다(실사례 2026-07-13: 요약형 뽑고 하이라이트형으로 재생성
+    했는데 미리보기가 이전 컨셉의 _voiced만 계속 표시). 새 컷 기준으로 다시
+    만들도록 지운다. TTS 조각(nNNN.wav)은 줄 번호로 재사용될 수 있어 특히 위험."""
+    import shutil
+    from pathlib import Path
+    outdir = Path(outdir)
+    for stale in (outdir / f"{code}_final_voiced.mp4",
+                  outdir / f"{code}_final_subbed.mp4"):
+        if stale.is_file():
+            try:
+                stale.unlink()
+            except OSError as e:
+                log(f"※ 구버전 파생물 삭제 실패({stale.name}): {e}")
+                continue
+            log(f"이전 컨셉 파생물 삭제: {stale.name} (새 컷 기준으로 다시 생성)")
+    tts = outdir / f"{code}_tts"
+    if tts.is_dir():
+        shutil.rmtree(tts, ignore_errors=True)
+        log(f"이전 내레이션 음성 조각 삭제: {tts.name}/")
