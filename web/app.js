@@ -409,8 +409,13 @@ $("#btnChainClean").onclick = async () => {
     videoPath = path; duration = dur;
     vid.src = `/video/stream?path=${encodeURIComponent(path)}&t=${Date.now()}`;
     excludes = []; pendingIn = null; renderEx(); setCurFile();
+    // '클린 완료' 마커 — ② AI 처리가 이 영상의 노출지도 스캔(NN 전체)을 생략하게 한다.
+    // 3중 필터를 완주한 파일에만 찍는다(중간 이탈본은 마커 없음 → ②가 정상 스캔).
+    fetch("/mark_clean",{method:"POST",headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({path})}).catch(()=>{});
     log(`⚡ 순차 자동 클린 완료: 총 ${nCut}구간 제거 → ${hhmmss(dur)} `
-       +`(${path.split(/[\\/]/).pop()}) — 결과를 재생해서 꼭 검수하세요`,"ok");
+       +`(${path.split(/[\\/]/).pop()}) — 결과를 재생해서 꼭 검수하세요. `
+       +`이 영상으로 ②를 돌리면 노출 스캔을 건너뜁니다`,"ok");
     refreshSteps();   // '이전에 잘라낸 결과' 표시 갱신 — 지금 파일이 최신 trim이므로 숨겨진다
   }catch(e){
     log("⚡ 순차 자동 클린 중단: "+((e && e.message) || e),"warn");

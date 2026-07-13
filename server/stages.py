@@ -320,6 +320,11 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
     nsfw_map = []
     if st.get("cleaned"):
         em.log("⓪ 노출 제거를 거친 클린본 — 추가 스캔 생략")
+    elif Path(str(video) + ".clean").is_file():
+        # ⚡ 순차 자동 클린(소리→의미→화면 3중 필터) 완주 마커 — 이미 그 필터들로
+        # 잘라낸 영상을 NN으로 또 훑을 이유가 없다(중복 스캔 제거, 2시간 ≈ 3분 절약).
+        # keep 단위 비주얼 가드는 안전망으로 그대로 돈다(수 초).
+        em.log("⚡ 3중 필터 클린 완료 영상 — 노출지도 스캔 생략")
     elif c.get("nsfw_full_scan", True):
         try:
             from server.core import nsfw

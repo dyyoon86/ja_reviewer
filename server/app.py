@@ -603,6 +603,19 @@ async def nsfw_scan(req: Request):
     return {"job": jid}
 
 
+@app.post("/mark_clean")
+async def mark_clean(req: Request):
+    """⚡ 순차 자동 클린(2️⃣소리→3️⃣의미→1️⃣화면)이 완주한 파일에 '클린 완료' 마커를
+    남긴다({파일}.clean). ② AI 처리가 이 마커를 보면 노출지도 스캔(NN 전체, 2시간≈3분)을
+    생략한다 — 3중 필터로 이미 잘라낸 영상을 또 훑는 중복 제거."""
+    body = await req.json()
+    path = body.get("path") or ""
+    if not Path(path).is_file():
+        raise HTTPException(400, f"파일이 없습니다: {path}")
+    Path(path + ".clean").write_text("cleaned by 3-filter chain", encoding="utf-8")
+    return {"ok": True, "marker": path + ".clean"}
+
+
 @app.post("/intimacy/scan")
 async def intimacy_scan(req: Request):
     """③단계(수동) — CLIP zero-shot으로 '스킨십(애무·키스)' 장면을 찾아 삭제 후보로
@@ -727,6 +740,11 @@ async def trim(req: Request):
             info += ["", f"결과 영상: {out}", f"결과 길이: {_hms(dur)}"]
             info_path = str(Path(out).with_name(Path(out).stem + "_info.txt"))
             Path(info_path).write_text("\n".join(info), encoding="utf-8")
+            # 같은 이름으로 재생성되면 이전 '클린 완료' 마커는 무효 — 지운다
+            #   (마커는 ⚡ 순차 클린 완주 시 /mark_clean이 다시 찍는다)
+            stale_marker = Path(out + ".clean")
+            if stale_marker.is_file():
+                stale_marker.unlink()
             jfile(jid, "잘라낸 영상", out)
             jfile(jid, "컷 정보", info_path)
             jdone(jid, {"mode": "trim", "video": out, "duration": dur,
