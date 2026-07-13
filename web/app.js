@@ -352,6 +352,71 @@ $("#btnIntimacyScan").onclick = () => {
     .catch(e=>{ log("요청 실패: "+e,"warn"); btn.disabled=false; btn.textContent=old; });
 };
 
+// ⚡ 순차 자동 클린 — 2️⃣소리 → 3️⃣의미 → 1️⃣화면 순서로 '스캔 → 잘라내기'를 자동 반복.
+// 순서 근거(123분 실측): 분당 스캔 비용 STT 0.69s < CLIP 1.06s < NN 1.44s —
+// 제일 싼 스캔에게 제일 긴 영상을 맡기고, 제일 비싼 NN은 마지막에 몇 분만 보게 한다.
+// (순차 ~2분 vs 전체영상에 셋 다 6분 32초)
+function runJobP(job){
+  return new Promise((resolve, reject)=>{
+    runJob(job, resolve, (msg)=>reject(new Error(msg||"작업 실패")));
+  });
+}
+$("#btnChainClean").onclick = async () => {
+  if(!needVideo()) return;
+  const btn = $("#btnChainClean");
+  const scanBtns = ["btnNsfwScan","btnAudioScan","btnIntimacyScan"].map(id=>$("#"+id));
+  const old = btn.textContent;
+  btn.disabled = true; scanBtns.forEach(b=>{ if(b) b.disabled=true; });
+  const stages = [
+    { key:"btnAudioScan", label:"2️⃣ 소리(STT)", url:"/audio/scan",
+      body: p=>({path:p, pad:parseFloat($("#moanPad").value)}) },
+    { key:"btnIntimacyScan", label:"3️⃣ 의미(CLIP)", url:"/intimacy/scan",
+      body: p=>({path:p, threshold:parseFloat($("#intimacyTh").value)}) },
+    { key:"btnNsfwScan", label:"1️⃣ 화면(NN)", url:"/nsfw/scan",
+      body: p=>({path:p, threshold:parseFloat($("#nsfwThr").value)}) },
+  ];
+  let path = videoPath, dur = duration, nCut = 0;
+  log(`── ⚡ 순차 자동 클린 시작 (2️⃣→3️⃣→1️⃣) — ${hhmmss(dur)} ──`);
+  try{
+    for(let i=0;i<stages.length;i++){
+      const st = stages[i];
+      btn.textContent = `⚡ ${i+1}/3 ${st.label} 스캔 중…`;
+      const j = await (await fetch(st.url,{method:"POST",
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(st.body(path))})).json();
+      if(!j.job) throw new Error(st.label+" 스캔 시작 실패");
+      const res = await runJobP(j.job);
+      const rs = (res && res.ranges) || [];
+      const sb = $("#"+st.key);
+      if(sb) markScanDone(sb, scanBase(sb), rs.length);
+      if(!rs.length){ log(`✔ ${st.label}: 검출 0 — 자를 것 없음`,"ok"); continue; }
+      btn.textContent = `⚡ ${i+1}/3 ${st.label} 잘라내는 중…`;
+      log(`✂ ${st.label}: ${rs.length}구간(${(rs.reduce((s,r)=>s+r[1]-r[0],0)/60).toFixed(1)}분) 잘라내는 중…`);
+      const tj = await (await fetch("/trim",{method:"POST",
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({path, excludes:rs, code:$("#code").value.trim()})})).json();
+      if(!tj.job) throw new Error(st.label+" 잘라내기 시작 실패");
+      const tres = await runJobP(tj.job);
+      if(!tres || !tres.video) throw new Error(st.label+" 잘라내기 결과 없음");
+      path = tres.video; dur = tres.duration || 0; nCut += rs.length;
+      log(`✔ ${st.label} 완료 → 남은 길이 ${hhmmss(dur)}`,"ok");
+    }
+    videoPath = path; duration = dur;
+    vid.src = `/video/stream?path=${encodeURIComponent(path)}&t=${Date.now()}`;
+    excludes = []; pendingIn = null; renderEx(); setCurFile();
+    log(`⚡ 순차 자동 클린 완료: 총 ${nCut}구간 제거 → ${hhmmss(dur)} `
+       +`(${path.split(/[\\/]/).pop()}) — 결과를 재생해서 꼭 검수하세요`,"ok");
+  }catch(e){
+    log("⚡ 순차 자동 클린 중단: "+((e && e.message) || e),"warn");
+    log(`  현재 작업 대상: ${path.split(/[\\/]/).pop()} — 여기까지는 잘려 있습니다`,"warn");
+    videoPath = path; duration = dur;
+    vid.src = `/video/stream?path=${encodeURIComponent(path)}&t=${Date.now()}`;
+    setCurFile();
+  }
+  btn.disabled = false; btn.textContent = old;
+  scanBtns.forEach(b=>{ if(b) b.disabled=false; });
+};
+
 $("#btnTrim").onclick = () => {
   if(!needVideo()) return;
   if(!excludes.length){ log("삭제할 구간을 하나 이상 추가하세요","warn"); return; }
