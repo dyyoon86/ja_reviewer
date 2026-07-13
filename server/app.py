@@ -1394,10 +1394,19 @@ def queue_clear_finished():
 # ─── 정적 프론트 ─────────────────────────────────────────────────────────────
 @app.get("/")
 def index():
-    return FileResponse(WEB / "index.html")
+    return FileResponse(WEB / "index.html",
+                        headers={"Cache-Control": "no-cache, must-revalidate"})
 
 
-app.mount("/static", StaticFiles(directory=str(WEB)), name="static")
+# 정적 파일 캐시 금지 — 기능을 붙일 때마다 브라우저가 옛 app.js를 캐시해
+# "버튼은 보이는데 눌러도 아무 일이 없는" 유령 증상이 났다(2026-07-13 ⚡ 버튼).
+class _NoCacheStatic(StaticFiles):
+    def file_response(self, *args, **kwargs):
+        resp = super().file_response(*args, **kwargs)
+        resp.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return resp
+
+app.mount("/static", _NoCacheStatic(directory=str(WEB)), name="static")
 
 
 def main():
