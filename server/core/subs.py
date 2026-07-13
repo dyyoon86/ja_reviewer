@@ -27,9 +27,12 @@ _ALIGN = {("bottom", "left"): 1, ("bottom", "center"): 2, ("bottom", "right"): 3
           ("middle", "left"): 4, ("middle", "center"): 5, ("middle", "right"): 6,
           ("top", "left"): 7, ("top", "center"): 8, ("top", "right"): 9}
 
-# 기본 스타일 — 대사(하단 흰), 내레이션=기본(상단 노랑), 강조(중앙 큰 빨강), 정보(우상단 작은 하늘)
+# 기본 스타일 — 대사(하단 흰), 내레이션=기본(대사 바로 위 노랑), 강조/정보(현재 미사용)
 # anim: 등장 효과 — none | fade | pop | punch | slide  (_ass_anim 참고)
-# 대사는 차분하게(none), 내레이션·강조·정보는 튀어나오게 → 리듬감
+#
+# ★내레이션 위치 (2026-07-13 사용자 피드백): 예전엔 화면 '상단'이라 대사(하단)와 멀리
+#   떨어져 시선이 위아래로 튀었다 → **대사 바로 위**(하단 정렬, 대사 한 줄 높이만큼 띄움).
+#   대사 margin 46 + 대사 2줄 높이(42*2.2≈92) = 138 → 대사가 2줄로 늘어도 안 겹친다.
 STYLE_DEFAULT = {
     "dialogue":  {"font": "Malgun Gothic", "size": 42, "color": "#FFFFFF", "outline_color": "#000000",
                   "outline": 2.2, "shadow": 0.4, "bold": True, "v": "bottom", "h": "center", "margin": 46,
@@ -38,7 +41,7 @@ STYLE_DEFAULT = {
                    "outline": 2.2, "shadow": 0.4, "bold": True, "v": "bottom", "h": "center", "margin": 46,
                    "anim": "none"},
     "narration": {"font": "Malgun Gothic", "size": 38, "color": "#FFD400", "outline_color": "#000000",
-                  "outline": 2.2, "shadow": 0.4, "bold": True, "v": "top", "h": "center", "margin": 40,
+                  "outline": 2.2, "shadow": 0.4, "bold": True, "v": "bottom", "h": "center", "margin": 138,
                   "anim": "pop"},
     "emphasis":  {"font": "Malgun Gothic", "size": 52, "color": "#FF3B3B", "outline_color": "#000000",
                   "outline": 2.8, "shadow": 0.6, "bold": True, "v": "middle", "h": "center", "margin": 60,

@@ -420,7 +420,8 @@ def _reduce_transcript(meta, segs, llm, em, limit=25000, block_sec=1200):
     return picked, hint
 
 
-def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", style="3min"):
+def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", style="3min",
+             nar_rich=None):
     """② AI 처리 — 저장된 전사 + 메타 → LLM 압축·번역·내레이션. plan.json 저장 + 컷.
     gpu: 컷(NVENC) 구간을 감쌀 세마포어(큐 병렬 시) — None이면 잠금 없음(기존 단독 동작)."""
     gpu = gpu or NullLock()
@@ -476,8 +477,11 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
         plan_segs, story = _reduce_transcript(m, segs, llm, em,
                                               limit=int(c.get("map_reduce_chars", 25000)))
         full_hint = "\n".join(x for x in ((hint or "").strip(), story) if x)
+        # 강조·정보 내레이션은 기본 끔 — 색만 바뀔 뿐 등장 이펙트·크기·효과음 연출이 없어
+        # 화면만 산만하다(2026-07-13). 연출을 갖춘 뒤 GUI 체크박스로 켠다.
+        rich = bool(c.get("nar_rich", False) if nar_rich is None else nar_rich)
         res = P.call_llm(pf(m, plan_segs, target, hint=full_hint, pos=pos, style=style,
-                            with_dialogue=not two_pass),
+                            with_dialogue=not two_pass, nar_rich=rich),
                          llm, em.log)
     finally:
         hb.set()

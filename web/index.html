@@ -66,6 +66,8 @@
           <input type="checkbox" id="faNsfw" checked style="height:auto;vertical-align:middle"> 🛡 비주얼 노출 가드 (권장)</label>
         <label class="muted" title="작은 모델로 빠르게 훑고, 고른 구간만 정밀 재전사 — 2시간 영상 전사가 20분→2분">
           <input type="checkbox" id="faTwoPass" checked style="height:auto;vertical-align:middle"> ⚡ 2단계 전사 (권장)</label>
+        <label class="muted" title="'강조'·'정보' 내레이션 자막을 LLM이 만들지 여부. 지금은 색만 바뀔 뿐 등장 이펙트·크기·효과음 연출이 없어 기본은 끕니다 — 연출을 갖춘 뒤 켜세요.">
+          <input type="checkbox" id="faNarRich" style="height:auto;vertical-align:middle"> 🎨 강조·정보 자막 사용</label>
       </div>
       <div class="actions">
         <button id="btnOpenDone" class="spacer">📂 완성본 폴더 열기</button>
@@ -285,6 +287,9 @@
               <option value="mid">다음은 (중간)</option>
               <option value="last">마지막으로</option>
             </select>
+            <label class="chk" title="'강조'(빨강 큰 글씨)·'정보'(하늘색 우상단) 내레이션을 LLM이 만들지 여부. 지금은 색만 바뀔 뿐 등장 이펙트·크기 변화·효과음 연출이 없어 기본은 끕니다 — 연출을 갖춘 뒤 켜세요.">
+              <input type="checkbox" id="narRich"> 강조·정보 자막 사용
+            </label>
             <button class="go" id="btnStepAi">실행</button>
           </li>
           <li>

@@ -40,15 +40,22 @@ except Exception:
 WEB = ROOT / "web"
 CFG_PATH = ROOT / "studio_config.json"
 SUB_TEMPLATES = {
-    "기본 · 대사하단/내레이션상단/강조중앙/정보우상단": {**P.STYLE_DEFAULT},
+    # 기본 = 내레이션이 대사 '바로 위'(둘 다 하단 정렬, 내레이션 margin이 대사 2줄만큼 높다).
+    # 예전 '내레이션 상단'은 시선이 화면 위아래로 튀어 산만했다(2026-07-13 피드백).
+    "기본 · 내레이션이 대사 바로 위": {**P.STYLE_DEFAULT},
     "심플 · 대사·내레이션 하단 흰색": {
         **P.STYLE_DEFAULT,
-        "narration": {**P.STYLE_DEFAULT["narration"], "color": "#FFFFFF", "v": "bottom", "margin": 110},
+        "narration": {**P.STYLE_DEFAULT["narration"], "color": "#FFFFFF"},
     },
-    "예능 · 큰 노랑 내레이션 + 빨강 강조": {
+    "예능 · 큰 노랑 내레이션": {
         **P.STYLE_DEFAULT,
         "dialogue": {**P.STYLE_DEFAULT["dialogue"], "size": 40},
-        "narration": {**P.STYLE_DEFAULT["narration"], "size": 48, "color": "#FFE600"},
+        "narration": {**P.STYLE_DEFAULT["narration"], "size": 46, "color": "#FFE600",
+                      "margin": 132},
+    },
+    "내레이션 상단(예전 방식)": {
+        **P.STYLE_DEFAULT,
+        "narration": {**P.STYLE_DEFAULT["narration"], "v": "top", "margin": 40},
     },
 }
 
@@ -826,7 +833,8 @@ async def step_ai(req: Request):
         try:
             jdone(jid, stage_ai(c, code, body.get("path"), target, llm, mode, hint,
                                 JobEmitter(jid), pos=body.get("pos", "mid"),
-                                style=body.get("style", "3min")))
+                                style=body.get("style", "3min"),
+                                nar_rich=body.get("nar_rich")))
         except Exception as e:
             jerr(jid, e)
     run_bg(work)

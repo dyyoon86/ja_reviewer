@@ -65,8 +65,9 @@ def _style_cinema():
         "**[AI 문체 금지]** '~에 초점을 둔 구성', '~을 선사합니다', 형용사 3개 이상 나열, 같은 종결어미 3연속. **자막·대사를 메타적으로 지칭하지 말 것** — '자막을 보면', '자막에서', '~라는 대사에서'는 금지. "
         "**[유튜브 안전]** 약물 직접 언급 금지 — '약 먹이다/약물/수면제/최음제/약 기운' → '몽롱물', '분위기가 달라지는데..', '몸 상태가 이상해지는데..'로 대체. "
         "[대사] 자연스러운 한국어 구어체(번역투 금지), 신음류 제외/(신음). 각 대사에 speaker 지정 — '여'/'남'. "
-        "[자막 길이] 각 항목 25자 이내, 길면 의미 단위로 끊어 여러 항목. "
-        "[내레이션 유형] style 지정 — '기본'(장면 중계)/'강조'(훅·반전·총평)/'정보'(스펙·레이블·수치).\n"
+        "[자막 길이] 각 항목 25자 이내, 길면 의미 단위로 끊어 여러 항목.\n"
+        # 내레이션 유형(기본/강조/정보) 지시는 _nar_style_rule()이 한 곳에서만 준다 —
+        # 여기서도 말하면 '유형을 쓰지 마라'와 충돌한다.
         + _translate())
 
 
@@ -136,9 +137,8 @@ def _style_3min():
         "**[유튜브 안전]** 약물 직접 언급 금지 — '약 먹이다/약물/수면제/최음제/약 기운' → '몽롱물', '분위기가 달라지는데..', '몸 상태가 이상해지는데..'로 대체. "
         "섹스 스킵 구간은 브릿지('이후 장면은 생략하고…'). "
         "[대사] 자연스러운 한국어 구어체(번역투 금지), 신음류 제외/(신음). 각 대사에 speaker 지정 — '여'/'남'. "
-        "[자막 길이] 각 항목 25자 이내, 길면 의미 단위로 끊어 여러 항목. "
-        "[내레이션 유형] style 지정 — '기본'(해설)/'강조'(총평·별점·반전 등 핵심 한두 줄)/'정보'(스펙·레이블·수치). "
-        "'강조'는 남발하지 말고 총평과 결정적 한 줄에만.\n"
+        "[자막 길이] 각 항목 25자 이내, 길면 의미 단위로 끊어 여러 항목.\n"
+        # 내레이션 유형 지시는 _nar_style_rule()에서만 (중복하면 '유형 쓰지 마라'와 충돌)
         "[문장 예시 — 이 톤을 그대로 따를 것]\n"
         "· 평일에는 조용한 여교사이지만 주말이 되면 미쳐 날뛴다는 내용입니다.\n"
         "· 설정은 딱히 중요하지 않은 작품으로, 그냥 열심히 하는 작품입니다.\n"
@@ -295,7 +295,7 @@ def prompt_auto(meta, segs, target_sec=60, hint="", pos="mid", style="3min"):
 
 
 def prompt_highlight(meta, segs, target_sec=60, hint="", pos="mid", style="3min",
-                     with_dialogue=True):
+                     with_dialogue=True, nar_rich=False):
     """AlphaCut식 하이라이트 추출 — '고루 분포' 대신 '가장 후킹되는 순간'만 골라 몰아 뽑는다."""
     body = "\n".join(f"{k}\t{a:.2f}\t{b:.2f}\t{t}" for k, (a, b, t) in enumerate(segs, 1))
     make = "압축한다" if not with_dialogue else "압축하고, 한글 대사자막과 해설 내레이션을 만든다"
@@ -304,7 +304,7 @@ def prompt_highlight(meta, segs, target_sec=60, hint="", pos="mid", style="3min"
             f"{_hint_block(hint)}"
             f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n"
             f"{_roundup_block(pos, target_sec, style)}{_timeline_rule()}{_style(style)}\n"
-            f"{_dialogue_note(with_dialogue)}"
+            f"{_dialogue_note(with_dialogue)}{_nar_style_rule(nar_rich)}"
             f"[하이라이트 규칙] "
             f"(1)잡담·무음·반복은 버린다. "
             f"(2)★고루 분포 금지★ — 앞·중간·뒤 균등이 아니라 **후킹 밀도가 가장 높은 순간에 집중**. "
@@ -318,6 +318,22 @@ def prompt_highlight(meta, segs, target_sec=60, hint="", pos="mid", style="3min"
             f"\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\",\"style\":\"기본|강조|정보\"}}]}}")
 
 
+def _nar_style_rule(rich):
+    """내레이션 유형(강조·정보) 사용 여부.
+
+    기본은 **끔** — '강조'/'정보'는 색만 바뀔 뿐 실제 연출 효과가 없어서(2026-07-13 사용자
+    피드백) 화면만 산만해진다. 필요할 때만 GUI에서 켠다."""
+    if rich:
+        return ("[내레이션 유형] style 지정 — '기본'(장면 중계)/'강조'(훅·반전·총평)/"
+                "'정보'(스펙·레이블·수치). '강조'는 남발하지 말고 총평과 결정적 한 줄에만.\n")
+    return ("[★내레이션 유형] style은 **전부 \"기본\"** 으로만 출력한다. "
+            "'강조'·'정보' 유형은 쓰지 마라(사용 안 함).\n")
+
+
+def _nar_style_out(rich):
+    return "기본|강조|정보" if rich else "기본"
+
+
 def _keep_meta_out():
     """왜 그 구간을 골랐는지 근거를 쓰게 한다 — LLM이 근거를 적으면 선택이 정교해지고,
     나중에 '왜 이 컷?'을 추적할 수 있다(하이라이트 모드엔 이미 picks[].hook/reason이 있음)."""
@@ -326,7 +342,7 @@ def _keep_meta_out():
 
 
 def prompt_manual(meta, segs, target_sec=60, hint="", pos="mid", style="3min",
-                  with_dialogue=True):
+                  with_dialogue=True, nar_rich=False):
     body = "\n".join(f"{k}\t{a:.2f}\t{b:.2f}\t{t}" for k, (a, b, t) in enumerate(segs, 1))
     make = ("**스토리 핵심만 골라 약 {t}초 내외로 압축**하고, 해설 내레이션을 만든다"
             if not with_dialogue else
@@ -337,7 +353,7 @@ def prompt_manual(meta, segs, target_sec=60, hint="", pos="mid", style="3min",
             f"{_hint_block(hint)}"
             f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n"
             f"{_roundup_block(pos, target_sec, style)}{_timeline_rule()}{_style(style)}\n"
-            f"{_dialogue_note(with_dialogue)}"
+            f"{_dialogue_note(with_dialogue)}{_nar_style_rule(nar_rich)}"
             f"[규칙] (1)무음·잡담·반복·의미없는 짧은 라인은 버린다. "
             f"(2)스토리(설정·관계·전환·갈등·결말)를 드러내는 핵심 구간만 keep으로 골라 **합쳐서 {target_sec}초 ±20% 목표**. "
             f"(3)정사 선별은 하지 말 것(이미 제거됨). 시간은 이 자막 기준 초.\n"
@@ -345,6 +361,7 @@ def prompt_manual(meta, segs, target_sec=60, hint="", pos="mid", style="3min",
             f"[출력 JSON만] {{\"summary\":\"3~5줄\",\"stars\":1~5,\"keep\":[[시작,끝],...],"
             f"{_keep_meta_out()}"
             f"{_dialogue_out(with_dialogue)}"
-            f"\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\",\"style\":\"기본|강조|정보\"}}]}}")
+            f"\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\","
+            f"\"style\":\"{_nar_style_out(nar_rich)}\"}}]}}")
 
 
