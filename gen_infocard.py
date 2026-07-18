@@ -114,7 +114,7 @@ def fetch_meta(code: str) -> dict:
         v = v or 0
         return f"{round(v/10000)}만" if v >= 10000 else str(v)
 
-    rd = (w.get("release_date") or "")[:7].replace("-", ".")   # 2026.03
+    rd = (w.get("release_date") or "")[:10].replace("-", ".")  # 2026.03.15 (일자까지)
 
     # 배우 프로필 사진(SFW 헤드샷) 절대경로
     photo = a.get("photo_path") or w.get("actress_photo") or ""
@@ -130,10 +130,16 @@ def fetch_meta(code: str) -> dict:
     if not (thumb and os.path.exists(thumb)):
         thumb = ""
 
+    # 제목: hook_title(한글 번역) 우선. title이 배우이름과 같으면(크롤러가 제목 대신
+    # 배우이름을 넣은 행) 이름이 두 번 찍히므로 영/일 원제 → 품번으로 폴백.
+    title = w.get("hook_title") or w.get("title") or ""
+    if not title.strip() or title.strip() == (w.get("actress") or "").strip():
+        title = w.get("title_en") or w.get("title_ja") or w["code"]
+
     return {
         "thumb":    thumb,
         "code":     w["code"],
-        "title":    w.get("hook_title") or w.get("title") or w["code"],
+        "title":    title,
         "actress":  w.get("actress") or "",
         "actress_ja": w.get("actress_ja") or "",
         "photo":    photo,

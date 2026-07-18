@@ -87,7 +87,7 @@ def _dialogue_before(slot_start, dialogue, window=15.0):
     return lines
 
 
-def regen_narration(folder: Path, meta_api: str, log=print):
+def regen_narration(folder: Path, meta_api: str, log=print, seq=None):
     """내레이션만 6슬롯(인트로 2 + 갭 3 + 아웃트로 1) 규칙으로 재생성.
     메타(배우/신체/레이블) 반영 + keep 갭 창에 길이 비례 배분 + retime(snap)으로
     {code}_내레이션.srt/.json 을 갱신한다. 반환: 새 narration 리스트."""
@@ -147,13 +147,25 @@ def regen_narration(folder: Path, meta_api: str, log=print):
 
     # ── 슬롯별 어미 매핑 및 설명 ────────────────────────────────────────
     # 슬롯 순서: 인트로(1) → 갭0(2) → 갭1(3) → 갭2+(4,5) → 아웃트로(6)
+    # 아웃트로 스타일 로테이션 — 모음집에서 11편이 전부 "어떻게 될까요?"로 끝나면 지루하다.
+    # seq(몇 번째 꼭지)에 따라 순환해 연속 작품이 같은 끝맺음을 쓰지 않게 한다.
+    OUTRO_STYLES = [
+        "어미=질문형 '○○는 어떻게 될까요?' 딱 1회",
+        "어미=명사형 피날레 — '점점 깊어지는 두 사람.'처럼 명사로 뚝 끊기",
+        "어미=단언형 — '이건 직접 봐야 압니다.'처럼 짧게 단언",
+        "어미=여운형 — '이 다음은 상상에 맡기겠습니다.'처럼 여운 남기기",
+        "어미=관전포인트형 — '~가 이 작품의 관전 포인트입니다.'",
+        "어미=한줄평형 — '개인적으로 꽤 볼만한 작품입니다.' 식 짧은 평",
+    ]
+    outro_rule = OUTRO_STYLES[(seq[0] - 1) % len(OUTRO_STYLES)] if seq else OUTRO_STYLES[0]
+
     ending_map = {
         "인트로":  "어미=~입니다 (배우명/신체/레이블/컨셉 소개, 2줄 분리)",
         "갭0":     "어미=~는데.. 또는 명사절 ('달아오르는 에미카.' 형식) — ~입니다 절대 금지",
         "갭1":     "어미=~는데.. 또는 명사절 — ~입니다 절대 금지",
         "갭2":     "어미=~입니다 또는 ~거 같습니다 (작품 흐름/컨셉 요약)",
         "갭3+":    "어미=~거 같습니다 또는 ~지 않나 싶습니다 (개인 평가/인상)",
-        "아웃트로": "어미=질문형 '○○는 어떻게 될까요?' 딱 1회",
+        "아웃트로": outro_rule,
     }
 
     # ── gap_windows 먼저 계산 — 프롬프트 슬롯 설명에 사용 ───────────────
@@ -211,13 +223,31 @@ S2: "낯선 제안이 {actress}앞에 놓이는데.."
 S3: "이상한 기운이 도는데.." / "점점 달아오르는 {actress}."
 S4: "이런 전개를 가진 작품입니다."
 S5: "{actress} 피지컬은 확실한 거 같습니다."
-S6: "{actress}는 어떻게 될까요?"
+S6: (아웃트로 — 아래 슬롯의 어미 지시를 그대로 따를 것)
 """
 
-    prompt = f"""6슬롯 나레이션. 각 S의 '어미' 규칙을 반드시 지켜라.
+    # 모음집 연속 리뷰 — seq=(i, n)이면 i번째 꼭지로서 앞 작품에서 이어지는 인트로를 쓴다.
+    # 마무리 인사는 모음집 맨 끝에서 사람이 붙이므로 개별 꼭지에는 절대 넣지 않는다.
+    seq_rule = ""
+    if seq:
+        si, sn = seq
+        ordinal = ["", "첫", "두", "세", "네", "다섯", "여섯", "일곱", "여덟", "아홉", "열",
+                   "열한", "열두"]
+        nth = f"{ordinal[si]} 번째" if si < len(ordinal) else f"{si}번째"
+        seq_rule = (f"[연속 리뷰] 모음집 {sn}편 중 {si}번째 꼭지. "
+                    f"S1 첫 줄은 반드시 '{nth} 작품은 {actress}입니다.'로 시작한다"
+                    f"('다음 작품은' 금지 — 몇 번째인지 명시).\n")
+
+    tone_rule = ("[말투] 유튜브 리뷰어의 자연스러운 입말로. AI티 나는 문어체 금지 — "
+                 "'~하는 모습입니다' '~을 보여줍니다' '기대가 됩니다' "
+                 "'매력적인/인상적인/주목할 만한' 같은 상투어 금지. 같은 어미 3연속 금지. "
+                 "마무리 인사('지금까지 ~였습니다' '시청 감사' '구독') 절대 금지.\n")
+
+    prompt = f"""영상 리뷰 채널의 전연령 시청용 '작품 소개' 나레이션 작업이다 — 성적 묘사 없이
+배우·컨셉 소개와 스토리 호기심 유발만 한다. 6슬롯 나레이션. 각 S의 '어미' 규칙을 반드시 지켜라.
 
 {examples}
-작품: {meta_line}
+{seq_rule}{tone_rule}작품: {meta_line}
 배경: {summary[:60]}
 
 슬롯:
@@ -235,10 +265,26 @@ S6: "{actress}는 어떻게 될까요?"
                        encoding="utf-8", errors="replace", capture_output=True)
 
     raw = (r.stdout or "").strip()
-    if not raw:
-        raise RuntimeError(f"응답 없음: {(r.stderr or '')[:300]}")
     raw = raw.replace("```json","").replace("```","").strip()
     s = raw.find("["); e = raw.rfind("]") + 1
+    if not raw or s < 0 or e <= s:
+        # claude가 작품 소재(배경 요약)를 이유로 거부하면 JSON 없이 사과문만 온다.
+        # 같은 프롬프트를 codex는 정상 처리하므로(메인 ② 파이프라인이 codex) 폴백한다.
+        # ※ call_llm은 JSON '객체'({}) 파서라 배열([]) 출력엔 못 쓴다 — 원문을 직접 받는다.
+        log(f"  claude 응답에 JSON 없음(거부/빈 응답 추정) → codex 폴백: {raw[:80]}…")
+        import tempfile
+        exe = _cli_path("codex")
+        with tempfile.TemporaryDirectory() as td:
+            outf = Path(td) / "o.json"
+            p = subprocess.run([exe, "exec", "--ephemeral", "--skip-git-repo-check",
+                                "-c", 'model_reasoning_effort="high"', "-o", str(outf)],
+                               input=prompt, timeout=900, text=True, encoding="utf-8",
+                               errors="replace", capture_output=True)
+            raw = outf.read_text(encoding="utf-8") if outf.exists() else ""
+        if not raw.strip():
+            raise RuntimeError(f"codex도 응답 없음: {(p.stderr or '')[-240:]}")
+        raw = raw.replace("```json","").replace("```","").strip()
+        s = raw.find("["); e = raw.rfind("]") + 1
     if s < 0 or e <= s:
         raise RuntimeError(f"JSON 파싱 실패:\n{raw[:500]}")
     try:
