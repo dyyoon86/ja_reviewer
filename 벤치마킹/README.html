@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>골채널 벤치마킹 총괄</title>
+<style>
+:root { color-scheme: dark; }
+body { font-family: 'Pretendard','Malgun Gothic',sans-serif; background:#111418; color:#e8eaed;
+       max-width:900px; margin:0 auto; padding:40px 24px; line-height:1.75; }
+h1 { color:#ff6b81; border-bottom:2px solid #ff6b81; padding-bottom:12px; }
+h2 { color:#ffd400; margin-top:2.2em; border-left:4px solid #ffd400; padding-left:12px; }
+h3 { color:#7fd0ff; margin-top:1.6em; }
+blockquote { background:#1b2027; border-left:4px solid #556; margin:1em 0; padding:10px 18px;
+              color:#aab; border-radius:0 8px 8px 0; }
+table { border-collapse:collapse; width:100%; margin:1.2em 0; font-size:.93em; }
+th { background:#232a33; color:#ffd400; }
+th,td { border:1px solid #333c48; padding:8px 12px; text-align:left; vertical-align:top; }
+tr:nth-child(even) td { background:#171c22; }
+code { background:#232a33; padding:2px 6px; border-radius:4px; color:#ffb86c; }
+strong { color:#fff; }
+a { color:#7fd0ff; }
+li { margin:4px 0; }
+hr { border:0; border-top:1px solid #333c48; }
+</style></head><body>
+<h1>골채널 벤치마킹 — JA 리뷰 유튜브 4강 분석</h1>
+<blockquote>
+<p>2026-07-18 작성. 배경: ja12 모음집 내레이션이 "재미없다"는 자체 평가 →
+잘 되는 채널 4곳의 대본·구성 방식을 실제 자막 추출로 분석해 ja_reviewer 내레이션 개선에 반영.</p>
+<p>채널별 상세: <a href="3분휴지/분석.html">3분휴지</a> · <a href="락규의_JA이야기/분석.html">락규의_JA이야기</a> · <a href="휴지도둑/분석.html">휴지도둑</a> · <a href="내손내싼/분석.html">내손내싼</a>
+(각 폴더에 같은 내용 <code>분석.html</code> 포함)</p>
+</blockquote>
+<h2>한눈 비교</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>3분휴지(현 5분휴지)</th>
+<th>락규의 JA이야기</th>
+<th>휴지도둑</th>
+<th>내손내싼</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>구독/최고 조회</td>
+<td>9.7만 / 89만</td>
+<td>10.9만 / 202만</td>
+<td>2.3만 / <strong>120만</strong></td>
+<td>8.6만 / 86만</td>
+</tr>
+<tr>
+<td>포맷</td>
+<td>스토리 리뷰 8~17분</td>
+<td>정보 다큐 4~13분</td>
+<td>감상형 15~26분</td>
+<td>쇼츠 14초~1분</td>
+</tr>
+<tr>
+<td>나레이션 밀도</td>
+<td>높음 (전 구간 중계)</td>
+<td>높음 (팩트 연속)</td>
+<td><strong>낮음</strong> (전환점만)</td>
+<td>초고밀 (전량 대본)</td>
+</tr>
+<tr>
+<td>재미의 원천</td>
+<td>미스터리 재구성 + 메타 유머</td>
+<td>데이터·뒷이야기·팩트체크</td>
+<td>어그로 제목 + 은어 개그</td>
+<td>1인칭 리액션 + 말장난</td>
+</tr>
+<tr>
+<td>결말 처리</td>
+<td>질문으로 컷</td>
+<td>(해당 없음)</td>
+<td>댓글 유도 컷</td>
+<td>(해당 없음)</td>
+</tr>
+<tr>
+<td>시그니처</td>
+<td>"이상한 영상… 3분휴지였습니다"</td>
+<td>"유익한 영상으로… 락규였습니다"</td>
+<td>"결말은 댓글 참고"</td>
+<td>"알고리즘 초토화할 절박한 남자"</td>
+</tr>
+</tbody>
+</table>
+<h2>공통 성공 패턴 (4채널 모두)</h2>
+<ol>
+<li><strong>결말 스포 금지 + 질문형 마무리</strong> — 궁금증을 남긴 채 끊는다.</li>
+<li><strong>검열 회피 은어를 '유머'로 승화</strong> — 운동, 비타민, 간병, 바지 지표… 순화가 곧 개그.</li>
+<li><strong>고정 시그니처 멘트</strong> — 오프닝/클로징 문장이 채널 브랜드.</li>
+<li><strong>솔직 평가(호불호 명시)</strong> — 칭찬만 하는 리뷰는 없다. "아쉽다"가 신뢰를 만든다.</li>
+<li><strong>시청자 질문 대리 해소</strong> — "왜?"를 먼저 던지고 먼저 답한다 (락규 팩트체크, 3분휴지 떡밥 질문).</li>
+</ol>
+<h2>우리 내레이션이 재미없는 이유 (진단)</h2>
+<p>ja12 현재 내레이션: <em>"첫 번째 작품은 나나시마 마이입니다. 레이블은 ABF, 청초한 마스크입니다. 이번 컨셉은 영화관 아르바이트생입니다."</em></p>
+<ul>
+<li>❌ 전부 <strong>평서문 설명</strong> — 질문/떡밥/리액션이 0개</li>
+<li>❌ 관찰자 시점만 있고 <strong>리뷰어 페르소나(1인칭 감상)</strong> 가 없음</li>
+<li>❌ 추상 형용사("청초한") — 장면이 안 그려짐</li>
+<li>❌ 심리 해설·전환점 멘트 없음 — 컷과 컷이 나열로만 이어짐</li>
+<li>❌ 시그니처 멘트/평가 지표 같은 반복 브랜딩 장치 없음</li>
+</ul>
+<h2>적용 로드맵 (ja_reviewer 내레이션 프롬프트 v2)</h2>
+<table>
+<thead>
+<tr>
+<th>우선순위</th>
+<th>훔쳐올 것</th>
+<th>출처</th>
+<th>적용 위치</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>★★★</td>
+<td>오프닝 = 리액션/미스터리 훅 (배우 소개는 2번째 문장으로)</td>
+<td>내손내싼·3분휴지</td>
+<td>prompts 내레이션 규칙</td>
+</tr>
+<tr>
+<td>★★★</td>
+<td>떡밥 질문 2개 심고 중반에 공개 ("왜 ~일까요?")</td>
+<td>3분휴지</td>
+<td>내레이션 슬롯 배치</td>
+</tr>
+<tr>
+<td>★★★</td>
+<td>마지막 내레이션 = "과연 ~일까요?" + 결말 미공개</td>
+<td>3분휴지·휴지도둑</td>
+<td>아웃트로 규칙</td>
+</tr>
+<tr>
+<td>★★</td>
+<td>전환점 한 줄 멘트 ("그렇게 둘만의 비밀이 생겼습니다")</td>
+<td>휴지도둑</td>
+<td>중반 내레이션</td>
+</tr>
+<tr>
+<td>★★</td>
+<td>추상 형용사 금지 → 상황 비유 ("학과에서 한 번은 봤을 법한")</td>
+<td>내손내싼</td>
+<td>문체 규칙</td>
+</tr>
+<tr>
+<td>★★</td>
+<td>팩트 라인 1개 (연차/시리즈 n번째/랭킹) — DB 메타 자동 삽입</td>
+<td>락규</td>
+<td>regen + meta</td>
+</tr>
+<tr>
+<td>★★</td>
+<td>채널 고유 평가 지표·시그니처 클로징 개발</td>
+<td>내손내싼·3분휴지</td>
+<td>아웃트로 템플릿</td>
+</tr>
+<tr>
+<td>★</td>
+<td>은어 개그 어휘집 (비타민·간병·운동 등)</td>
+<td>휴지도둑·락규</td>
+<td>순화 규칙 확장</td>
+</tr>
+<tr>
+<td>★</td>
+<td>셀프 츳코미 1회 허용</td>
+<td>내손내싼</td>
+<td>문체 규칙</td>
+</tr>
+<tr>
+<td>★</td>
+<td>호불호 한 줄 ("다만 ~는 아쉽습니다")</td>
+<td>락규·3분휴지</td>
+<td>작품 정보 블록</td>
+</tr>
+</tbody>
+</table>
+<h2>분석 방법 (재현용)</h2>
+<ol>
+<li>YouTube Data API로 채널 검색→업로드 목록→조회수 정렬 (키: alphacut/web/.env.local)</li>
+<li><code>yt-dlp --skip-download --write-auto-subs --sub-langs "ko.*"</code> 로 상위 영상 자막 추출 (순차+4초 간격)</li>
+<li>VTT 정리 후 대본 정독 → 구조 분해</li>
+<li>채널 ID: 5분휴지 <code>UC9-HP355lLtRxCXp3wCXLrA</code> / 락규 <code>UCeP3b4T32ERontJHxUK8aLA</code> / 휴지도둑 <code>UCwaXwT3Toej3RY7jrOrL2Zw</code> / 내손내싼 <code>UCdyM928oDkEE9IrHfLFGZ-Q</code></li>
+</ol>
+<hr><p style="color:#667;font-size:.85em">ja_reviewer 벤치마킹 문서 · 2026-07-18 생성</p>
+</body></html>
