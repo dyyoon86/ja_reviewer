@@ -228,11 +228,13 @@ def _rounded_rect_drawing(w, h, r):
 
 
 def _plate_events(rows, st, w, h, style_name):
-    """자막 뒤에 깔 '둥근 배경판' 이벤트들 — rows=[(start, end, text)].
+    """자막 뒤에 깔 '둥근 배경판' 이벤트들 — rows=[(start, end, text[, cy])].
 
     ASS는 박스 모서리를 둥글게 못 하므로(BorderStyle=3은 각진 사각형), 배경판을
     **드로잉 이벤트로 직접 그려** 자막보다 아래 레이어에 깐다.
     글자 폭은 실제 폰트로 재서(PIL) 텍스트에 딱 맞는 판을 만든다.
+    row에 cy(세로 중심, px)가 있으면 스타일 위치 대신 그 지점 중앙에 판을 깐다
+    (배너 구간 중앙 이동용 — 텍스트의 \\an5\\pos와 같은 좌표 기준).
     """
     if not st.get("plate"):
         return []
@@ -245,7 +247,9 @@ def _plate_events(rows, st, w, h, style_name):
     margin = float(st.get("margin", 40))
     line_h = size * 1.25          # libass 줄높이 ≈ 폰트크기의 1.2~1.3배
     out = []
-    for (a, b, text) in rows:
+    for row in rows:
+        a, b, text = row[0], row[1], row[2]
+        cy = row[3] if len(row) > 3 else None
         lines = str(text).split("\\N")
         tw = max((_text_width(ln, font, size, st.get("bold", True)) for ln in lines), default=0)
         text_h = line_h * len(lines)
@@ -254,7 +258,9 @@ def _plate_events(rows, st, w, h, style_name):
         # 판의 좌상단 좌표(\an7 기준) — 텍스트 블록을 감싸도록 패딩만큼 바깥으로.
         #   libass는 MarginV를 '화면 끝 ~ 텍스트 끝' 거리로 쓴다.
         x = (w - bw) / 2
-        if v == "top":
+        if cy is not None:
+            y = cy - text_h / 2 - pad_y
+        elif v == "top":
             y = margin - pad_y
         elif v == "middle":
             y = (h - bh) / 2
@@ -300,7 +306,37 @@ def screen_fx(events, w, h, log=print, intensity=0.16):
     return ",".join(parts)
 
 
-def build_ass(dialogue, narration, out_ass, width, height, styles=None):
+# 배너(인포카드) 구간 중앙 표시 위치 — 화면 높이 비율.
+#   인포카드는 하단(좌)을 크게 덮으므로 하단 자막이 가려진다. 워터마크(우상단)·프레임
+#   테두리를 피한 안전지대 = 화면 중앙부. 내레이션을 대사보다 위에 둔다(평소 배치와 동일).
+BANNER_NAR_CY = 0.40
+BANNER_DLG_CY = 0.54
+
+
+def _banner_reflow(evs, banner_end):
+    """인포카드(0~banner_end)가 하단을 덮는 동안의 자막 처리 — **지우지 않고 중앙으로 옮긴다**.
+
+    ja12까지는 겹치는 자막을 통째로 드롭해서(_reburn_1080.suppress_banner) 오프닝
+    내레이션("이번 작품은~")이 음성만 나오고 자막이 사라졌다 (2026-07-19 사용자 지적).
+    → 배너 구간과 겹치는 이벤트: 통째면 중앙 표시, 걸치면 분할(배너 중=중앙, 이후=제자리).
+    반환: (s, e, style, text, in_banner, cont) — cont=True는 분할 후반부(등장 애니 생략)."""
+    if not banner_end or banner_end <= 0:
+        return [(s, e, st, t, False, False) for s, e, st, t in evs]
+    out = []
+    for s, e, st, t in evs:
+        if s >= banner_end:                    # 배너 뒤 → 그대로
+            out.append((s, e, st, t, False, False))
+        elif e <= banner_end + 0.4:            # 통째로(거의) 배너 안 → 중앙 표시
+            out.append((s, e, st, t, True, False))
+        elif s >= banner_end - 0.3:            # 끝자락에 살짝 걸침 → 시작만 뒤로 밀기
+            out.append((banner_end, e, st, t, False, False))
+        else:                                  # 크게 걸침 → 배너 끝에서 분할
+            out.append((s, banner_end, st, t, True, False))
+            out.append((banner_end, e, st, t, False, True))
+    return out
+
+
+def build_ass(dialogue, narration, out_ass, width, height, styles=None, banner_end=None):
     styles = styles or {}
     S = {k: {**STYLE_DEFAULT[k], **(styles.get(k) or {})}
          for k in ("dialogue", "dialogue_m", "narration", "emphasis", "info")}
@@ -340,6 +376,7 @@ def build_ass(dialogue, narration, out_ass, width, height, styles=None):
         tag = it[3] if len(it) > 3 else "기본"
         evs.append((it[0], it[1], STYLE_TAGNAME.get(tag, "Narration"), it[2]))
     evs.sort(key=lambda x: x[0])
+    evs = _banner_reflow(evs, banner_end)      # → (s,e,style,text,in_banner,cont)
 
     # 배경판 이벤트 — Layer 0(자막보다 아래). 자막은 Layer 1로 올린다.
     PLATE_OF = {"Narration": ("narration", "NarPlate"),
@@ -348,13 +385,20 @@ def build_ass(dialogue, narration, out_ass, width, height, styles=None):
     for style, (skey, sname) in PLATE_OF.items():
         if not S[skey].get("plate"):
             continue
-        rows = [(s, e, str(t).replace("\n", "\\N")) for s, e, stl, t in evs if stl == style]
+        rows = [(s, e, str(t).replace("\n", "\\N"),
+                 height * BANNER_NAR_CY if (inb and style == "Narration") else None)
+                for s, e, stl, t, inb, _c in evs if stl == style]
         for a, b, _sn, body in _plate_events(rows, S[skey], width, height, sname):
             L.append(f"Dialogue: 0,{_ass_time(a)},{_ass_time(b)},{sname},,0,0,0,,{body}")
 
-    for s, e, style, t in evs:
+    for s, e, style, t, inb, cont in evs:
         txt = str(t).replace("\n", "\\N")
-        tag = _ass_anim(ANIM.get(style, "none"), int((e - s) * 1000))
+        tag = _ass_anim("none" if cont else ANIM.get(style, "none"), int((e - s) * 1000))
+        # 배너 구간 → 하단 스타일만 중앙으로(강조=원래 중앙, 정보=상단이라 안 겹침)
+        if inb and style in ("Dialogue", "DialogueM"):
+            tag += f"{{\\an5\\pos({width / 2:.0f},{height * BANNER_DLG_CY:.0f})}}"
+        elif inb and style == "Narration":
+            tag += f"{{\\an5\\pos({width / 2:.0f},{height * BANNER_NAR_CY:.0f})}}"
         L.append(f"Dialogue: 1,{_ass_time(s)},{_ass_time(e)},{style},,0,0,0,,{tag}{txt}")
     Path(out_ass).write_text("\n".join(L) + "\n", encoding="utf-8")
     return out_ass
@@ -505,8 +549,16 @@ def burn_subs(video, dialogue_srt, narration_srt, out_video, styles=None,
         raise RuntimeError("자막·배너 둘 다 꺼져 있어 구울 게 없습니다.")
     ass_path = Path(out_video).with_suffix(".ass")
     if subs:
-        build_ass(dlg, nar, str(ass_path), w, h, styles)
+        # 인포카드가 같이 구워지면 그 구간(0~hold+fade)의 하단 자막은 중앙으로 이동
+        b_end = 0.0
+        if banner and banner.get("info") and Path(banner["info"]).is_file():
+            a = banner_anim or BANNER_ANIM
+            b_end = float(a.get("hold", BANNER_ANIM["hold"])) + \
+                float(a.get("fade", BANNER_ANIM["fade"])) + 0.1
+        build_ass(dlg, nar, str(ass_path), w, h, styles, banner_end=b_end)
         log(f"자막 굽기 (ffmpeg ass, {w}x{h}, 대사 {len(dlg)} · 내레이션 {len(nar)})...")
+        if b_end:
+            log(f"인포카드 {b_end:.1f}s 동안 겹치는 대사·내레이션은 화면 중앙으로 이동(가림 방지)")
     else:
         ass_path.parent.mkdir(parents=True, exist_ok=True)
         log(f"자막 없이 배너만 굽기 ({w}x{h})...")
