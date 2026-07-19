@@ -161,7 +161,7 @@ def extract_theme(img_path: str) -> dict:
     """썸네일에서 대표 색을 뽑아 배너 테마(그라데이션+강조색) 구성.
     이미지 없으면 딸기 레드 기본값."""
     default = {"c1": "#ff2d55", "c2": "#e50914", "accent": "#ffe14d",
-               "frame": "#ff2d55,#ff6ec4 30%,#ffd23f 55%,#ff6ec4 75%,#ff2d55"}
+               "frame": "#ff2d55,#ff6ec4 30%,#ff9ad1 55%,#ff6ec4 75%,#ff2d55"}
     if not img_path:
         return default
     try:
@@ -202,10 +202,10 @@ def extract_theme(img_path: str) -> dict:
     # 강조색: 같은 색 컨셉의 밝은 톤(살짝 노랑 쪽으로 이웃 hue) — 튀지 않게 조화
     ah = (h + 0.06) % 1.0
     ar, ag, ab = [c*255 for c in colorsys.hsv_to_rgb(ah, min(0.85, s*0.7), 1.0)]
-    # 프레임: 대표색 → 밝은 이웃톤 → 대표색 흐름(동일 계열)
-    lh = (h + 0.05) % 1.0
+    # 프레임: 대표색 → 같은 hue의 밝은톤 → 대표색 흐름(색상 이동 없이 동일 계열 유지)
+    # (이웃 hue를 섞으면 핑크가 주황/노랑으로 번져 테두리가 끊겨 보인다 — 2026-07-19)
     fr, fg, fb = [c*255 for c in colorsys.hsv_to_rgb(h, s, 1.0)]
-    fr2, fg2, fb2 = [c*255 for c in colorsys.hsv_to_rgb(lh, max(0.4, s*0.7), 1.0)]
+    fr2, fg2, fb2 = [c*255 for c in colorsys.hsv_to_rgb(h, max(0.35, s*0.55), 1.0)]
     frame = (f"{_hx(fr,fg,fb)},{_hx(fr2,fg2,fb2)} 35%,"
              f"{_hx(fr,fg,fb)} 65%,{_hx(fr2,fg2,fb2)}")
     return {"c1": _hx(r1, g1, b1), "c2": _hx(r2, g2, b2),
@@ -228,11 +228,11 @@ def html_bg() -> str:
 def html_frame(t: dict) -> str:
     return f"""<!doctype html><meta charset=utf-8><style>*{{margin:0;box-sizing:border-box}}html,body{{background:transparent}}
 .f{{width:1920px;height:1080px;position:relative;background:transparent}}
-.b{{position:absolute;inset:0;border:14px solid transparent;
+.b{{position:absolute;inset:0;border:22px solid transparent;
  background:linear-gradient(120deg,{t['frame']}) border-box;
  -webkit-mask:linear-gradient(#000 0 0) padding-box,linear-gradient(#000 0 0);
  -webkit-mask-composite:xor;mask-composite:exclude;border-radius:8px}}
-.b2{{position:absolute;inset:26px;border:2px solid rgba(255,255,255,.35);border-radius:4px}}
+.b2{{position:absolute;inset:34px;border:2px solid rgba(255,255,255,.35);border-radius:4px}}
 </style><div class=f><div class=b></div><div class=b2></div></div>"""
 
 def html_info(m: dict, mb: str, t: dict) -> str:
