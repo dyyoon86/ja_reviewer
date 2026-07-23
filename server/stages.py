@@ -486,6 +486,12 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
             try:
                 from server.core import visual as _visual
                 vis_text = _visual.build_visual_brief(video, c, em.log)
+                if vis_text:
+                    # 섹션3 regen_narration이 최종 내레이션에도 화면 근거를 쓰도록 파일로 남긴다
+                    try:
+                        (outdir / f"{code}_시각브리핑.txt").write_text(vis_text, encoding="utf-8")
+                    except OSError:
+                        pass
             except Exception as e:
                 em.log(f"※ 시각정보 생성 실패({type(e).__name__}: {e}) — 시각정보 없이 진행")
         # 강조·정보 내레이션은 기본 끔 — 색만 바뀔 뿐 등장 이펙트·크기·효과음 연출이 없어

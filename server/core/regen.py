@@ -9,6 +9,7 @@ GUI(③ 결과 화면 버튼)와 tools/ CLI가 공유한다.
   (대사/내레이션 SRT는 호출부에서 stage_subs로 다시 굽는다)
 """
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -104,6 +105,18 @@ def regen_narration(folder: Path, meta_api: str, log=print, seq=None):
 
     if not narration:
         raise RuntimeError("narration 항목 없음")
+
+    # 화면 시각정보(섹션2 stage_ai가 저장) — 슬롯 시각에 맞춰 붙여 최종 내레이션도 화면 근거를 갖게 한다.
+    # 좌표는 클린본 기준으로 keep/narration과 동일하다.
+    vis_entries = []
+    vbf = folder / f"{code}_시각브리핑.txt"
+    if vbf.is_file():
+        for ln in vbf.read_text(encoding="utf-8").splitlines():
+            mm = re.match(r"\s*\[?(\d+)\s*s\]?\s*[:：]?\s*(.+)", ln)
+            if mm:
+                vis_entries.append((int(mm.group(1)), mm.group(2).strip()))
+        if vis_entries:
+            log(f"  화면 시각정보 {len(vis_entries)}줄 반영")
 
     # 슬롯 6개로 압축: 인트로 1 + 중간 4 + 아웃트로 1
     MAX_SLOTS = 6
@@ -222,6 +235,8 @@ def regen_narration(folder: Path, meta_api: str, log=print, seq=None):
         line = f"S{i+1}({ws:.0f}~{we:.0f}초) {ending_map[ek]}"
         if before: line += " 직전:" + "/".join(f'「{t}」' for t in before)
         if after:  line += " 직후:" + "/".join(f'「{t}」' for t in after)
+        vis_here = [d for (t, d) in vis_entries if ws - 3 <= t <= we + 3][:2]
+        if vis_here: line += " 화면:" + " / ".join(vis_here)
         slots_desc.append(line)
 
     examples = f"""[좋은 예 — 이 감각을 따를 것 (문장을 그대로 베끼지 말고 이 작품 내용으로)]
@@ -259,7 +274,10 @@ S6: (아웃트로 — 아래 슬롯의 어미 지시를 그대로 따를 것)
                  + _human_tone() +
                  "[자가검열 — 출력 직전에 한 번 더] 각 문장을 소리 내어 읽는다고 상상하고, "
                  "유튜버가 절대 안 할 말(설명문 나열, 스펙 낭독, 상투어)이 있으면 사람 말로 다시 쓴다. "
-                 "6문장 중 질문이 하나도 없으면 실패다.\n")
+                 "6문장 중 질문이 하나도 없으면 실패다.\n"
+                 "[화면 반영] 슬롯에 '화면:'이 붙어 있으면 그게 그 순간 실제 장면이다. "
+                 "그 자리에서 보는 것처럼 생생히 중계하되(현재형·구체), '~물에 가까운 시추에이션' 같은 "
+                 "장르 요약·평론으로 흘리지 마라. 평가·별점·필모 비교는 마지막 아웃트로 슬롯에만.\n")
 
     prompt = f"""영상 리뷰 채널의 전연령 시청용 '작품 소개' 나레이션 작업이다 — 성적 묘사 없이
 배우·컨셉 소개와 스토리 호기심 유발만 한다. 6슬롯 나레이션. 각 S의 '어미' 규칙을 반드시 지켜라.
