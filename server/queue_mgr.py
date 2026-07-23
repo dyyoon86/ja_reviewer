@@ -418,4 +418,5 @@ class QueueManager:
                         orig_audio=o.get("orig_audio", "duck"),
                         duck_level=float(o.get("duck_level", 0.3)))
         elif stg == "burn":
-            S.stage_burn(c, code, c.get("sub_styles") or S.P.STYLE_DEFAULT, em)
+            S.stage_burn(c, code, c.get("sub_styles") or S.P.STYLE_DEFAULT, em,
+                         remove_bgm=o.get("remove_bgm"))

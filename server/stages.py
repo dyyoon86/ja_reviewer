@@ -623,22 +623,8 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
     em.step(3, 3, "핵심 구간 컷")
     with gpu:
         P.cut_video(video, keep, final, em.log, lambda fr: em.prog(fr, "컷"))
-    # ★ 원본 BGM 제거 — 컷 결과(1~3분)에만 돌린다(원본 2시간이 아니라).
-    #   여기서 해야 뒤따르는 TTS 더킹·굽기가 '목소리만 있는' 오디오를 쓴다.
-    #   실패해도 파이프라인은 계속 간다(BGM 있는 채로 진행).
-    want_bgm = bool(c.get("remove_bgm", False) if remove_bgm is None else remove_bgm)
-    if want_bgm:
-        try:
-            from server.core import bgm
-            em.step(3, 3, "원본 BGM 제거 (demucs — 목소리만 남김)")
-            with gpu:
-                bgm.remove_bgm(final, final, log=em.log,
-                               python=c.get("bgm_python"),
-                               model=c.get("bgm_model", "htdemucs"),
-                               progress=lambda fr: em.prog(fr, "BGM 제거"))
-            worklog(outdir, code, "② BGM 제거 — 원본 배경음악 제거(목소리만)")
-        except Exception as e:
-            em.log(f"※ BGM 제거 실패({type(e).__name__}: {e}) — 원본 소리 그대로 진행")
+    # ※ 원본 BGM 제거는 최종 번인 단계(stage_burn)로 이동했다 — 최종본에 실제로 반영되는
+    #   지점이 거기이고, produce만 재실행해도 적용되기 때문(remove_bgm 인자는 하위호환용 유지).
 
     # 새 컷이 만들어졌다 = 이전 컨셉의 음성본/굽기본/TTS 조각은 전부 구버전 → 삭제
     P.invalidate_derived(outdir, code, em.log)
@@ -804,7 +790,8 @@ def stage_banner(c, code, em, hold=2.0, preview=True):
             "meta": {k: r["meta"][k] for k in ("code", "actress", "title")}}
 
 
-def stage_burn(c, code, styles, em, source=None, banner=True, parts=None, cutins=None):
+def stage_burn(c, code, styles, em, source=None, banner=True, parts=None, cutins=None,
+               remove_bgm=None):
     """⑥ 굽기(하드섭) — voiced 우선 → final. {code}_final_subbed.mp4 생성.
     banner=True면 프레임·인포카드·워터마크를 같은 인코딩 1패스에서 함께 굽는다.
     parts={'frame','info','wm','subs': bool} 로 구울 요소를 고른다(미리보기 체크 그대로)."""
@@ -921,6 +908,19 @@ def stage_burn(c, code, styles, em, source=None, banner=True, parts=None, cutins
                                       f"{ev['sub_coverage'] * 100:.0f}%)")
         except Exception as e:
             em.log(f"※ 자체 검사 실패({type(e).__name__}: {e}) — 건너뜁니다")
+
+    # ★ 원본 BGM 제거 — 최종본 오디오에서 배경음악/현장음을 걷어내 목소리만 남긴다(채널 BGM을
+    #   따로 얹을 때 유용). config remove_bgm(또는 인자). demucs 필요(config bgm_python).
+    #   실패해도 계속(BGM 있는 채로 수거). 비디오(번인)는 스트림 카피라 재번인 없음.
+    if bool(c.get("remove_bgm", False) if remove_bgm is None else remove_bgm):
+        try:
+            from server.core import bgm
+            em.log("원본 BGM 제거 (demucs — 목소리만 남김)")
+            bgm.remove_bgm(out, out, log=em.log, python=c.get("bgm_python"),
+                           model=c.get("bgm_model") or "htdemucs")
+            worklog(outdir, code, "⑥ BGM 제거 — 최종본 배경음악 제거(목소리만)")
+        except Exception as e:
+            em.log(f"※ BGM 제거 실패({type(e).__name__}: {e}) — 원본 소리 그대로 진행")
 
     # 완성본 수거함 — 품번 폴더에 흩어진 완성본을 한 곳에 모은다(풀오토 출구).
     # 노출이 검출된 건 _검수필요/ 로 격리 — 사람이 보기 전엔 업로드 폴더에 들어가지 않는다.

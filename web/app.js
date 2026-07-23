@@ -962,7 +962,8 @@ $("#btnBurn").onclick=()=>{
   const banner=$("#burnBanner") ? $("#burnBanner").checked : true;
   log("── 자막 입히기 시작 ──"+(banner?" (배너·워터마크 동시)":""));
   fetch("/burn",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    code, styles:allStyles(), banner
+    code, styles:allStyles(), banner,
+    remove_bgm: $("#rmBgm") ? $("#rmBgm").checked : undefined
   })}).then(r=>r.json()).then(j=>runJob(j.job,(r)=>{
     $("#resultCard").style.display="block";
     $("#result").innerHTML=`<div class="ok">✔ 자막${r.banner?"·배너":""} 입힌 영상</div><div>${r.subbed}</div>`;
