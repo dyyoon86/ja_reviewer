@@ -326,7 +326,6 @@ S6: (아웃트로 — 아래 슬롯의 어미 지시를 그대로 따를 것)
     try:
         new_nar = json.loads(raw[s:e])
     except json.JSONDecodeError:
-        import re
         items = re.findall(r'\{[^{}]+\}', raw[s:])
         new_nar = []
         for item in items:
