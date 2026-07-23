@@ -181,6 +181,20 @@ def _hint_block(hint):
     return f"[사용자 추가 지시 — 최우선 반영]\n{h}\n" if h else ""
 
 
+def _visual_block(visual):
+    """화면 시각정보 — 클린본 프레임을 비전 모델이 읽어 만든 '[초] 장면/화면글자' 브리핑.
+    오디오 자막엔 없는 '행동·표정·소품·거리감'을 알려주므로, 화자 배정·번역 톤·내레이션을
+    화면 사실에 맞춰 쓰게 한다(자막과 시각이 어긋나면 시각을 사실로 본다)."""
+    v = (visual or "").strip()
+    if not v:
+        return ""
+    return ("[화면 시각정보 — 자막에 없는 행동·표정·소품을 여기서 파악해 대사/내레이션에 반영]\n"
+            " · 아래는 각 시각(초)의 화면 상황이다. 오디오 자막과 함께 보고, 누가 무엇을 하는지·"
+            "분위기·거리감을 근거로 화자 배정과 번역 톤, 내레이션을 정한다.\n"
+            " · 자막과 화면이 어긋나면 화면을 사실로 삼는다. 단, 여기 적힌 상황을 대사로 지어내지는 말 것.\n"
+            f"{v}\n")
+
+
 def _timeline_rule():
     """narration/dialogue 시간이 keep 밖으로 나가면 안 되는 이유:
     최종 영상은 keep 구간만 이어붙인 것이라, 밖의 항목은 retime에서 끝점으로 밀려
@@ -333,7 +347,7 @@ def prompt_auto(meta, segs, target_sec=60, hint="", pos="mid", style="3min"):
 
 
 def prompt_highlight(meta, segs, target_sec=60, hint="", pos="mid", style="3min",
-                     with_dialogue=True, nar_rich=False, cutin_tags=None):
+                     with_dialogue=True, nar_rich=False, cutin_tags=None, visual=""):
     """AlphaCut식 하이라이트 추출 — '고루 분포' 대신 '가장 후킹되는 순간'만 골라 몰아 뽑는다."""
     body = "\n".join(f"{k}\t{a:.2f}\t{b:.2f}\t{t}" for k, (a, b, t) in enumerate(segs, 1))
     make = "압축한다" if not with_dialogue else "압축하고, 한글 대사자막과 해설 내레이션을 만든다"
@@ -341,6 +355,7 @@ def prompt_highlight(meta, segs, target_sec=60, hint="", pos="mid", style="3min"
             f"**약 {target_sec}초 내외 하이라이트**로 {make}. 줄거리 요약이 아니라 '반전·긴장·감정 절정'의 밀도 높은 컷.\n"
             f"{_hint_block(hint)}"
             f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n"
+            f"{_visual_block(visual)}"
             f"{_roundup_block(pos, target_sec, style)}{_timeline_rule()}{_style(style)}\n"
             f"{_dialogue_note(with_dialogue)}{_nar_style_rule(nar_rich)}{_cutin_rule(cutin_tags)}"
             f"[하이라이트 규칙] {_safe_keep_rule()}"
@@ -399,7 +414,7 @@ def _keep_meta_out():
 
 
 def prompt_manual(meta, segs, target_sec=60, hint="", pos="mid", style="3min",
-                  with_dialogue=True, nar_rich=False, cutin_tags=None):
+                  with_dialogue=True, nar_rich=False, cutin_tags=None, visual=""):
     body = "\n".join(f"{k}\t{a:.2f}\t{b:.2f}\t{t}" for k, (a, b, t) in enumerate(segs, 1))
     make = ("**스토리 핵심만 골라 약 {t}초 내외로 압축**하고, 해설 내레이션을 만든다"
             if not with_dialogue else
@@ -409,6 +424,7 @@ def prompt_manual(meta, segs, target_sec=60, hint="", pos="mid", style="3min",
             f"여기서 {make}.\n"
             f"{_hint_block(hint)}"
             f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n"
+            f"{_visual_block(visual)}"
             f"{_roundup_block(pos, target_sec, style)}{_timeline_rule()}{_style(style)}\n"
             f"{_dialogue_note(with_dialogue)}{_nar_style_rule(nar_rich)}{_cutin_rule(cutin_tags)}"
             f"[규칙] {_safe_keep_rule()}(1)무음·잡담·반복·의미없는 짧은 라인은 버린다. "

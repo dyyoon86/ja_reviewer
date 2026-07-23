@@ -86,6 +86,9 @@ DEFAULTS = {"meta_api": "http://172.30.1.40:8770", "llm": "claude",
             # torch가 없는 venv 대신 **시스템 파이썬의 demucs**를 외부 호출한다(bgm_python로 지정 가능).
             # 주의: 목소리만 남기므로 방 잡음·발소리 같은 현장음도 함께 사라진다(매우 드라이해진다).
             "remove_bgm": False, "bgm_model": "htdemucs",
+            # 화면 시각정보 — 클린본 프레임을 비전(claude -p)이 읽어 '장면/화면글자' 브리핑을 만들고
+            # ②AI 프롬프트에 넣어 화면 근거로 대사·내레이션을 쓰게 한다(기본 off). model=sonnet 권장.
+            "visual_brief": False, "visual_model": "sonnet", "visual_step": 6.0, "visual_cap": 60,
             # 상황별 짤(움짤) — {out_dir}/_assets/gifs/{태그}/ 에 파일을 넣으면 그 태그만 쓰인다.
             # LLM이 태그를 고르고(cutins), 굽기가 화면 구석에 얹는다. 파일 없으면 조용히 생략.
             "cutins": False, "cutin_pos": "tr", "cutin_scale": 0.26,
@@ -859,7 +862,8 @@ async def step_ai(req: Request):
                                 style=body.get("style", "3min"),
                                 nar_rich=body.get("nar_rich"),
                                 remove_bgm=body.get("remove_bgm"),
-                                cutins=body.get("cutins")))
+                                cutins=body.get("cutins"),
+                                visual_brief=body.get("visual_brief")))
         except Exception as e:
             jerr(jid, e)
     run_bg(work)

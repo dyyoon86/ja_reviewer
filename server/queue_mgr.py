@@ -403,7 +403,7 @@ class QueueManager:
                        (o.get("hint") or "").strip(), em, gpu=self._lane("gpu"),
                        pos=pos, style=o.get("style", "3min"),
                        nar_rich=o.get("nar_rich"), remove_bgm=o.get("remove_bgm"),
-                       cutins=o.get("cutins"))
+                       cutins=o.get("cutins"), visual_brief=o.get("visual_brief"))
         elif stg == "subs":
             S.stage_subs(c, code, em)
         elif stg == "banner":

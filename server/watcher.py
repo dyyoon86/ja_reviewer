@@ -59,6 +59,7 @@ class Watcher:
                 "style": "3min", "pos": "solo", "orig_audio": "duck", "duck_level": 0.3,
                 "tts_profile": c.get("tts_profile"), "tts_base": c.get("tts_base"),
                 "tts_language": c.get("tts_language", "ko"), "tts_mux": True,
+                "visual_brief": bool(c.get("visual_brief", False)),
                 "fullauto": True}
 
     # ── 루프 ────────────────────────────────────────────────────────────────

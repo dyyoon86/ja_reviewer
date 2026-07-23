@@ -421,7 +421,7 @@ def _reduce_transcript(meta, segs, llm, em, limit=25000, block_sec=1200):
 
 
 def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", style="3min",
-             nar_rich=None, remove_bgm=None, cutins=None):
+             nar_rich=None, remove_bgm=None, cutins=None, visual_brief=None):
     """② AI 처리 — 저장된 전사 + 메타 → LLM 압축·번역·내레이션. plan.json 저장 + 컷.
     gpu: 컷(NVENC) 구간을 감쌀 세마포어(큐 병렬 시) — None이면 잠금 없음(기존 단독 동작)."""
     gpu = gpu or NullLock()
@@ -477,6 +477,17 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
         plan_segs, story = _reduce_transcript(m, segs, llm, em,
                                               limit=int(c.get("map_reduce_chars", 25000)))
         full_hint = "\n".join(x for x in ((hint or "").strip(), story) if x)
+        # 화면 시각정보 — 클린본 프레임을 비전(claude -p)이 읽어 '장면/화면글자' 브리핑을 만들고
+        #   프롬프트에 넣어준다. LLM이 오디오 자막만이 아니라 화면 행동·표정·소품까지 알고
+        #   대사/내레이션을 쓴다(config visual_brief, 기본 off). 실패는 soft-fail(없이 진행).
+        vis_text = ""
+        use_visual = bool(c.get("visual_brief", False) if visual_brief is None else visual_brief)
+        if use_visual:
+            try:
+                from server.core import visual as _visual
+                vis_text = _visual.build_visual_brief(video, c, em.log)
+            except Exception as e:
+                em.log(f"※ 시각정보 생성 실패({type(e).__name__}: {e}) — 시각정보 없이 진행")
         # 강조·정보 내레이션은 기본 끔 — 색만 바뀔 뿐 등장 이펙트·크기·효과음 연출이 없어
         # 화면만 산만하다(2026-07-13). 연출을 갖춘 뒤 GUI 체크박스로 켠다.
         rich = bool(c.get("nar_rich", False) if nar_rich is None else nar_rich)
@@ -497,7 +508,8 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
             except Exception as e:
                 em.log(f"※ 짤 태그 조회 실패({e}) — 짤 없이 진행")
         res = P.call_llm(pf(m, plan_segs, target, hint=full_hint, pos=pos, style=style,
-                            with_dialogue=not two_pass, nar_rich=rich, cutin_tags=tags),
+                            with_dialogue=not two_pass, nar_rich=rich, cutin_tags=tags,
+                            visual=vis_text),
                          llm, em.log)
     finally:
         hb.set()
