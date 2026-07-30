@@ -102,6 +102,17 @@ def fetch_meta(code: str) -> dict:
                 f"[gen_infocard] '{code}' 를 로컬 DB·meta_api 어디서도 찾지 못했습니다. "
                 f"아직 크롤링되지 않은 품번일 수 있습니다.")
         print(f"[gen_infocard] '{code}' 로컬 DB에 없음 → meta_api에서 가져옴(신작)")
+        # ★ 원격 메타에는 배우 사진이 안 실려 온다(우분투 로컬 파일). 그렇다고 사진을
+        #   포기하면 워터마크 얼굴 슬롯이 딸기 마스코트로 떨어진다(2026-07-24 ja13 사례:
+        #   11편 전부 얼굴 없이 납품될 뻔). 작품만 신작이고 배우는 로컬 DB에 이미 있는
+        #   경우가 대부분이므로, 이름으로 로컬 actresses를 한 번 더 조회해 사진을 붙인다.
+        if w.get("actress_ja"):
+            db2 = sqlite3.connect(DB); db2.row_factory = sqlite3.Row
+            a = db2.execute("SELECT * FROM actresses WHERE name_ja=?",
+                            (w["actress_ja"],)).fetchone()
+            db2.close()
+            if a:
+                print(f"[gen_infocard] 배우 '{w['actress_ja']}' 로컬 DB에서 사진 확보")
     a = dict(a) if a else {}
 
     likes = w.get("likes") or 0
@@ -217,7 +228,7 @@ def _mascot_b64() -> str:
         return base64.b64encode(f.read()).decode()
 
 _FONTS = ("@import url('https://fonts.googleapis.com/css2?"
-          "family=Nanum+Brush+Script&family=Jua&display=swap');")
+          "family=Nanum+Brush+Script&family=Jua&family=Black+Han+Sans&display=swap');")
 
 def html_bg() -> str:
     return f"""<!doctype html><meta charset=utf-8><style>*{{margin:0}}
@@ -236,90 +247,101 @@ def html_frame(t: dict) -> str:
 </style><div class=f><div class=b></div><div class=b2></div></div>"""
 
 def html_info(m: dict, mb: str, t: dict) -> str:
-    # 정보 알약 동적 구성 (없는 값은 생략)
-    pills = [f'<span class="pill key">{_h(m["label"])} · {_h(m["code"])}</span>']
+    """인트로 인포카드 — 좌측 액센트 바 + 품번/배우/메타 3줄(2026-07-24 재디자인).
+
+    옛 디자인은 브러시체 타이틀의 좌측 시작점이 아래 줄과 어긋나고(side bearing),
+    폰트 3종(브러시·Jua·컬러이모지)이 섞여 자간·글자높이가 제각각인 데다
+    품번이 타이틀과 알약에, 배우명이 타이틀과 본문에 중복 노출됐다.
+    → 한 서체 계열 + 왼쪽 끝 완전 일치 + 중복 제거 + 이모지 대신 텍스트 라벨.
+    """
+    bits = []
+    if m["label"]:
+        bits.append(_h(m["label"]))
     if m["bust"] and m["waist"] and m["hip"]:
-        pills.append(f'<span class="pill">B<b>{m["bust"]}</b>·W<b>{m["waist"]}</b>·H<b>{m["hip"]}</b></span>')
+        bits.append(f'B{m["bust"]}·W{m["waist"]}·H{m["hip"]}')
     ck = []
-    if m["cup"]:    ck.append(f'<b>{m["cup"]}</b>컵')
+    if m["cup"]:    ck.append(f'{m["cup"]}컵')
     if m["height"]: ck.append(f'{m["height"]}cm')
-    if ck: pills.append(f'<span class="pill">{" · ".join(ck)}</span>')
-    if m["release"]: pills.append(f'<span class="pill">📅 {m["release"]}</span>')
-    if m["star"]:    pills.append(f'<span class="pill key">★ <b>{m["star"]}</b></span>')
-    if m["views"]:   pills.append(f'<span class="pill">👁 {m["views"]}</span>')
-    if m["like_pct"]:pills.append(f'<span class="pill">👍 <b>{m["like_pct"]}%</b></span>')
+    if ck: bits.append(" · ".join(ck))
+    if m["release"]:  bits.append(m["release"])
+    if m["star"]:     bits.append(f'★ {m["star"]}')
+    if m["like_pct"]: bits.append(f'좋아요 {m["like_pct"]}%')
+    meta = '<span class=dot>·</span>'.join(f"<span>{b}</span>" for b in bits)
     aja = f'<span class="ja">{_h(m["actress_ja"])}</span>' if m["actress_ja"] else ""
     return f"""<!doctype html><meta charset=utf-8><style>{_FONTS}
-*{{margin:0;box-sizing:border-box;font-family:'Pretendard','Malgun Gothic',sans-serif}}html,body{{background:transparent}}
-.f{{width:1920px;height:1080px;position:relative;background:transparent}}
+*{{margin:0;box-sizing:border-box}}html,body{{background:transparent}}
+.f{{width:1920px;height:1080px;position:relative;background:transparent;
+ font-family:'Jua','Malgun Gothic',sans-serif}}
 .logo{{position:absolute;top:48px;left:56px;display:flex;align-items:center;gap:12px;
  background:linear-gradient(135deg,{t['c1']},{t['c2']});padding:10px 22px 10px 12px;border-radius:18px;
  box-shadow:0 8px 26px rgba(0,0,0,.4);transform:rotate(-2deg);border:2px solid rgba(255,255,255,.25)}}
 .logo img{{width:64px;height:64px;object-fit:contain;filter:drop-shadow(0 2px 4px rgba(0,0,0,.4))}}
-.logo .t{{color:#fff;font-family:'Jua';font-size:30px}}
-.lower{{position:absolute;left:76px;bottom:84px;
- background:rgba(12,7,11,.62);border-radius:26px;padding:26px 36px 26px 30px;
- border:1.5px solid rgba(255,255,255,.14);box-shadow:0 10px 40px rgba(0,0,0,.45)}}
-.title{{font-family:'Nanum Brush Script';font-size:134px;line-height:.9;
- background:linear-gradient(180deg,#fff 60%,{t['accent']});-webkit-background-clip:text;-webkit-text-fill-color:transparent;
- filter:drop-shadow(0 5px 18px rgba(0,0,0,.65)) drop-shadow(0 0 30px {t['c1']}66)}}
-.actress{{font-family:'Jua';font-size:44px;color:{t['accent']};margin-top:2px;margin-left:6px;text-shadow:0 3px 12px rgba(0,0,0,.7)}}
-.actress .ja{{color:#e8e8ee;font-size:23px;margin-left:10px;font-weight:600}}
-.meta{{display:flex;align-items:center;gap:9px;margin-top:18px;margin-left:6px;flex-wrap:wrap;max-width:1500px}}
-.pill{{font-family:'Jua';font-size:24px;padding:7px 15px;border-radius:99px;
- background:rgba(255,255,255,.14);border:1.5px solid rgba(255,255,255,.45);color:#fff;backdrop-filter:blur(3px)}}
-.pill b{{color:{t['accent']}}}
-.pill.key{{background:linear-gradient(135deg,{t['c1']},{t['c2']});border:1.5px solid rgba(255,255,255,.35);color:#fff;box-shadow:0 4px 14px rgba(0,0,0,.35)}}
-.pill.key b{{color:{t['accent']}}}
+.logo .t{{color:#fff;font-size:30px;letter-spacing:-.01em}}
+.card{{position:absolute;left:76px;bottom:84px;display:flex;align-items:stretch;
+ background:rgba(10,6,10,.72);border-radius:20px;overflow:hidden;
+ border:1.5px solid rgba(255,255,255,.13);box-shadow:0 12px 44px rgba(0,0,0,.5)}}
+.bar{{width:10px;background:linear-gradient(180deg,{t['c1']},{t['c2']});flex:0 0 auto}}
+.body{{padding:30px 40px 30px 34px}}
+.code{{font-family:'Black Han Sans','Jua',sans-serif;font-size:96px;line-height:1;
+ letter-spacing:.01em;color:#fff;text-shadow:0 4px 18px rgba(0,0,0,.6)}}
+.name{{font-size:46px;color:{t['accent']};margin-top:14px;letter-spacing:-.01em;
+ display:flex;align-items:baseline;gap:14px}}
+.name .ja{{color:#cfcfd8;font-size:24px}}
+.meta{{margin-top:22px;font-size:26px;color:#e6e6ee;letter-spacing:-.01em;
+ display:flex;align-items:center;gap:12px;flex-wrap:wrap;max-width:1500px}}
+.meta .dot{{color:{t['c1']}}}
 </style><div class=f>
  <div class=logo><img src="data:image/png;base64,{mb}"><span class=t>딸딸기튜브</span></div>
- <div class=lower>
-  <div class=title>{_h(m["title"])}</div>
-  <div class=actress>{_h(m["actress"])} {aja}</div>
-  <div class=meta>{''.join(pills)}</div>
+ <div class=card>
+  <div class=bar></div>
+  <div class=body>
+   <div class=code>{_h(m["code"])}</div>
+   <div class=name>{_h(m["actress"])}{aja}</div>
+   <div class=meta>{meta}</div>
+  </div>
  </div></div>"""
 
 def html_wm(m: dict, mb: str, t: dict) -> str:
-    # 배우 얼굴(좌) + 3줄: ①품번  ②배우이름+3사이즈  ③출시일+평점
+    """상시 워터마크 — 얼굴 + 품번/배우/출시일을 담은 단일 패널(2026-07-24 재디자인).
+
+    옛 디자인은 바 3개가 각각 다른 글자크기(38/29/24)·패딩·테두리로 떠 있어
+    내용 길이에 따라 오른쪽 끝이 계단처럼 어긋났다("중구난방"). 하나의 패널로
+    묶어 오른쪽 끝을 직선으로 떨어뜨리고, 이모지(📅) 대신 가운뎃점으로 통일.
+    """
     if m.get("photo"):
         with open(m["photo"], "rb") as f:
             face = "data:image/jpeg;base64," + base64.b64encode(f.read()).decode()
-        face_html = f'<div class=face style="background-image:url({face})"></div>'
+        face_bg = f"url({face});background-size:cover"
     else:
-        face_html = f'<div class=face style="background-image:url(data:image/png;base64,{mb});background-size:70%;background-color:#e50914"></div>'
-    size = ""
+        face_bg = (f"url(data:image/png;base64,{mb});background-size:70%;"
+                   f"background-color:{t['c1']}")
+    # 상시 워터마크에도 3사이즈를 넣는다(2026-07-30 요청) — 인트로 인포카드가 사라진 뒤에는
+    # 스펙을 볼 수 있는 곳이 없었다. 형식은 인포카드와 동일(B··W··H·).
+    meas = ""
     if m["bust"] and m["waist"] and m["hip"]:
-        size = f'<span class=sz>B{m["bust"]}·W{m["waist"]}·H{m["hip"]}</span>'
-    r3 = []
-    if m["release"]: r3.append(f'📅 {m["release"]}')
-    if m["star"]:    r3.append(f'★ {m["star"]}')
-    row3 = "&nbsp;&nbsp;".join(r3)
-    # 3줄 각각 다른 바 스타일(같은 팔레트) — 방송 하단자막식
+        meas = f'B{m["bust"]}·W{m["waist"]}·H{m["hip"]}'
+    sub = " · ".join(x for x in [m["release"], f'★ {m["star"]}' if m["star"] else "", meas] if x)
     return f"""<!doctype html><meta charset=utf-8><style>{_FONTS}
 *{{margin:0;box-sizing:border-box}}html,body{{background:transparent}}
-.f{{width:1920px;height:1080px;position:relative;background:transparent;font-family:'Jua','Malgun Gothic',sans-serif}}
-.wrap{{position:absolute;top:44px;left:48px;display:flex;align-items:center;gap:16px;
- filter:drop-shadow(0 6px 18px rgba(0,0,0,.5))}}
-.face{{width:138px;height:138px;border-radius:20px;background-size:cover;background-position:center top;
- border:4px solid #fff;box-shadow:0 4px 12px rgba(0,0,0,.45);z-index:2;flex:0 0 auto}}
-.rows{{display:flex;flex-direction:column;gap:6px;align-items:flex-start}}
-.row{{border-radius:11px;line-height:1;white-space:nowrap;display:inline-flex;align-items:center}}
-/* 1줄: 품번 — 진한 테마색 solid, 굵게 */
-.r1{{background:linear-gradient(135deg,{t['c2']},{t['c1']});color:#fff;font-size:38px;
- padding:11px 20px;border:2px solid rgba(255,255,255,.4);box-shadow:0 3px 8px rgba(0,0,0,.35)}}
-/* 2줄: 배우+사이즈 — 밝은 흰바탕에 테마색 글씨 */
-.r2{{background:rgba(255,255,255,.95);color:{t['c2']};font-size:29px;padding:9px 18px;gap:11px}}
-.r2 .sz{{color:{t['c1']};font-size:22px;font-weight:400}}
-/* 3줄: 출시일·평점 — 반투명 어두운 바 + 강조색 */
-.r3{{background:rgba(20,10,14,.72);color:{t['accent']};font-size:24px;padding:9px 18px;
- border:1.5px solid {t['accent']}88;backdrop-filter:blur(3px)}}
+.f{{width:1920px;height:1080px;position:relative;background:transparent;
+ font-family:'Jua','Malgun Gothic',sans-serif}}
+.panel{{position:absolute;top:44px;left:48px;display:flex;align-items:center;gap:16px;
+ background:rgba(10,6,10,.74);border:1.5px solid rgba(255,255,255,.16);
+ border-radius:18px;padding:14px 22px 14px 14px;box-shadow:0 8px 26px rgba(0,0,0,.5)}}
+.face{{width:116px;height:116px;border-radius:12px;background-position:center top;
+ background-image:{face_bg};flex:0 0 auto;box-shadow:0 2px 8px rgba(0,0,0,.5)}}
+.col{{display:flex;flex-direction:column;gap:7px;align-items:flex-start}}
+.code{{font-family:'Black Han Sans','Jua',sans-serif;font-size:38px;line-height:1;
+ color:#fff;letter-spacing:.01em}}
+.name{{font-size:27px;line-height:1;color:{t['accent']};letter-spacing:-.01em}}
+.sub{{font-size:21px;line-height:1;color:#b9b9c4;letter-spacing:-.01em}}
 </style><div class=f>
- <div class=wrap>
-  {face_html}
-  <div class=rows>
-   <div class="row r1">{_h(m["code"])}</div>
-   <div class="row r2">{_h(m["actress"])} <span class=sz>{size}</span></div>
-   <div class="row r3">{row3}</div>
+ <div class=panel>
+  <div class=face></div>
+  <div class=col>
+   <div class=code>{_h(m["code"])}</div>
+   <div class=name>{_h(m["actress"])}</div>
+   <div class=sub>{sub}</div>
   </div>
  </div></div>"""
 
