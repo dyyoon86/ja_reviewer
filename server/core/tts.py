@@ -89,6 +89,59 @@ def tts_generate(base, text, profile_id, language, out_wav, seed=None, log=print
     return out_wav
 
 
+def tts_generate_best(base, text, profile_id, language, out_wav, seed=None,
+                      candidates=1, ref_npy=None, python=None, log=print):
+    """tts_generate의 화자 선별판 — seed를 바꿔 후보 N개를 만들고 기준 임베딩에
+    가장 가까운 것을 out_wav로 채택한다.
+
+    voicebox는 seed가 같으면 결과가 완전히 같으므로(실측), 후보는 seed를 바꿔야 한다.
+    candidates<=1 이거나 기준 임베딩이 없으면 기존 동작(단일 생성)과 동일하다.
+    후보 채점이 실패해도 첫 후보를 그대로 채택해 파이프라인은 멈추지 않는다."""
+    from . import voicepick
+    try:
+        k = max(1, int(candidates))
+    except (TypeError, ValueError):
+        k = 1
+    if k <= 1 or not ref_npy:
+        return tts_generate(base, text, profile_id, language, out_wav, seed, log)
+
+    base_seed = 0
+    try:
+        base_seed = int(seed)
+    except (TypeError, ValueError):
+        pass
+    # 후보 seed: 기본 seed + 결정론적 오프셋 → 재실행 시 같은 후보 집합(재현성 유지)
+    seeds = [base_seed + off for off in (0, 1013, 2027, 3041, 4051)][:k]
+
+    cands = []
+    for i, sd in enumerate(seeds):
+        w = f"{out_wav}.c{i}.wav"
+        try:
+            tts_generate(base, text, profile_id, language, w, sd, log=lambda m: None)
+            cands.append(w)
+        except Exception as e:
+            log(f"  후보 seed={sd} 생성 실패({e}) — 건너뜀")
+    if not cands:
+        raise RuntimeError("모든 후보 생성 실패")
+
+    scores = voicepick.score(cands, ref_npy, python=python, log=log)
+    if scores:
+        best = max(cands, key=lambda c: scores.get(c, -1.0))
+        vals = sorted((scores.get(c, -1.0) for c in cands), reverse=True)
+        log(f"  화자 선별: {len(cands)}후보 {vals[0]:.3f}"
+            + (f" (최저 {vals[-1]:.3f}, 폭 {vals[0] - vals[-1]:.3f})" if len(vals) > 1 else "")
+            + f" → seed={seeds[cands.index(best)]}")
+    else:
+        best = cands[0]
+
+    Path(best).replace(out_wav)
+    for c in cands:
+        if c != best:
+            try: Path(c).unlink()
+            except Exception: pass
+    return out_wav
+
+
 def audio_duration(path):
     """오디오 길이(초). 실패 시 0."""
     try:
@@ -100,25 +153,20 @@ def audio_duration(path):
         return 0.0
 
 
-MIN_GAP = 0.12       # 문장 사이 최소 숨돌림(초)
-MAX_TEMPO = 1.35     # 이 이상 빠르게 하면 알아듣기 어렵다
+# 문장 사이 최소 숨돌림(초). 0.12는 너무 짧아 "숨도 안 쉬고 쏟아진다"는
+# 지적을 받았다(2026-07-30) — 사람이 문장을 끊는 실제 호흡은 0.3초 이상이다.
+MIN_GAP = 0.30
+# atempo 상한. 1.35는 알아듣기는 되지만 확연히 쫓기는 말투가 된다 → 기본은 거의
+# 티 안 나는 1.12까지만 압축하고, 그래도 영상 길이를 넘칠 때만 HARD_TEMPO로 escalate.
+MAX_TEMPO = 1.12
+HARD_TEMPO = 1.35
 
 
-def build_narration_wav(clips, out_wav, log=print, video_sec=None,
-                        min_gap=MIN_GAP, max_tempo=MAX_TEMPO):
-    """clips=[(start_sec, wav_path)] → 단일 내레이션 트랙.
-
-    TTS 실제 발화가 LLM이 잡은 슬롯보다 길면 다음 문장과 겹쳐 두 목소리가 동시에 난다
-    (예전 구현은 겹치면 그대로 amix). 여기서는:
-      1) 슬롯에 안 들어가면 atempo로 살짝 빠르게(최대 max_tempo) → 영상 싱크 유지
-      2) 그래도 넘치면 다음 문장 시작을 뒤로 민다(싱크가 조금 밀리더라도 겹침보다 낫다)
-    """
-    if not clips:
-        raise RuntimeError("내레이션 클립이 없습니다.")
-    items = sorted(((float(s), str(p)) for s, p in clips), key=lambda x: x[0])
-    durs = [audio_duration(p) for _, p in items]
-
-    placed, cursor = [], 0.0     # placed: (start, path, tempo)
+def _place(items, durs, min_gap, max_tempo, video_sec):
+    """각 문장의 실제 발화 길이(durs)를 보고 배치 결정 → (placed, sped, pushed, end).
+    placed=(start, path, tempo). 슬롯에 안 들어가면 ①max_tempo까지 압축
+    ②그래도 넘치면 다음 문장을 뒤로 민다(겹쳐서 두 목소리가 나는 것보다 낫다)."""
+    placed, cursor = [], 0.0
     sped = pushed = 0
     for i, ((st, p), d) in enumerate(zip(items, durs)):
         start = max(st, cursor)
@@ -135,6 +183,36 @@ def build_narration_wav(clips, out_wav, log=print, video_sec=None,
         eff = (d / tempo) if tempo > 0 else d
         placed.append((start, p, tempo))
         cursor = start + eff + min_gap
+    return placed, sped, pushed, cursor - min_gap
+
+
+def build_narration_wav(clips, out_wav, log=print, video_sec=None,
+                        min_gap=MIN_GAP, max_tempo=MAX_TEMPO):
+    """clips=[(start_sec, wav_path)] → 단일 내레이션 트랙.
+
+    TTS 실제 발화가 LLM이 잡은 슬롯보다 길면 다음 문장과 겹쳐 두 목소리가 동시에 난다
+    (예전 구현은 겹치면 그대로 amix). 여기서는:
+      1) 슬롯에 안 들어가면 atempo로 살짝 빠르게(최대 max_tempo) → 영상 싱크 유지
+      2) 그래도 넘치면 다음 문장 시작을 뒤로 민다(싱크가 조금 밀리더라도 겹침보다 낫다)
+
+    max_tempo는 낮게(1.12) 잡아 말투를 지키는 쪽을 우선하고, 그 결과 내레이션이
+    영상보다 길어질 때만 HARD_TEMPO(1.35)로 다시 계산한다 — 아웃트로가 영상 끝에서
+    잘리는 것(mux의 duration=first)보다는 조금 빠른 말투가 낫다.
+    """
+    if not clips:
+        raise RuntimeError("내레이션 클립이 없습니다.")
+    items = sorted(((float(s), str(p)) for s, p in clips), key=lambda x: x[0])
+    durs = [audio_duration(p) for _, p in items]
+
+    used_tempo = max_tempo
+    placed, sped, pushed, end = _place(items, durs, min_gap, max_tempo, video_sec)
+    if video_sec and end > video_sec + 0.3 and max_tempo < HARD_TEMPO:
+        h_placed, h_sped, h_pushed, h_end = _place(items, durs, min_gap, HARD_TEMPO, video_sec)
+        if h_end < end - 0.05:
+            log(f"  · 내레이션이 영상({video_sec:.1f}s)을 {end - video_sec:.1f}s 넘겨 "
+                f"압축 상한을 {max_tempo}→{HARD_TEMPO}로 올림 (끝 {h_end:.1f}s)")
+            placed, sped, pushed, end = h_placed, h_sped, h_pushed, h_end
+            used_tempo = HARD_TEMPO
 
     inputs, filt = [], []
     for i, (st, p, tempo) in enumerate(placed):
@@ -151,14 +229,13 @@ def build_narration_wav(clips, out_wav, log=print, video_sec=None,
                     "-map", "[a]", _tmp], check=True, timeout=FFMPEG_TIMEOUT)
     _finalize(_tmp, out_wav)
 
-    end = cursor - min_gap
     msg = f"내레이션 WAV 합성 완료: {out_wav} ({len(placed)}문장, 끝 {end:.1f}s"
     if video_sec:
         msg += f" / 영상 {video_sec:.1f}s"
-    msg += ")"
+    msg += f", 숨돌림 {min_gap:.2f}s)"
     log(msg)
     if sped:
-        log(f"  · 슬롯이 좁아 {sped}문장을 최대 {max_tempo}배까지 빠르게 조정")
+        log(f"  · 슬롯이 좁아 {sped}문장을 최대 {used_tempo}배까지 빠르게 조정")
     if pushed:
         log(f"  · {pushed}문장은 앞 문장과 겹쳐 뒤로 밀었습니다(내레이션이 촘촘합니다)")
     if video_sec and end > video_sec + 0.5:

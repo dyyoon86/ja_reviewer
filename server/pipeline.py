@@ -52,7 +52,8 @@ from server.core.cutter import (
     cut_video_copy, cut_video_smart,
 )
 from server.core.tts import (
-    tts_profiles, tts_generate, audio_duration, MIN_GAP, MAX_TEMPO,
+    tts_profiles, tts_generate, tts_generate_best, audio_duration,
+    MIN_GAP, MAX_TEMPO, HARD_TEMPO,
     build_narration_wav, merge_spans, _duck_expr, ORIG_AUDIO_MODES, mux_narration,
 )
 from server.core.subs import (

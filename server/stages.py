@@ -207,7 +207,20 @@ def _chain_clean(c, code, video, em, gpu, outdir, clean):
                f"→ {sum(b - a for a, b in keep) / 60:.1f}분 유지")
         dst = outdir / (f"{code}_클린.mp4" if i == len(stages) else f"{code}_클린_s{i}.mp4")
         with gpu:
-            P.cut_video(src, keep, str(dst), em.log, lambda fr: em.prog(fr, f"{label} 컷"))
+            # 스마트 컷 우선(수동 ⚡ /trim과 동일 경로) — 경계 GOP만 재인코딩하고 중간은
+            # 스트림 카피. 경계 정밀도는 재인코딩 컷과 같은 frame-accurate라 노출 경계가
+            # 밀리지 않는다. 3중 필터는 단계마다 '남기는 분량 전체'를 다시 인코딩해 왔는데
+            # 실측(ja14 FNS-230, 171분)에서 편당 66분 중 60분이 컷이었다(NVENC 1.2배속,
+            # 누적 재인코딩 119분). 남길 게 많을수록 손해라 여기서도 스마트 컷을 쓴다.
+            # 폴백은 재인코딩만 — cut_video_copy는 keep 시작을 앞쪽 키프레임으로 스냅해
+            # 직전 제거 구간(=노출)의 꼬리를 도로 물고 올 수 있어 클린 단계엔 부적합.
+            try:
+                P.cut_video_smart(src, keep, str(dst), em.log,
+                                  lambda fr: em.prog(fr, f"{label} 컷"))
+            except Exception as se:
+                em.log(f"  스마트 컷 실패({se}) → 재인코딩 컷으로 폴백")
+                P.cut_video(src, keep, str(dst), em.log,
+                            lambda fr: em.prog(fr, f"{label} 컷"))
         if tmp_prev:
             try:
                 Path(tmp_prev).unlink()
@@ -702,12 +715,30 @@ def stage_tts(c, code, base, profile, language, seed, mux, em,
     if not entries:
         raise RuntimeError("내레이션 항목이 없습니다.")
     clipdir = outdir / f"{code}_tts"; clipdir.mkdir(parents=True, exist_ok=True)
+    # 화자 선별 — voicebox 생성 편차(실측 0.815~0.920)로 문장 하나가 다른 목소리처럼
+    # 들리는 것 방지. seed를 바꿔 후보를 만들고 기준 임베딩에 가까운 것을 채택한다.
+    # 기준(voice_ref.npy)이 없거나 resemblyzer가 없으면 자동으로 단일 생성으로 돌아간다.
+    ncand = int(c.get("tts_candidates", 1) or 1)
+    ref_npy = None
+    if ncand > 1:
+        ref_npy = c.get("voice_ref") or str(Path(__file__).resolve().parent.parent
+                                            / "models" / "voice_ref.npy")
+        if not Path(ref_npy).is_file():
+            em.log(f"※ 화자 기준 임베딩 없음({ref_npy}) — 후보 선별 없이 단일 생성")
+            ref_npy = None
+        else:
+            em.log(f"화자 선별 켜짐: 문장당 후보 {ncand}개")
     clips = []
     total = len(entries) + 1 + (1 if mux else 0)
     for i, (st, en, text) in enumerate(entries, 1):
         em.step(i, total, f"음성 {i}/{len(entries)}: {text[:18]}")
         w = str(clipdir / f"n{i:03d}.wav")
-        P.tts_generate(base, text, profile, language, w, seed, em.log)
+        if ref_npy:
+            P.tts_generate_best(base, text, profile, language, w, seed,
+                                candidates=ncand, ref_npy=ref_npy,
+                                python=c.get("voice_python"), log=em.log)
+        else:
+            P.tts_generate(base, text, profile, language, w, seed, em.log)
         clips.append((st, w))
     wav = str(outdir / f"{code}_내레이션.wav")
     em.step(len(entries) + 1, total, "내레이션 트랙 합성")
