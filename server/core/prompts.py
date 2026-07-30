@@ -354,8 +354,14 @@ def prompt_auto(meta, segs, target_sec=60, hint="", pos="mid", style="3min"):
 
 
 def prompt_highlight(meta, segs, target_sec=60, hint="", pos="mid", style="3min",
-                     with_dialogue=True, nar_rich=False, cutin_tags=None, visual=""):
-    """AlphaCut식 하이라이트 추출 — '고루 분포' 대신 '가장 후킹되는 순간'만 골라 몰아 뽑는다."""
+                     with_dialogue=True, nar_rich=False, cutin_tags=None, visual="",
+                     hook_floor=3):
+    """AlphaCut식 하이라이트 추출 — '고루 분포' 대신 '가장 후킹되는 순간'만 골라 몰아 뽑는다.
+
+    hook_floor: 이 점수 미만인 컷은 목표 길이를 못 채워도 넣지 않는다.
+    목표 길이를 늘리면(60→120초) 예전 규칙의 '부족하면 낮은 점수도 채택'이 발동해
+    늘어지는 컷으로 분량을 메꿨다 — 사용자 요구는 "길게, 단 지루한 부분 없게"이므로
+    길이보다 후킹 밀도를 우선한다(2026-07-30)."""
     body = "\n".join(f"{k}\t{a:.2f}\t{b:.2f}\t{t}" for k, (a, b, t) in enumerate(segs, 1))
     make = "압축한다" if not with_dialogue else "압축하고, 한글 대사자막과 해설 내레이션을 만든다"
     return (f"너는 일본 영상 리뷰어다. 아래 영상 자막에서 **가장 후킹되는(클릭·시청유지 유발) 순간**만 골라 "
@@ -369,7 +375,10 @@ def prompt_highlight(meta, segs, target_sec=60, hint="", pos="mid", style="3min"
             f"(1)잡담·무음·반복은 버린다. "
             f"(2)★고루 분포 금지★ — 앞·중간·뒤 균등이 아니라 **후킹 밀도가 가장 높은 순간에 집중**. "
             f"(3)각 컷마다 hook(후킹점수 1~5, 5=최고)과 reason(왜 후킹인지 한 줄)을 매긴다. "
-            f"(4)점수 높은 컷들로 합쳐서 {target_sec}초 ±20% 채운다(부족하면 낮은 점수도 채택, 넘치면 상위만). "
+            f"(4)점수 높은 컷부터 채워 합계 {target_sec}초 ±20%를 목표로 한다. "
+            f"★단 hook {hook_floor} 미만인 컷은 목표 길이를 못 채워도 절대 넣지 마라★ — "
+            f"분량을 메꾸려고 늘어지는 컷(설명만 이어지는 대화, 반응 없는 정적 장면, "
+            f"같은 상황의 반복)을 끼우면 실패다. {target_sec}초보다 짧게 끝나는 편이 낫다. "
             f"(5)각 컷은 2~15초 권장. 시간은 원본 영상 기준 초.\n"
             f"[출력 JSON만] {{\"summary\":\"3~5줄\",\"stars\":1~5,"
             f"\"picks\":[{{\"start\":초,\"end\":초,\"hook\":1~5,\"reason\":\"\"}}],"
