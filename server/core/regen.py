@@ -18,6 +18,23 @@ from .llm import fetch_meta, _cli_path, call_llm
 from .prompts import prompt_manual
 from .cutter import cut_video
 
+# 내레이션 슬롯 배분 기준 (2026-07-30, "초반 내레이션이 숨도 안 쉰다" 대응)
+# voicebox 실측 발화속도 7~8.5자/초 → 프롬프트 상한인 25자 문장에 3.3초가 필요하다.
+# 슬롯 길이와 글자수 상한은 **한 쌍**이다 — 발화속도 실측 7.5자/초 기준으로
+# 글자수 ≈ 슬롯초 × 7.5 를 넘으면 TTS가 슬롯을 넘겨 대사를 덮는다.
+#   3.5s / 25자 : 문장이 여유롭지만 대사 빽빽한 작품은 자리가 3~4개뿐
+#   2.5s / 18자 : 자리가 1.5~2배 늘어난다(2026-07-31 사용자 요청, 현재 설정)
+NAR_SLOT_MIN = 2.5    # 한 문장이 압축 없이 들어가는 최소 슬롯(초)
+NAR_ITEM_GAP = 0.35   # 같은 창 안 문장 사이 숨돌림(초). tts.MIN_GAP과 짝을 맞춘다
+NAR_DLG_PAD = 0.35    # 대사 앞뒤로 비워둘 여유(초) — 내레이션이 대사를 앞지르지 않게
+NAR_CPS = 7.5         # voicebox 실측 발화속도(자/초) — 글자수↔슬롯초 환산 기준
+NAR_MAX_CHARS = 30    # 절대 상한(자막 한 줄이 넘치지 않는 선)
+
+
+def _char_budget(win_sec, cps=NAR_CPS, lo=12, hi=NAR_MAX_CHARS):
+    """창 길이 → 그 안에 압축 없이 들어가는 글자수. 슬롯마다 다르게 준다."""
+    return max(lo, min(hi, int(win_sec * cps)))
+
 
 # ─── keep 구간 재선정 ─────────────────────────────────────────────────────────
 def replan(folder: Path, meta_api: str, llm="claude", target=60, log=print):
@@ -88,7 +105,18 @@ def _dialogue_before(slot_start, dialogue, window=15.0):
     return lines
 
 
-def regen_narration(folder: Path, meta_api: str, log=print, seq=None):
+def narration_slots(video_sec, lo=6, hi=14, per=10.0):
+    """영상 길이 → 내레이션 슬롯 수. 예전엔 6으로 고정이었는데, 목표 길이를 60→120초로
+    늘리자 2분 영상에 내레이션 6줄만 남아 빈 구간이 길어졌다("지루한 부분 없게" 요구와
+    정면 충돌). 10초당 1슬롯으로 비례시키고 6~14 사이로 묶는다(60초=6, 120초=12)."""
+    try:
+        v = float(video_sec)
+    except (TypeError, ValueError):
+        return lo
+    return max(lo, min(hi, round(v / per)))
+
+
+def regen_narration(folder: Path, meta_api: str, log=print, seq=None, slots=None):
     """내레이션만 6슬롯(인트로 2 + 갭 3 + 아웃트로 1) 규칙으로 재생성.
     메타(배우/신체/레이블) 반영 + keep 갭 창에 길이 비례 배분 + retime(snap)으로
     {code}_내레이션.srt/.json 을 갱신한다. 반환: 새 narration 리스트."""
@@ -118,16 +146,16 @@ def regen_narration(folder: Path, meta_api: str, log=print, seq=None):
         if vis_entries:
             log(f"  화면 시각정보 {len(vis_entries)}줄 반영")
 
-    # 슬롯 6개로 압축: 인트로 1 + 중간 4 + 아웃트로 1
-    MAX_SLOTS = 6
-    if len(narration) > MAX_SLOTS:
-        intro  = [narration[0]]
-        outro  = [narration[-1]]
-        middle = narration[1:-1]
-        step   = max(1, len(middle) // (MAX_SLOTS - 2))
-        mid6   = middle[::step][: MAX_SLOTS - 2]
-        narration = intro + mid6 + outro
-        log(f"  슬롯 압축: {len(plan['narration'])}→{len(narration)}개")
+    # 슬롯 수 목표: 영상 길이에 비례(6~14). 실제 개수는 '대사 없는 틈'이 몇 개
+    # 나오는지에 따라 아래에서 다시 정한다(압축은 gap_windows 확정 후에 한다).
+    if slots:
+        SLOT_TARGET = max(3, int(slots))
+    else:
+        fin = folder / f"{code}_final.mp4"
+        vsec = video_duration(str(fin)) if fin.is_file() else \
+            sum(b - a for a, b in parse_keep(keep))
+        SLOT_TARGET = narration_slots(vsec)
+        log(f"  내레이션 슬롯 목표 {SLOT_TARGET}개 (영상 {vsec:.0f}s 기준)")
 
     # ── 메타 정보 ──────────────────────────────────────────────────────────
     log("메타 조회 중...")
@@ -189,11 +217,93 @@ def regen_narration(folder: Path, meta_api: str, log=print, seq=None):
     }
 
     # ── gap_windows 먼저 계산 — 프롬프트 슬롯 설명에 사용 ───────────────
+    def free_intervals(keep_segs, dlg, pad=NAR_DLG_PAD):
+        """keep 안에서 **대사가 말하지 않는 틈**만 남긴다(대사 앞뒤 pad 확보).
+        예전 배치는 대사 타임라인을 안 봐서 내레이션이 대사를 앞지르거나 덮었다
+        ("대사도 안 나왔는데 대본 자막이 먼저 나온다", 2026-07-30 SNOS-301)."""
+        busy = []
+        for d in dlg or []:
+            try:
+                busy.append([float(d["start"]) - pad, float(d["end"]) + pad])
+            except (KeyError, TypeError, ValueError):
+                continue
+        busy.sort()
+        merged = []
+        for a, b in busy:
+            if merged and a <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], b)
+            else:
+                merged.append([a, b])
+        free = []
+        for ks, ke in keep_segs:
+            cur = ks
+            for a, b in merged:
+                if b <= cur or a >= ke:
+                    continue
+                if a > cur:
+                    free.append((cur, min(a, ke)))
+                cur = max(cur, b)
+                if cur >= ke:
+                    break
+            if cur < ke:
+                free.append((cur, ke))
+        return [(round(a, 2), round(b, 2)) for a, b in free if b - a >= 0.05]
+
+    def windows_from_free(keep_segs, dlg, n_slots):
+        """대사 없는 틈에만 슬롯을 놓는다 → 내레이션이 대사를 앞지르지 않는다.
+        목표 개수보다 틈이 적으면 긴 틈을 반으로 쪼개 늘리고(각 조각 ≥ NAR_SLOT_MIN),
+        많으면 첫/끝(인트로·아웃트로)은 남기고 짧은 중간 틈을 버린다.
+        쓸 틈이 3개도 안 되면 None → 호출측이 옛 방식(keep 머리)으로 후퇴."""
+        free = free_intervals(keep_segs, dlg)
+        wins = [(a, b) for a, b in free if b - a >= NAR_SLOT_MIN]
+        if len(wins) < 3:
+            # 틈이 적으면 기준을 낮춰 한 번 더 — 조금 짧은 슬롯은 TTS가 살짝
+            # 압축(≤1.12배)하거나 뒤로 밀어 흡수한다. 옛 방식(대사 위에 얹기)보다 낫다.
+            wins = [(a, b) for a, b in free if b - a >= NAR_SLOT_MIN * 0.7]
+        # ★ 쪼개기를 먼저 하고 개수를 판정한다 — 긴 틈 하나가 여러 슬롯이 되므로
+        #   쪼개기 전 개수로 잘라내면 쓸 수 있는 자리를 놓친다(SNOS-293: 8s+4s → 3슬롯).
+        while len(wins) < n_slots:
+            # 첫·마지막 창(인트로·아웃트로)은 되도록 쪼개지 않는다 — 인트로는
+            # '서수+배우명'만 14자라 창이 짧으면 훅을 넣을 자리가 없다.
+            inner = list(range(1, len(wins) - 1)) or list(range(len(wins)))
+            cand = [k for k in inner if wins[k][1] - wins[k][0] >= 2 * NAR_SLOT_MIN]
+            pool = cand or list(range(len(wins)))
+            i = max(pool, key=lambda k: wins[k][1] - wins[k][0])
+            a, b = wins[i]
+            # 반으로만 가르면 8s/2.5s 같은 틈에서 3등분 기회를 놓친다 → 들어가는 만큼 균등분할
+            k = int((b - a) // NAR_SLOT_MIN)
+            if k < 2:
+                break                       # 더 쪼개면 한 문장이 안 들어간다
+            k = min(k, n_slots - len(wins) + 1)
+            step = (b - a) / k
+            wins[i:i + 1] = [(round(a + j * step, 2), round(a + (j + 1) * step, 2))
+                             for j in range(k)]
+        wins.sort()
+        if len(wins) < 3:
+            return None                     # 인트로·중간·아웃트로도 못 놓으면 후퇴
+        if len(wins) > n_slots and n_slots >= 3:
+            mids = sorted(wins[1:-1], key=lambda w: w[1] - w[0],
+                          reverse=True)[:n_slots - 2]
+            mids.sort()
+            wins = [wins[0]] + mids + [wins[-1]]
+        return wins
+
     def compute_gap_windows(keep_segs, n_slots=6):
         if not keep_segs: return []
+        w = windows_from_free(keep_segs, dialogue, n_slots)
+        if w:
+            return w
+        log("  ※ 대사가 빽빽해 대사-회피 배치 불가 — keep 머리 기준으로 배치")
         windows = []
         k0s, k0e = keep_segs[0]
-        intro_span = min(12.0, (k0e - k0s) * 0.4)
+        seg0 = k0e - k0s
+        # 인트로 2슬롯이 이 창을 반으로 갈라 쓴다. 예전엔 (seg0*0.4)만 봤더니 첫 keep이
+        # 짧은 작품에서 슬롯이 1~2초로 나와 오프닝 2문장이 최대속도로 압축됐다
+        # ("초반 내레이션이 숨도 안 쉰다", 2026-07-30). 실측 발화속도 7~8.5자/초이므로
+        # 25자 한 문장에 NAR_SLOT_MIN(3.5s)은 있어야 한다 → 두 문장 몫을 우선 확보하고,
+        # 그래도 첫 keep이 그보다 짧으면 그 90%까지만(뒤 대사를 다 먹지 않게).
+        want = 2 * NAR_SLOT_MIN + NAR_ITEM_GAP
+        intro_span = min(max(seg0 * 0.4, want), 12.0, seg0 * 0.9)
         mid_i = round(k0s + intro_span / 2, 2)
         end_i = round(k0s + intro_span, 2)
         windows.extend([(k0s, mid_i), (mid_i, end_i)])
@@ -211,28 +321,42 @@ def regen_narration(folder: Path, meta_api: str, log=print, seq=None):
         windows.append((outro_s, round(lke - 0.1, 2)))
         return windows
 
-    gap_windows = compute_gap_windows(keep, MAX_SLOTS)
+    gap_windows = compute_gap_windows(keep, SLOT_TARGET)
     if not gap_windows:
         gap_windows = [(n["start"], n["end"]) for n in narration]
 
-    # ── 슬롯 설명 빌드 (인덱스 기반 슬롯 분류) ──────────────────────────
-    n_total = len(narration)
+    # 실제 슬롯 수 = 확보된 창 개수. 대사가 빽빽한 작품은 목표보다 적게 나오는데,
+    # 그게 정상이다 — 자리가 없는데 밀어넣던 것이 대사와 겹치는 원인이었다.
+    MAX_SLOTS = len(gap_windows)
+    if MAX_SLOTS < SLOT_TARGET:
+        log(f"  대사 없는 틈이 {MAX_SLOTS}개 — 내레이션을 그만큼만 놓는다"
+            f"(목표 {SLOT_TARGET}개, 대사와 겹치지 않게)")
+    # ── 슬롯 설명 빌드 — **창 개수가 곧 문장 수**다 ──────────────────────
+    # ★ 예전엔 n_total을 기존 plan의 내레이션 개수에서 가져왔다. 그러면 앞선 실행이
+    #   plan을 적은 개수로 덮어쓴 뒤에는 창이 늘어나도 그만큼만 요청하게 된다
+    #   (2026-07-31: 창 4개인데 3개만 요청). 창을 진실의 원천으로 삼는다.
+    n_total = MAX_SLOTS
+    n_intro = 2 if n_total >= 5 else 1      # 슬롯이 적으면 인트로도 한 줄로
+    log(f"  내레이션 {len(narration)}줄 → {n_total}줄로 재작성"
+        if len(narration) != n_total else f"  내레이션 {n_total}줄")
     slots_desc = []
+    budgets = []
     _gi = 0
-    for i, n in enumerate(narration):
-        # 인덱스 기반: i<2 → 인트로, i==last → 아웃트로, else → 갭
-        if i < 2:              ek = "인트로"
+    for i, (ws, we) in enumerate(gap_windows):
+        if i < n_intro:        ek = "인트로"
         elif i == n_total - 1: ek = "아웃트로"
         elif _gi == 0:         ek = "갭0";  _gi += 1
         elif _gi == 1:         ek = "갭1";  _gi += 1
         elif _gi == 2:         ek = "갭2";  _gi += 1
         else:                  ek = "갭3+"; _gi += 1
 
-        ws, we = gap_windows[i] if i < len(gap_windows) else (n["start"], n["end"])
         before = _dialogue_before(ws, dialogue)
         after  = _dialogue_after(we, dialogue)
 
-        line = f"S{i+1}({ws:.0f}~{we:.0f}초) {ending_map[ek]}"
+        # 슬롯마다 제 창 길이에 맞는 글자수를 준다 — 전역 상한 하나로 묶으면
+        # 인트로("다섯 번째 작품 하츠미 나노카"만 14자)에 훅을 넣을 자리가 없다.
+        budgets.append(_char_budget(we - ws))
+        line = f"S{i+1}({ws:.0f}~{we:.0f}초, {budgets[-1]}자 이내) {ending_map[ek]}"
         if before: line += " 직전:" + "/".join(f'「{t}」' for t in before)
         if after:  line += " 직후:" + "/".join(f'「{t}」' for t in after)
         vis_here = [d for (t, d) in vis_entries if ws - 3 <= t <= we + 3][:2]
@@ -240,12 +364,13 @@ def regen_narration(folder: Path, meta_api: str, log=print, seq=None):
         slots_desc.append(line)
 
     examples = f"""[좋은 예 — 이 감각을 따를 것 (문장을 그대로 베끼지 말고 이 작품 내용으로)]
-S1: "첫 번째 작품, {actress}. 인터뷰인 줄 알고 봤는데 분위기가 점점 수상해집니다."
-S2: "영화관 알바생 컨셉, {label_short or '신작'}입니다."
-S3: "근데 이 잡담, 왜 자꾸 약속 쪽으로 흘러갈까요?"
-S4: "웃고는 있는데 눈은 안 웃는 것 같습니다."
-S5: "그렇게 두 사람만의 비밀이 생겨버렸습니다."
-S6: (아웃트로 — 아래 슬롯의 어미 지시를 그대로 따를 것)
+S1: "첫 작품 {actress}, 분위기가 수상합니다."
+S2: "영화관 알바 컨셉, {label_short or '신작'}입니다."
+S3: "이 잡담, 왜 자꾸 약속 얘기죠?"
+S4: "눈은 안 웃는 거 같습니다."
+S5: "둘만의 비밀이 생겨버렸습니다."
+S{n_total}: (마지막=아웃트로 — 아래 슬롯의 어미 지시를 그대로 따를 것)
+(위는 감각 예시다. 실제 슬롯은 S1~S{n_total}이고, 아래 '슬롯:' 목록의 개수·시간을 따른다)
 
 [나쁜 예 — 이렇게 쓰면 실패 (ja12에서 실제로 재미없다고 판정된 문장들)]
 "{actress}입니다." → 훅 없이 이름만 던지는 오프닝 금지
@@ -274,13 +399,13 @@ S6: (아웃트로 — 아래 슬롯의 어미 지시를 그대로 따를 것)
                  + _human_tone() +
                  "[자가검열 — 출력 직전에 한 번 더] 각 문장을 소리 내어 읽는다고 상상하고, "
                  "유튜버가 절대 안 할 말(설명문 나열, 스펙 낭독, 상투어)이 있으면 사람 말로 다시 쓴다. "
-                 "6문장 중 질문이 하나도 없으면 실패다.\n"
+                 f"{n_total}문장 중 질문이 하나도 없으면 실패다.\n"
                  "[화면 반영] 슬롯에 '화면:'이 붙어 있으면 그게 그 순간 실제 장면이다. "
                  "그 자리에서 보는 것처럼 생생히 중계하되(현재형·구체), '~물에 가까운 시추에이션' 같은 "
                  "장르 요약·평론으로 흘리지 마라. 평가·별점·필모 비교는 마지막 아웃트로 슬롯에만.\n")
 
     prompt = f"""영상 리뷰 채널의 전연령 시청용 '작품 소개' 나레이션 작업이다 — 성적 묘사 없이
-배우·컨셉 소개와 스토리 호기심 유발만 한다. 6슬롯 나레이션. 각 S의 '어미' 규칙을 반드시 지켜라.
+배우·컨셉 소개와 스토리 호기심 유발만 한다. {n_total}슬롯 나레이션. 각 S의 '어미' 규칙을 반드시 지켜라.
 
 {examples}
 {seq_rule}{tone_rule}작품: {meta_line}
@@ -289,7 +414,13 @@ S6: (아웃트로 — 아래 슬롯의 어미 지시를 그대로 따를 것)
 슬롯:
 {chr(10).join(slots_desc)}
 
-출력: JSON 배열만. start/end 슬롯 시간 사용. 25자 초과 시 2항목 분리.
+출력: JSON 배열만. start/end 슬롯 시간 사용.
+★슬롯 1개당 항목 정확히 1개 — 총 {n_total}개. 항목을 쪼개 개수를 늘리지 마라.
+★각 항목은 **한 문장**이고, 길이는 그 슬롯에 적힌 '○자 이내'를 지킨다(슬롯마다 다르다).
+ 한 항목에 문장 여러 개를 몰아넣는 것은 개수를 늘리는 것과 똑같이 금지다.
+ (나쁨: "어깨를 짚는 손. 왜 저렇게 여유로울까요? 혼났는데 웃는 얼굴, 무슨 생각일까요?" ← 3문장 45자
+  좋음: "혼났는데 왜 웃고 있을까요?" ← 1문장 15자)
+ 담을 내용이 많으면 **덜 중요한 것을 버려라**. 늘려 쓰면 음성이 슬롯을 넘겨 대사를 덮는다.
 [{{"start":초,"end":초,"text":"내용","style":"기본"}},...] """
 
     log(f"프롬프트 {len(prompt)}자 — Claude 호출 중...")
@@ -335,6 +466,30 @@ S6: (아웃트로 — 아래 슬롯의 어미 지시를 그대로 따를 것)
             raise RuntimeError(f"JSON 파싱 실패:\n{raw[:500]}")
         log(f"  부분 파싱: {len(new_nar)}개")
 
+    # 글자수 강제 — LLM이 '슬롯당 1개'를 지키려고 한 항목에 문장을 여러 개 몰아넣는
+    # 일이 있다(실측: 22줄 중 16줄이 25자 초과, 최대 47자). 그러면 자막 한 줄이 넘치고
+    # TTS가 슬롯을 넘겨 대사를 덮는다 → 문장 단위로 앞에서부터 담아 상한 안에 맞춘다.
+    trimmed = 0
+    for i, it in enumerate(new_nar):
+        t = str(it.get("text", "")).strip()
+        lim = budgets[i] if i < len(budgets) else NAR_MAX_CHARS
+        if len(t) <= lim:
+            it["text"] = t
+            continue
+        parts = re.findall(r"[^.!?]+[.!?]?", t)
+        keep_txt = ""
+        for p in parts:
+            p = p.strip()
+            if not p:
+                continue
+            if keep_txt and len(keep_txt) + 1 + len(p) > lim:
+                break
+            keep_txt = (keep_txt + " " + p).strip() if keep_txt else p
+        it["text"] = keep_txt or t[:lim]
+        trimmed += 1
+    if trimmed:
+        log(f"  글자수 정리: {trimmed}개 항목을 슬롯별 상한 안으로 줄임")
+
     # Claude 타이밍 무시 — gap_windows 시간으로 강제 배분 (길이 비례)
     total_dur = sum(e - s for s, e in gap_windows)
     n_items = len(new_nar)
@@ -363,10 +518,15 @@ S6: (아웃트로 — 아래 슬롯의 어미 지시를 그대로 따를 것)
         chunk = new_nar[item_idx : item_idx + cnt]
         if not chunk:
             item_idx += cnt; continue
-        dur = (we - ws) / len(chunk)
+        # 한 창에 여러 문장이 들어갈 때 예전엔 end==다음 start로 딱 붙여 배분해
+        # 간격이 0이었다 → TTS가 쉼 없이 이어 붙어 "숨도 안 쉬는" 소리가 났다.
+        # 문장 사이에 NAR_ITEM_GAP만큼 호흡을 끼워 나눈다.
+        gaps = NAR_ITEM_GAP * (len(chunk) - 1)
+        dur = max(0.6, (we - ws - gaps) / len(chunk))
         for j, entry in enumerate(chunk):
-            entry["start"] = round(ws + j * dur, 2)
-            entry["end"]   = round(ws + (j + 1) * dur, 2)
+            st = ws + j * (dur + NAR_ITEM_GAP)
+            entry["start"] = round(st, 2)
+            entry["end"]   = round(st + dur, 2)
         result.extend(chunk)
         item_idx += cnt
     new_nar = result
@@ -392,6 +552,6 @@ S6: (아웃트로 — 아래 슬롯의 어미 지시를 그대로 따를 것)
     log(f"완료: {srt_path}")
     log(f"\n[새 내레이션] {len(new_nar)}줄")
     for n in new_nar:
-        flag = "⚠️" if len(n["text"]) > 25 else "  "
+        flag = "⚠️" if len(n["text"]) > NAR_MAX_CHARS else "  "
         log(f"  {flag}[{n.get('style','기본')}] {n['text']}  ({len(n['text'])}자)")
     return new_nar
