@@ -4,8 +4,9 @@
 내레이션 자막은 숨기고(대사+배너+워터마크만), 대사 0줄 작품은 자막 없이 배너만.
 stage_burn이 전수검사 + _완성/_검수필요 수거까지 수행한다.
 
-사용: .venv\\Scripts\\python.exe tools\\burn_only.py ABF-366 SNOS-281
+사용: .venv\\Scripts\\python.exe tools\\burn_only.py [--out DIR] ABF-366 SNOS-281
 """
+import argparse
 import sys
 from pathlib import Path
 
@@ -20,12 +21,16 @@ from batch_produce import hide_narration
 
 
 def main():
-    codes = [c for c in sys.argv[1:] if c]
-    if not codes:
-        print("사용: burn_only.py <품번>...")
-        sys.exit(1)
+    ap = argparse.ArgumentParser(description="지정 품번만 번인(⑥) 재실행")
+    ap.add_argument("codes", nargs="+", help="품번 목록")
+    ap.add_argument("--out", help="out_dir 오버라이드 (batch_clean/review/produce와 동일)")
+    args = ap.parse_args()
+    codes = [c for c in args.codes if c]
     cfg = _common.load_cfg()
+    if args.out:
+        cfg["out_dir"] = args.out
     styles = cfg.get("sub_styles") or P.STYLE_DEFAULT
+    print(f"out_dir={cfg['out_dir']} / 대상 {len(codes)}개")
     fails = 0
     for code in codes:
         outdir = stages.work_dir(cfg, code)

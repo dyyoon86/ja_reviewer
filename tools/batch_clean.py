@@ -55,6 +55,9 @@ class CliEmitter(Emitter):
 def main():
     ap = argparse.ArgumentParser(description="섹션 ① 3중 필터 클린 일괄 실행")
     ap.add_argument("folder", help="영상 폴더 (mp4 전부 처리)")
+    ap.add_argument("--out", help="out_dir 오버라이드 (예: ...\\ja_reviewer_out\\ja15). "
+                                  "생략 시 studio_config.json의 out_dir. 모음집을 연달아 "
+                                  "돌릴 때 config를 건드리지 않으려고 둔다.")
     args = ap.parse_args()
 
     folder = Path(args.folder)
@@ -64,6 +67,8 @@ def main():
         sys.exit(1)
 
     cfg = _common.load_cfg()
+    if args.out:
+        cfg["out_dir"] = args.out
     print(f"대상 {len(videos)}개 / out_dir={cfg['out_dir']} / clean_mode={cfg.get('clean_mode', 'chain')}")
 
     results = []

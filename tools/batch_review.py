@@ -30,6 +30,9 @@ from batch_clean import CliEmitter, guess_code
 def main():
     ap = argparse.ArgumentParser(description="섹션 ② 리뷰생성(전사→AI→자막) 일괄 실행")
     ap.add_argument("folder", help="원본 영상 폴더 (품번 결정용)")
+    ap.add_argument("--out", help="out_dir 오버라이드 (예: ...\\ja_reviewer_out\\ja15). "
+                                  "생략 시 studio_config.json의 out_dir. batch_clean과 동일 — "
+                                  "모음집을 연달아 돌릴 때 config를 건드리지 않으려고 둔다.")
     ap.add_argument("--meta", help="meta_api 주소 오버라이드 (예: http://127.0.0.1:8770)")
     ap.add_argument("--redo", action="store_true", help="plan.json 있어도 다시 실행")
     args = ap.parse_args()
@@ -40,12 +43,15 @@ def main():
         sys.exit(1)
 
     cfg = _common.load_cfg()
+    if args.out:
+        cfg["out_dir"] = args.out
     if args.meta:
         cfg["meta_api"] = args.meta
     mode = cfg.get("fullauto_mode", "summary")
     target = int(cfg.get("target_sec", 60))
     llm = cfg.get("llm", "claude")
-    print(f"대상 {len(videos)}개 / meta={cfg['meta_api']} / llm={llm} / mode={mode} / target={target}s / pos=solo")
+    print(f"대상 {len(videos)}개 / out_dir={cfg['out_dir']} / meta={cfg['meta_api']} / "
+          f"llm={llm} / mode={mode} / target={target}s / pos=solo")
 
     results = []
     for i, v in enumerate(videos, 1):

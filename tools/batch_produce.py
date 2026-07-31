@@ -78,19 +78,26 @@ def hide_narration(outdir, code):
 def main():
     ap = argparse.ArgumentParser(description="모음집 최종 생산(내레이션→배너→TTS→대사만 번인)")
     ap.add_argument("folder", help="원본 영상 폴더 (품번 순서 결정용)")
+    ap.add_argument("--out", help="out_dir 오버라이드 (예: ...\\ja_reviewer_out\\ja15). "
+                                  "생략 시 studio_config.json의 out_dir. batch_clean/"
+                                  "batch_review와 동일 — 모음집을 연달아 돌릴 때 config 보호용.")
     ap.add_argument("--meta", help="meta_api 주소 오버라이드")
     ap.add_argument("--hold", type=float, default=None, help="배너 유지 초 (기본 config banner_hold)")
     args = ap.parse_args()
 
     cfg = _common.load_cfg()
+    if args.out:
+        cfg["out_dir"] = args.out
     if args.meta:
         cfg["meta_api"] = args.meta
     hold = args.hold if args.hold is not None else float(cfg.get("banner_hold", 5.0))
     codes = sorted({guess_code(v.name) for v in Path(args.folder).glob("*.mp4")} - {""})
     n = len(codes)
     styles = cfg.get("sub_styles") or P.STYLE_DEFAULT
-    print(f"대상 {n}개(순서 고정) / meta={cfg['meta_api']} / banner hold={hold}s / "
-          f"tts={cfg.get('tts_base')} profile={str(cfg.get('tts_profile'))[:8]}…")
+    print(f"대상 {n}개(순서 고정) / out_dir={cfg['out_dir']} / meta={cfg['meta_api']} / "
+          f"banner hold={hold}s / tts={cfg.get('tts_base')} "
+          f"profile={str(cfg.get('tts_profile'))[:8]}… seed={cfg.get('tts_seed')} "
+          f"후보={cfg.get('tts_candidates', 1)}개")
 
     results = []
     for i, code in enumerate(codes, 1):
