@@ -11,3 +11,7 @@ jav_2026.db*
 # tool cache
 .understand-anything/
 models/
+
+# OMC 상태/설정 백업
+.omc/
+studio_config.json.bak*
