@@ -71,6 +71,42 @@ def _caption(frames, frame_dir, model, log):
     return "\n".join(keep) if keep else out
 
 
+def _overview(caps, model, log):
+    """프레임 캡션 전체 → '작품이 무엇인지' 3줄 판정.
+
+    ★2026-08-12 추가. 캡션은 6초마다 프레임을 **하나씩 독립적으로** 설명하기 때문에
+      조각은 다 잡히는데 전체가 뭔지는 아무도 말하지 않는다. DSOD-001이 그랬다 —
+      '트레이닝복 무리', "'08'번 여자", '붉은 옷 감시자 총 든 채', '타이머 29:22'가
+      전부 캡션에 있었는데도 **오징어게임 패러디라는 말이 한 번도 안 나왔고**, 그래서
+      내레이션이 가장 큰 후킹 포인트를 통째로 놓쳤다("들이닥친 남자들이 게임을 걸고").
+      캡션을 다시 한 번 통으로 읽혀 설정·패러디·장르를 명시적으로 뽑아 앞에 붙인다.
+    """
+    if not caps.strip():
+        return ""
+    prompt = "\n".join([
+        "아래는 리뷰용 영상에서 6초 간격으로 뽑은 프레임 캡션이다(정사장면은 이미 제거됨).",
+        "전체를 읽고 **정확히 3줄**로만 답하라. 머리말·설명 금지.",
+        "설정: (장소·인물 관계·상황을 한 문장)",
+        "패러디: (널리 알려진 영화·드라마·게임의 패러디나 오마주가 명백하면 그 작품명. "
+        "예: 초록 트레이닝복+번호+빨간 감시자+카운트다운 → 오징어게임. 아니면 '없음')",
+        "장르: (예: 오피스 드라마 / 스릴러 / 학원물 / 인터뷰)",
+        "", caps,
+    ])
+    exe = _cli_path("claude")
+    env = dict(os.environ, DISABLE_OMC="1")
+    try:
+        r = subprocess.run([exe, "-p", "--model", model], input=prompt,
+                           capture_output=True, text=True, encoding="utf-8",
+                           env=env, timeout=300)
+    except Exception as e:
+        log(f"※ 시각 요약 실패({type(e).__name__}: {e}) — 캡션만 사용")
+        return ""
+    out = re.split(r"\n[─-]{5,}", (r.stdout or "").strip())[0].strip()
+    keep = [ln.strip() for ln in out.splitlines()
+            if re.match(r"\s*(설정|패러디|장르)\s*:", ln)]
+    return "\n".join(keep)
+
+
 def build_visual_brief(video, cfg, log=print):
     """클린본 → 시각 브리핑 텍스트. 실패 시 '' 반환(soft-fail)."""
     video = Path(video)
@@ -96,6 +132,11 @@ def build_visual_brief(video, cfg, log=print):
             log("※ 시각정보: 프레임 추출 0 — 생략")
             return ""
         brief = _caption(frames, tmp, model, log)
+        if brief and cfg.get("visual_overview", True):
+            ov = _overview(brief, model, log)
+            if ov:
+                log("작품 판정: " + " / ".join(ov.splitlines()))
+                brief = ov + "\n\n" + brief     # 전체 판정을 맨 앞에
         if brief:
             log(f"화면 시각정보 확보: {len(brief.splitlines())}줄")
         return brief
