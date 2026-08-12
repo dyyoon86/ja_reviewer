@@ -11,8 +11,13 @@ from server import pipeline as P
 from server import stages
 from server.core import transcribe as T
 
-codes = [c for c in sys.argv[1:] if c]
+args = sys.argv[1:]
 cfg = _common.load_cfg()
+if "--out" in args:                     # 모음집을 연달아 돌릴 때 config를 안 건드리려고(batch_* 와 동일)
+    i = args.index("--out")
+    cfg["out_dir"] = args[i + 1]
+    del args[i:i + 2]
+codes = [c.upper() for c in args if c]
 for code in codes:
     outdir = Path(cfg["out_dir"]) / code
     plan = json.loads((outdir / f"{code}_plan.json").read_text(encoding="utf-8"))

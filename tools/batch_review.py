@@ -35,7 +35,18 @@ def main():
                                   "모음집을 연달아 돌릴 때 config를 건드리지 않으려고 둔다.")
     ap.add_argument("--meta", help="meta_api 주소 오버라이드 (예: http://127.0.0.1:8770)")
     ap.add_argument("--redo", action="store_true", help="plan.json 있어도 다시 실행")
+    ap.add_argument("--skip", default="", help="제외할 품번(쉼표 구분). 클린본이 너무 짧아 "
+                                              "②AI가 어차피 중단되는 본편형 등을 빼둘 때.")
+    ap.add_argument("--only", default="", help="이 품번만 처리(쉼표 구분). 클린본이 짧은 편만 "
+                                              "--target 낮춰 따로 돌릴 때.")
+    ap.add_argument("--target", type=int, help="목표 길이(초) 오버라이드. 생략 시 config target_sec. "
+                                              "★stage_ai는 keep 합계가 target×min_keep_ratio(0.5) "
+                                              "미만이면 중단하므로, 클린본이 짧은 편은 이걸 낮춰야 "
+                                              "통과한다(예: 클린본 72초 → --target 60).")
     args = ap.parse_args()
+
+    skip = {c.strip().upper() for c in args.skip.split(",") if c.strip()}
+    only = {c.strip().upper() for c in args.only.split(",") if c.strip()}
 
     videos = sorted(Path(args.folder).glob("*.mp4"))
     if not videos:
@@ -48,7 +59,7 @@ def main():
     if args.meta:
         cfg["meta_api"] = args.meta
     mode = cfg.get("fullauto_mode", "summary")
-    target = int(cfg.get("target_sec", 60))
+    target = int(args.target or cfg.get("target_sec", 60))
     llm = cfg.get("llm", "claude")
     print(f"대상 {len(videos)}개 / out_dir={cfg['out_dir']} / meta={cfg['meta_api']} / "
           f"llm={llm} / mode={mode} / target={target}s / pos=solo")
@@ -59,6 +70,9 @@ def main():
         print(f"\n{'=' * 70}\n({i}/{len(videos)}) {code or '??'} ← {v.name}", flush=True)
         if not code:
             results.append((v.name, "품번 추정 실패 — 건너뜀", None))
+            continue
+        if code in skip or (only and code not in only):
+            print(f"[{code}] 대상 아님 — 건너뜀")
             continue
         em = CliEmitter(code)
         outdir = stages.work_dir(cfg, code)

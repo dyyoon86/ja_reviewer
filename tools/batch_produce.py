@@ -83,7 +83,17 @@ def main():
                                   "batch_review와 동일 — 모음집을 연달아 돌릴 때 config 보호용.")
     ap.add_argument("--meta", help="meta_api 주소 오버라이드")
     ap.add_argument("--hold", type=float, default=None, help="배너 유지 초 (기본 config banner_hold)")
+    ap.add_argument("--skip", default="", help="제외할 품번(쉼표 구분). 섹션②에서 탈락한 편을 빼둔다. "
+                                              "★서수 인트로(seq)가 제외분을 순번으로 세지 않도록 "
+                                              "codes 확정 전에 걸러낸다.")
+    ap.add_argument("--keep-nar", action="store_true",
+                    help="★이미 확정한 내레이션을 그대로 쓰고 재생성을 건너뛴다. 기본 동작은 "
+                         "맨 앞에서 regen_narration을 도는 것이라, 사람이 검수해 확정한 대본이 "
+                         "LLM 새 출력으로 덮어써진다(2026-08-03 ja16). 대본 확정 후 배너·TTS·"
+                         "번인만 돌릴 때 반드시 붙일 것.")
     args = ap.parse_args()
+
+    skip = {c.strip().upper() for c in args.skip.split(",") if c.strip()}
 
     cfg = _common.load_cfg()
     if args.out:
@@ -91,7 +101,7 @@ def main():
     if args.meta:
         cfg["meta_api"] = args.meta
     hold = args.hold if args.hold is not None else float(cfg.get("banner_hold", 5.0))
-    codes = sorted({guess_code(v.name) for v in Path(args.folder).glob("*.mp4")} - {""})
+    codes = sorted({guess_code(v.name) for v in Path(args.folder).glob("*.mp4")} - {""} - skip)
     n = len(codes)
     styles = cfg.get("sub_styles") or P.STYLE_DEFAULT
     print(f"대상 {n}개(순서 고정) / out_dir={cfg['out_dir']} / meta={cfg['meta_api']} / "
@@ -110,7 +120,13 @@ def main():
         t0 = time.time()
         step = "내레이션"
         try:
-            regen_narration(outdir, cfg["meta_api"], log=em.log, seq=(i, n))
+            if args.keep_nar:
+                srt = outdir / f"{code}_내레이션.srt"
+                if not srt.is_file():
+                    raise RuntimeError("--keep-nar인데 내레이션 srt가 없다 — 먼저 대본을 만들 것")
+                em.log(f"--keep-nar: 확정 대본 그대로 사용 ({srt.name})")
+            else:
+                regen_narration(outdir, cfg["meta_api"], log=em.log, seq=(i, n))
 
             step = "배너"
             b = stages.stage_banner(cfg, code, em, hold=hold)
