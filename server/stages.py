@@ -553,9 +553,15 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
             precise_model = st.get("model") or c.get("whisper_model", "large-v3")
             em.log(f"2차 정밀 전사 — keep {len(keep)}구간만 {precise_model}로 재전사")
             with gpu:
+                # ★ initial_prompt를 주지 않는다(2026-08-11 A/B 실측). 메타 힌트는 배우 이름으로
+                #   끝나는데(`…瀬戸環奈。瀬戸環奈`), whisper가 그 이름을 그대로 받아적어 구간
+                #   전체를 이름 한 줄로 뭉갠다 — SNOS-334 같은 keep에서 22줄 → 6줄로 붕괴했고,
+                #   그 6줄 중 2줄이 배우 이름이었다. 이름만 남은 keep은 _guard_keep에 '대사 0줄'로
+                #   걸려 통째로 빠지기까지 한다(ja16 MIDA-727/735/762가 대사 0줄로 납품된 경로).
+                #   1차 러프 스캔은 구간 선정용이라 힌트를 유지하지만, 최종 자막이 되는 이 정밀
+                #   전사만큼은 힌트 없이 원문 그대로 받는 편이 정확하다.
                 fine = P.transcribe_ranges(video, keep, precise_model, em.log,
-                                           lambda fr: em.prog(fr, "정밀 전사"),
-                                           initial_prompt=P.build_initial_prompt(m))
+                                           lambda fr: em.prog(fr, "정밀 전사"))
             # ★ 노출 안전장치 2차 — 러프 스캔은 신음 구간에 환청 대사를 지어내
             #   _guard_keep(러프 기준)을 뚫을 수 있다. 정밀 전사에서도 대사 0줄인
             #   keep은 노출 장면으로 보고 다시 제외한다(전부 걸리면 원본 유지=검수行).
