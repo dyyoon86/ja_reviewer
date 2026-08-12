@@ -64,7 +64,9 @@ DEFAULTS = {"meta_api": "http://172.30.1.40:8770", "llm": "claude",
             # 2-pass 전사: ①러프 스캔(scan_model)→②keep만 정밀(whisper_model).
             # map_reduce_chars: 전사가 이 글자수를 넘으면 블록 요약 후 최종 선정(토큰 폭탄 방지)
             "two_pass": True, "scan_model": "small", "map_reduce_chars": 25000,
-            "banner_hold": 4.0,   # 인포카드 유지시간(초)
+            # 인포카드 유지시간(초). 2026-08-12 재설계로 제목·3사이즈·컵/키가 들어가
+            # 읽을 것이 늘어 4→7초. 아주 짧은 편은 편별로 낮춰 쓴다.
+            "banner_hold": 7.0,
             # 비주얼 노출 가드(NudeNet) — keep 구간 프레임을 NN으로 검사해 노출 장면 제외
             "nsfw_guard": True, "nsfw_step": 2.0, "nsfw_threshold": 0.35,
             # ⓪ 노출 제거(클린본) — 원본에서 노출을 물리적으로 잘라낸 뒤 파이프라인 시작.

@@ -254,41 +254,62 @@ def html_info(m: dict, mb: str, t: dict) -> str:
     품번이 타이틀과 알약에, 배우명이 타이틀과 본문에 중복 노출됐다.
     → 한 서체 계열 + 왼쪽 끝 완전 일치 + 중복 제거 + 이모지 대신 텍스트 라벨.
     """
-    bits = []
-    if m["label"]:
-        bits.append(_h(m["label"]))
+    # ★2026-08-12 재설계 — 사용자 지적 3건을 한꺼번에 고친다.
+    #   ① 제목이 화면에 없었다. meta()는 hook_title→title→원제 순으로 title을 계산하는데
+    #      2026-07-24 재디자인이 '중복 제거'를 하면서 제목 줄 자체를 지웠고, 그 뒤로
+    #      AI가 쓴 hook_title이 한 번도 안 나갔다(계산만 되는 죽은 값).
+    #   ② 정보가 부족했다 — 신체 스펙이 레이블·발매일과 한 줄에 섞여 눈에 안 들어왔다.
+    #      B·W·H / 컵 / 키를 **별도 강조 줄(pill)**로 빼서 반드시 보이게 한다.
+    #   ③ 작았다 — 품번 96→104, 배우 46→52, 메타 26→30, 카드 여백도 키웠다.
+    #   폰트도 Jua(둥근 캐주얼체) → Paperlogy(채널 자막과 같은 계열)로 통일.
+    #   품번만 Black Han Sans 유지(임팩트).
+    spec = []
     if m["bust"] and m["waist"] and m["hip"]:
-        bits.append(f'B{m["bust"]}·W{m["waist"]}·H{m["hip"]}')
-    ck = []
-    if m["cup"]:    ck.append(f'{m["cup"]}컵')
-    if m["height"]: ck.append(f'{m["height"]}cm')
-    if ck: bits.append(" · ".join(ck))
+        spec.append(f'B{m["bust"]} · W{m["waist"]} · H{m["hip"]}')
+    if m["cup"]:    spec.append(f'{m["cup"]}컵')
+    if m["height"]: spec.append(f'{m["height"]}cm')
+    spec_html = ("<div class=spec>"
+                 + "".join(f"<span class=pill>{_h(s)}</span>" for s in spec)
+                 + "</div>") if spec else ""
+
+    bits = []
+    if m["label"]:    bits.append(_h(m["label"]))
     if m["release"]:  bits.append(m["release"])
+    if m["runtime"]:  bits.append(f'{m["runtime"]}분')
     if m["star"]:     bits.append(f'★ {m["star"]}')
     if m["like_pct"]: bits.append(f'좋아요 {m["like_pct"]}%')
     meta = '<span class=dot>·</span>'.join(f"<span>{b}</span>" for b in bits)
     aja = f'<span class="ja">{_h(m["actress_ja"])}</span>' if m["actress_ja"] else ""
+    # 제목은 품번과 겹치면(폴백으로 품번이 들어온 경우) 굳이 두 번 쓰지 않는다.
+    ttl = (m.get("title") or "").strip()
+    title_html = (f'<div class=title>{_h(ttl)}</div>'
+                  if ttl and ttl != m["code"] else "")
     return f"""<!doctype html><meta charset=utf-8><style>{_FONTS}
 *{{margin:0;box-sizing:border-box}}html,body{{background:transparent}}
 .f{{width:1920px;height:1080px;position:relative;background:transparent;
- font-family:'Jua','Malgun Gothic',sans-serif}}
-.logo{{position:absolute;top:48px;left:56px;display:flex;align-items:center;gap:12px;
- background:linear-gradient(135deg,{t['c1']},{t['c2']});padding:10px 22px 10px 12px;border-radius:18px;
+ font-family:'Paperlogy','Pretendard','Malgun Gothic',sans-serif;font-weight:700}}
+.logo{{position:absolute;top:48px;left:56px;display:flex;align-items:center;gap:14px;
+ background:linear-gradient(135deg,{t['c1']},{t['c2']});padding:12px 26px 12px 14px;border-radius:20px;
  box-shadow:0 8px 26px rgba(0,0,0,.4);transform:rotate(-2deg);border:2px solid rgba(255,255,255,.25)}}
-.logo img{{width:64px;height:64px;object-fit:contain;filter:drop-shadow(0 2px 4px rgba(0,0,0,.4))}}
-.logo .t{{color:#fff;font-size:30px;letter-spacing:-.01em}}
-.card{{position:absolute;left:76px;bottom:84px;display:flex;align-items:stretch;
- background:rgba(10,6,10,.72);border-radius:20px;overflow:hidden;
- border:1.5px solid rgba(255,255,255,.13);box-shadow:0 12px 44px rgba(0,0,0,.5)}}
-.bar{{width:10px;background:linear-gradient(180deg,{t['c1']},{t['c2']});flex:0 0 auto}}
-.body{{padding:30px 40px 30px 34px}}
-.code{{font-family:'Black Han Sans','Jua',sans-serif;font-size:96px;line-height:1;
+.logo img{{width:72px;height:72px;object-fit:contain;filter:drop-shadow(0 2px 4px rgba(0,0,0,.4))}}
+.logo .t{{color:#fff;font-size:34px;letter-spacing:-.01em}}
+.card{{position:absolute;left:84px;bottom:88px;display:flex;align-items:stretch;
+ background:rgba(10,6,10,.78);border-radius:24px;overflow:hidden;
+ border:1.5px solid rgba(255,255,255,.14);box-shadow:0 14px 50px rgba(0,0,0,.55)}}
+.bar{{width:12px;background:linear-gradient(180deg,{t['c1']},{t['c2']});flex:0 0 auto}}
+.body{{padding:34px 52px 34px 40px}}
+.code{{font-family:'Black Han Sans',sans-serif;font-size:104px;line-height:1;
  letter-spacing:.01em;color:#fff;text-shadow:0 4px 18px rgba(0,0,0,.6)}}
-.name{{font-size:46px;color:{t['accent']};margin-top:14px;letter-spacing:-.01em;
- display:flex;align-items:baseline;gap:14px}}
-.name .ja{{color:#cfcfd8;font-size:24px}}
-.meta{{margin-top:22px;font-size:26px;color:#e6e6ee;letter-spacing:-.01em;
- display:flex;align-items:center;gap:12px;flex-wrap:wrap;max-width:1500px}}
+.title{{font-size:52px;line-height:1.25;color:#fff;margin-top:16px;letter-spacing:-.02em;
+ max-width:1420px;text-shadow:0 2px 10px rgba(0,0,0,.55)}}
+.name{{font-size:52px;color:{t['accent']};margin-top:16px;letter-spacing:-.02em;
+ display:flex;align-items:baseline;gap:16px}}
+.name .ja{{color:#cfcfd8;font-size:28px;font-weight:400}}
+.spec{{margin-top:20px;display:flex;gap:12px;flex-wrap:wrap}}
+.spec .pill{{font-size:34px;line-height:1;color:#fff;padding:12px 22px;border-radius:999px;
+ background:rgba(255,255,255,.10);border:1.5px solid {t['accent']}66;letter-spacing:.01em}}
+.meta{{margin-top:20px;font-size:30px;color:#e6e6ee;letter-spacing:-.01em;font-weight:400;
+ display:flex;align-items:center;gap:14px;flex-wrap:wrap;max-width:1500px}}
 .meta .dot{{color:{t['c1']}}}
 </style><div class=f>
  <div class=logo><img src="data:image/png;base64,{mb}"><span class=t>딸딸기튜브</span></div>
@@ -296,7 +317,9 @@ def html_info(m: dict, mb: str, t: dict) -> str:
   <div class=bar></div>
   <div class=body>
    <div class=code>{_h(m["code"])}</div>
+   {title_html}
    <div class=name>{_h(m["actress"])}{aja}</div>
+   {spec_html}
    <div class=meta>{meta}</div>
   </div>
  </div></div>"""
@@ -317,24 +340,30 @@ def html_wm(m: dict, mb: str, t: dict) -> str:
                    f"background-color:{t['c1']}")
     # 상시 워터마크에도 3사이즈를 넣는다(2026-07-30 요청) — 인트로 인포카드가 사라진 뒤에는
     # 스펙을 볼 수 있는 곳이 없었다. 형식은 인포카드와 동일(B··W··H·).
+    # ★2026-08-12 — 크기 상향(얼굴 116→148, 품번 38→50, 이름 27→34, 서브 21→26)과
+    #   3사이즈 노출 보강. 1080p 리프레임 납품본에서 옛 크기는 화면 대비 너무 작았다.
+    #   컵·키까지 넣어 인포카드가 사라진 뒤에도 스펙을 계속 볼 수 있게 한다.
     meas = ""
     if m["bust"] and m["waist"] and m["hip"]:
         meas = f'B{m["bust"]}·W{m["waist"]}·H{m["hip"]}'
-    sub = " · ".join(x for x in [m["release"], f'★ {m["star"]}' if m["star"] else "", meas] if x)
+    ck = " ".join(x for x in [f'{m["cup"]}컵' if m["cup"] else "",
+                              f'{m["height"]}cm' if m["height"] else ""] if x)
+    sub = " · ".join(x for x in [m["release"], f'★ {m["star"]}' if m["star"] else "",
+                                 meas, ck] if x)
     return f"""<!doctype html><meta charset=utf-8><style>{_FONTS}
 *{{margin:0;box-sizing:border-box}}html,body{{background:transparent}}
 .f{{width:1920px;height:1080px;position:relative;background:transparent;
- font-family:'Jua','Malgun Gothic',sans-serif}}
-.panel{{position:absolute;top:44px;left:48px;display:flex;align-items:center;gap:16px;
- background:rgba(10,6,10,.74);border:1.5px solid rgba(255,255,255,.16);
- border-radius:18px;padding:14px 22px 14px 14px;box-shadow:0 8px 26px rgba(0,0,0,.5)}}
-.face{{width:116px;height:116px;border-radius:12px;background-position:center top;
+ font-family:'Paperlogy','Pretendard','Malgun Gothic',sans-serif;font-weight:700}}
+.panel{{position:absolute;top:44px;left:48px;display:flex;align-items:center;gap:20px;
+ background:rgba(10,6,10,.78);border:1.5px solid rgba(255,255,255,.18);
+ border-radius:22px;padding:16px 28px 16px 16px;box-shadow:0 8px 26px rgba(0,0,0,.5)}}
+.face{{width:148px;height:148px;border-radius:14px;background-position:center top;
  background-image:{face_bg};flex:0 0 auto;box-shadow:0 2px 8px rgba(0,0,0,.5)}}
-.col{{display:flex;flex-direction:column;gap:7px;align-items:flex-start}}
-.code{{font-family:'Black Han Sans','Jua',sans-serif;font-size:38px;line-height:1;
+.col{{display:flex;flex-direction:column;gap:9px;align-items:flex-start}}
+.code{{font-family:'Black Han Sans',sans-serif;font-size:50px;line-height:1;
  color:#fff;letter-spacing:.01em}}
-.name{{font-size:27px;line-height:1;color:{t['accent']};letter-spacing:-.01em}}
-.sub{{font-size:21px;line-height:1;color:#b9b9c4;letter-spacing:-.01em}}
+.name{{font-size:34px;line-height:1;color:{t['accent']};letter-spacing:-.01em}}
+.sub{{font-size:26px;line-height:1;color:#c9c9d4;letter-spacing:-.01em;font-weight:400}}
 </style><div class=f>
  <div class=panel>
   <div class=face></div>
