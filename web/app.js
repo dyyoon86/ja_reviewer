@@ -963,7 +963,8 @@ $("#btnBurn").onclick=()=>{
   log("── 자막 입히기 시작 ──"+(banner?" (배너·워터마크 동시)":""));
   fetch("/burn",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
     code, styles:allStyles(), banner,
-    remove_bgm: $("#rmBgm") ? $("#rmBgm").checked : undefined
+    remove_bgm: $("#rmBgm") ? $("#rmBgm").checked : undefined,
+    reframe: $("#burnReframe") ? $("#burnReframe").checked : undefined
   })}).then(r=>r.json()).then(j=>runJob(j.job,(r)=>{
     $("#resultCard").style.display="block";
     $("#result").innerHTML=`<div class="ok">✔ 자막${r.banner?"·배너":""} 입힌 영상</div><div>${r.subbed}</div>`;
@@ -1514,12 +1515,13 @@ function faSave(){
     nar_rich: $("#faNarRich") ? $("#faNarRich").checked : false,
     remove_bgm: $("#faRmBgm") ? $("#faRmBgm").checked : false,
     visual_brief: $("#faVisual") ? $("#faVisual").checked : false,
+    reframe_1080: $("#faReframe") ? $("#faReframe").checked : true,
   };
   fetch("/config",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
     .then(()=>{ const s=$("#faStat"); if(s) s.textContent="✓ 저장됨 — 다음 영상부터 적용됩니다."; });
 }
 if($("#btnFaSave")) $("#btnFaSave").onclick = faSave;
-["#faTarget","#faMode","#faLlm","#faHold","#faNsfw","#faTwoPass","#faNarRich","#faRmBgm","#faVisual"].forEach(sel=>{
+["#faTarget","#faMode","#faLlm","#faHold","#faNsfw","#faTwoPass","#faNarRich","#faRmBgm","#faVisual","#faReframe"].forEach(sel=>{
   const el=$(sel); if(el) el.addEventListener("change", faSave);
 });
 fetch("/config").then(r=>r.json()).then(c=>{
@@ -1533,9 +1535,11 @@ fetch("/config").then(r=>r.json()).then(c=>{
   if($("#faNarRich")) $("#faNarRich").checked = c.nar_rich === true;
   if($("#faRmBgm")) $("#faRmBgm").checked = c.remove_bgm === true;
   if($("#faVisual")) $("#faVisual").checked = c.visual_brief === true;
+  if($("#faReframe")) $("#faReframe").checked = c.reframe_1080 !== false;
   if($("#narRich")) $("#narRich").checked = c.nar_rich === true;
   if($("#faRmBgm")) $("#faRmBgm").checked = c.remove_bgm === true;
   if($("#rmBgm")) $("#rmBgm").checked = c.remove_bgm === true;
+  if($("#burnReframe")) $("#burnReframe").checked = c.reframe_1080 !== false;
   if($("#useCutins")) $("#useCutins").checked = c.cutins === true;
 }).catch(()=>{});
 

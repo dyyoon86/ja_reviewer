@@ -89,6 +89,9 @@ DEFAULTS = {"meta_api": "http://172.30.1.40:8770", "llm": "claude",
             # 화면 시각정보 — 클린본 프레임을 비전(claude -p)이 읽어 '장면/화면글자' 브리핑을 만들고
             # ②AI 프롬프트에 넣어 화면 근거로 대사·내레이션을 쓰게 한다(기본 off). model=sonnet 권장.
             "visual_brief": False, "visual_model": "sonnet", "visual_step": 6.0, "visual_cap": 60,
+            # ⑥ 1080p 리프레임 — 위쪽 중앙을 zoom배로 떠서 1920x1080으로 굽는다(ja12 v3~ 납품 규격).
+            # 굽기 '전에' 확대해야 자막이 1080 캔버스에 native로 박힌다(720p에 굽고 늘리면 뭉개짐).
+            "reframe_1080": True, "reframe_zoom": 2.0, "reframe_align": "top",
             # 상황별 짤(움짤) — {out_dir}/_assets/gifs/{태그}/ 에 파일을 넣으면 그 태그만 쓰인다.
             # LLM이 태그를 고르고(cutins), 굽기가 화면 구석에 얹는다. 파일 없으면 조용히 생략.
             "cutins": False, "cutin_pos": "tr", "cutin_scale": 0.26,
@@ -1167,7 +1170,8 @@ async def burn(req: Request):
             r = stage_burn(c, code, styles, JobEmitter(jid), source=body.get("source"),
                            banner=bool(body.get("banner", True)),
                            parts=body.get("parts"),
-                           remove_bgm=body.get("remove_bgm"))
+                           remove_bgm=body.get("remove_bgm"),
+                           reframe=body.get("reframe"))
             c["sub_styles"] = styles; save_cfg(c)   # 마지막 사용 스타일 기억
             jdone(jid, r)
         except Exception as e:

@@ -828,10 +828,11 @@ def stage_banner(c, code, em, hold=2.0, preview=True):
 
 
 def stage_burn(c, code, styles, em, source=None, banner=True, parts=None, cutins=None,
-               remove_bgm=None):
+               remove_bgm=None, reframe=None):
     """⑥ 굽기(하드섭) — voiced 우선 → final. {code}_final_subbed.mp4 생성.
     banner=True면 프레임·인포카드·워터마크를 같은 인코딩 1패스에서 함께 굽는다.
-    parts={'frame','info','wm','subs': bool} 로 구울 요소를 고른다(미리보기 체크 그대로)."""
+    parts={'frame','info','wm','subs': bool} 로 구울 요소를 고른다(미리보기 체크 그대로).
+    reframe=True면 굽기 전에 1080p 리프레임(위쪽 중앙 200% 확대)을 먼저 한다."""
     outdir = work_dir(c, code)
     voiced = outdir / f"{code}_final_voiced.mp4"
     final = outdir / f"{code}_final.mp4"
@@ -843,6 +844,19 @@ def stage_burn(c, code, styles, em, source=None, banner=True, parts=None, cutins
         src = final
     else:
         raise RuntimeError(f"원본 영상이 없습니다: {final} (먼저 리뷰 생성)")
+    # ★ 1080p 리프레임 — 굽기 **전에** 한다. 720p에 자막을 굽고 나중에 확대하면 글자가
+    #   같이 뭉개지고, 배너 PNG(1920x1080 원본)도 한 번 줄였다 늘리는 꼴이 된다.
+    #   먼저 1920x1080으로 만들어 놓으면 자막·배너가 native 해상도로 들어간다.
+    #   납품본을 프리미어 1080p 타임라인에 100%로 얹기 위한 규격(ja12 v3~).
+    rf_tmp = None
+    if bool(c.get("reframe_1080", False) if reframe is None else reframe):
+        rf_tmp = outdir / f"{code}_rf1080.mp4"
+        P.reframe(str(src), str(rf_tmp), zoom=float(c.get("reframe_zoom", 2.0)),
+                  align=c.get("reframe_align", "top"), log=em.log)
+        src = rf_tmp
+        # 스타일은 720p 캔버스 기준이라 그대로 쓰면 글자가 절반으로 보인다 → 1.5배.
+        styles = P.scale_styles(styles, override={**P.STYLE_1080_OVERRIDE,
+                                                  **(c.get("sub_styles_1080") or {})})
     dsrt = outdir / f"{code}_대사.srt"
     nsrt = outdir / f"{code}_내레이션.srt"
     njson = outdir / f"{code}_내레이션.json"     # 유형(style) 포함 → 타입별 스타일
@@ -854,6 +868,15 @@ def stage_burn(c, code, styles, em, source=None, banner=True, parts=None, cutins
     bl = banner_layers(c, code, em) if banner else None
     if bl:
         bl = {k: v for k, v in bl.items() if parts.get(k, True)}
+        # ★워터마크 우상단 재배치 — gen_infocard는 좌상단에 그리는데 납품 규격은 우상단이다
+        #   (인포카드가 왼쪽에서 뜨므로 워터마크까지 왼쪽이면 시선이 한쪽에 몰린다).
+        #   리프레임 납품본에서만 켠다. config wm_topright로 강제 on/off.
+        wm_tr = c.get("wm_topright")
+        if bl.get("wm") and (rf_tmp is not None if wm_tr is None else wm_tr):
+            try:
+                bl["wm"] = P.wm_to_topright(bl["wm"], margin=float(c.get("wm_margin", 24)))
+            except Exception as e:
+                em.log(f"※ 워터마크 우상단 재배치 실패({type(e).__name__}: {e}) — 원래 위치로")
         bl = bl or None
     picked = ([k for k in ("frame", "info", "wm") if bl and k in bl]
               + (["자막"] if want_subs else []))
@@ -884,6 +907,11 @@ def stage_burn(c, code, styles, em, source=None, banner=True, parts=None, cutins
                 flash_intensity=float(c.get("flash_intensity", 0.14)),
                 cutins=cuts, cutin_pos=c.get("cutin_pos", "tr"),
                 cutin_scale=float(c.get("cutin_scale", 0.26)))
+    if rf_tmp is not None:      # 리프레임 중간물 — 구웠으면 쓸모없다(용량만 차지)
+        try:
+            rf_tmp.unlink()
+        except OSError:
+            pass
     # 강조·정보 자막이 뜨는 순간에 효과음 — 등장 애니(쾅/일렁임)와 짝이 되어야 임팩트가 산다
     if c.get("sfx", True) and want_subs and njson.is_file():
         try:

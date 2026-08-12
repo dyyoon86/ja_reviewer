@@ -49,7 +49,7 @@ from server.core.prompts import (
 )
 from server.core.cutter import (
     has_nvenc, _vcodec_args, cut_video, _kf_after, _kf_before,
-    cut_video_copy, cut_video_smart,
+    cut_video_copy, cut_video_smart, reframe, reframe_crop,
 )
 from server.core.tts import (
     tts_profiles, tts_generate, tts_generate_best, audio_duration,
@@ -60,4 +60,5 @@ from server.core.subs import (
     _ass_color, _ass_time, _ALIGN, STYLE_DEFAULT, STYLE_TAGNAME, SPEAKER_TAGNAME,
     _style_line, _ass_anim, build_ass, BANNER_ANIM,
     _prep_banner_layers, _banner_filter, burn_subs,
+    scale_styles, STYLE_1080_OVERRIDE, wm_to_topright,
 )

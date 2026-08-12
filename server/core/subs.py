@@ -84,6 +84,67 @@ STYLE_TAGNAME = {"기본": "Narration", "일반": "Narration", "강조": "Emphas
 SPEAKER_TAGNAME = {"여": "Dialogue", "여자": "Dialogue", "f": "Dialogue", "female": "Dialogue",
                    "남": "DialogueM", "남자": "DialogueM", "m": "DialogueM", "male": "DialogueM"}
 
+# ────────────────────────── 1080p 리프레임용 스타일 ──────────────────────────
+# STYLE_DEFAULT는 720p 캔버스 기준이다. 리프레임(1920x1080)에 그대로 쓰면 글자가
+# 절반 크기로 보인다 → 기하 값만 1.5배(=1080/720)로 키운다.
+_SCALE_KEYS = ("size", "margin", "outline", "shadow",
+               "plate_radius", "plate_pad_x", "plate_pad_y", "spacing")
+
+# ★내레이션만 단순 확대가 아니다. ja12 v3(2026-07-18)부터 사용자가 확정한 납품 규격 =
+#   **69px 검정 글씨 + 불투명 노란판**(720p의 흰 글씨 + 반투명판과 다른 look).
+#   1.5배만 하면 57px 흰 글씨/반투명이 되어 지금까지 낸 ja12~ja18과 달라진다.
+#   config sub_styles_1080 으로 편별 덮어쓰기 가능.
+STYLE_1080_OVERRIDE = {
+    "narration": {"size": 69, "color": "#111111", "outline": 0, "plate_alpha": 0},
+}
+
+
+def wm_to_topright(png, margin=24, suffix="_tr"):
+    """워터마크 PNG의 내용을 우상단으로 옮긴 사본 경로를 돌려준다(없으면 원본 경로).
+
+    gen_infocard의 html_wm은 패널을 **좌상단**(top:44px;left:48px)에 그린다. 그런데
+    ja12 v3부터 납품본은 우상단이 규격이다 — 인트로 인포카드가 왼쪽에서 뜨고 워터마크가
+    그 자리에 남으면 시선이 한쪽에 몰린다. HTML을 고치는 대신 다 그려진 PNG의 내용을
+    bbox로 떠서 반대쪽에 붙인다(배너 생성을 다시 안 해도 되고, 메타 조회도 불필요).
+    margin은 1920 기준이고 실제 PNG 폭에 비례로 환산한다.
+    """
+    from pathlib import Path as _P
+    from PIL import Image
+    src = _P(png)
+    dst = src.with_name(src.stem + suffix + src.suffix)
+    if dst.is_file() and dst.stat().st_mtime >= src.stat().st_mtime:
+        return str(dst)                      # 원본이 그대로면 사본 재사용
+    im = Image.open(src).convert("RGBA")
+    bb = im.getbbox()
+    if not bb:
+        return str(src)                      # 내용이 없다 — 손댈 것 없음
+    content = im.crop(bb)
+    m = round(margin * im.width / 1920)
+    canvas = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    canvas.paste(content, (im.width - content.width - m, m))
+    canvas.save(dst)
+    return str(dst)
+
+
+def scale_styles(styles=None, factor=1080 / 720, override=None):
+    """자막 스타일을 캔버스 배율만큼 키운 완전한 dict로 돌려준다(원본 불변).
+
+    글자·여백·외곽선처럼 픽셀로 재는 값만 곱하고 색·폰트·애니는 그대로 둔다.
+    """
+    out = {}
+    for name, base in STYLE_DEFAULT.items():
+        st = {**base, **((styles or {}).get(name) or {})}
+        for k in _SCALE_KEYS:
+            v = st.get(k)
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                st[k] = round(v * factor, 2)
+        st.update((override or {}).get(name) or {})
+        out[name] = st
+    # STYLE_DEFAULT에 없는 사용자 정의 스타일도 흘려보낸다
+    for name, st in (styles or {}).items():
+        out.setdefault(name, dict(st or {}))
+    return out
+
 
 def _style_line(name, st):
     """ASS Style 한 줄.

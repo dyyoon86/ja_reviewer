@@ -356,3 +356,57 @@ def cut_video_copy(video, keep, out_path, log=print, progress=None):
     log(f"무손실 컷 완료: {out_path}")
 
 
+
+# ────────────────────────── 리프레임(1080p 확대·상단정렬) ──────────────────────────
+# 최종 납품 규격(2026-07-18 ja12 v3부터 모든 모음집 공통, 2026-08-12 파이프라인 편입).
+# "프리미어 1080p 타임라인에 100%로 그냥 얹을 수 있게" 라는 요구에서 나왔다.
+#
+# 화면 위쪽 중앙만 잘라 2배로 키운다 — 인물 얼굴·상반신이 커지고 아래쪽(다리·바닥)이
+# 잘려 나가 결과적으로 안전해지는 방향이다. ★단 확대는 720p에서 봐준 경계 컷의 등급을
+# 올린다(ja18 SNOS-321: 폰 속 작은 비키니 사진이 전체화면 노출이 됐다) — 리프레임한
+# 완성본은 반드시 눈검사를 다시 해야 한다.
+#
+# ★소스 해상도로 크롭을 계산한다. 720p용 좌표(x=160)를 1080p 소스에 그대로 쓰면 화면이
+#   왼쪽으로 치우친다(ja18 SNOS-334가 이 케이스였다). 가로/세로를 zoom으로 나눈 크기를
+#   '가로 중앙·세로 위쪽'에서 떠내면 어떤 해상도든 같은 구도가 나온다.
+REFRAME_W, REFRAME_H = 1920, 1080
+
+
+def reframe_crop(w, h, zoom=2.0, align="top"):
+    """소스 해상도 → (crop 필터 문자열, 설명). 짝수로 맞춘다(h264 요구).
+
+    ★크롭 크기는 **소스가 아니라 출력(1920x1080)을 zoom으로 나눈 값**이다.
+      zoom=2 면 언제나 960x540을 떠서 1920x1080으로 2배 늘린다 = 프리미어에서
+      말하는 200%. 소스 크기로 나누면(w/2) 720p에서 640x360이 떠져 실제로는
+      3배가 되고, 지금까지 납품한 ja12~ja18과 구도가 달라진다.
+      720p → x=(1280-960)/2=160, 1080p → x=(1920-960)/2=480 이 나와야 맞다.
+    """
+    cw = min(w, max(2, int(round(REFRAME_W / zoom)) // 2 * 2))
+    ch = min(h, max(2, int(round(REFRAME_H / zoom)) // 2 * 2))
+    x = max(0, (w - cw) // 2 // 2 * 2)
+    y = 0 if align == "top" else max(0, (h - ch) // 2 // 2 * 2)
+    return f"crop={cw}:{ch}:{x}:{y}", f"{w}x{h} → {cw}x{ch}@({x},{y})"
+
+
+def reframe(video, out_path, zoom=2.0, align="top", log=print):
+    """위쪽 중앙을 zoom배로 떠서 1920x1080으로 만든다. 오디오는 그대로 복사."""
+    from .common import video_wh
+    wh = video_wh(video)
+    if not wh:
+        raise RuntimeError(f"해상도를 읽지 못했습니다: {video}")
+    w, h = wh
+    crop, desc = reframe_crop(w, h, zoom, align)
+    log(f"리프레임 {desc} → {REFRAME_W}x{REFRAME_H} ({zoom:g}배, "
+        f"{'상단' if align == 'top' else '중앙'} 정렬)")
+
+    def cmd(gpu):
+        return (["ffmpeg", "-y", "-loglevel", "error", "-i", str(video),
+                 "-vf", f"{crop},scale={REFRAME_W}:{REFRAME_H}:flags=lanczos"]
+                + _vcodec_args(gpu) + ["-c:a", "copy", str(out_path)])
+
+    try:
+        subprocess.run(cmd(has_nvenc()), check=True, timeout=FFMPEG_TIMEOUT)
+    except subprocess.CalledProcessError:
+        log("※ GPU 인코딩 실패 — CPU(libx264)로 다시 시도")
+        subprocess.run(cmd(False), check=True, timeout=FFMPEG_TIMEOUT)
+    return str(out_path)
