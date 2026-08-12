@@ -175,6 +175,13 @@ def regen_narration(folder: Path, meta_api: str, log=print, seq=None, slots=None
         log(f"  메타 조회 실패 ({e}), 코드명만 사용")
         meta = {}
     actress = meta.get("actress") or code
+    # ★배우가 여럿이면 이름을 다 부르지 않는다. DSOD-001(5인)에서 소개 줄이
+    #   "두 번째 작품은 미소노 와카, 나카마루 미쿠루, 유라 카나, 마츠마루 카스미,
+    #   모미지 히라기입니다"로 55자가 되어(다른 줄은 17~31자) 자막이 화면 밖으로
+    #   넘쳤다. 3명 이상이면 대표 1명 + "외 N명"으로 줄인다(2인은 그대로 부른다).
+    _names = [x.strip() for x in re.split(r"[,、]", actress) if x.strip()]
+    if len(_names) >= 3:
+        actress = f"{_names[0]} 외 {len(_names) - 1}명"
     meas    = meta.get("meas") or ""          # "B83(C컵) W57 H89 키168"
     label   = meta.get("label") or ""         # "S1 NO.1 STYLE"
     # 신체 요약: 키+컵만 (짧게)
