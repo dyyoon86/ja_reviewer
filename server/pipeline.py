@@ -6,7 +6,7 @@
   common     시간/SRT 유틸, keep/retime, ffprobe 조회
   transcribe ① Whisper 전사(환청 억제·CUDA DLL) + Claude 검증
   llm        ②③ 메타 조회 + LLM CLI 호출(stdin 필수)
-  prompts    프롬프트 빌더(딸감별사 톤·예산·시간규칙)
+  prompts    프롬프트 빌더(3min/cinema/gootabari 톤·예산·시간규칙)
   cutter     ④ ffmpeg 컷(NVENC/무손실 카피)
   tts        ⑤ voicebox TTS·내레이션 합성·더킹·먹싱
   subs       ⑥ ASS 하드섭 + 인포배너
@@ -42,9 +42,11 @@ from server.core.transcribe import (
 from server.core.llm import fetch_meta, _cli_path, call_llm, llm_ping
 from server.core.prompts import (
     _meta_block, _translate, NARRATION_STYLES, _style_cinema, _style,
-    _must_have, _style_3min, _hint_block, _timeline_rule,
+    _must_have, _style_3min, _style_gootabari, _hint_block, _timeline_rule,
     _TTS_CHARS_PER_SEC, _BREATH, _SEC_PER_SENT, _CINEMA_SPEECH_RATIO,
-    narration_budget, _roundup_block, prompt_auto, prompt_highlight, prompt_manual,
+    _GOOTA_SPEECH_RATIO, _GOOTA_SEC_PER_SENT, _drip_rule,
+    narration_budget, _roundup_block, _roundup_gootabari,
+    prompt_auto, prompt_highlight, prompt_manual,
     prompt_block, prompt_dialogue_fix,
 )
 from server.core.cutter import (

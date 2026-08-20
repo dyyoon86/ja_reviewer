@@ -75,10 +75,18 @@ STYLE_DEFAULT = {
                   "v": "top", "h": "center", "margin": 34,
                   "border_style": 3, "back_color": "#000000", "back_alpha": 0x30,
                   "anim": "shimmer", "sfx": "blip"},
+    # ★ 드립 = 구타바리형(내레이션 문체 gootabari)의 괄호 드립자막. 2~5자짜리 속마음·밈이
+    #   화면 오른쪽에 툭 튀어나온다. TTS는 읽지 않는다(stages.write_narration이 SRT에서 뺀다).
+    #   위치가 중앙우측인 이유 — 대사(하단)·내레이션(하단 노란판)·강조(정중앙)와 안 겹친다.
+    "drip":      {"font": "Malgun Gothic", "size": 54, "color": "#FFFFFF",
+                  "outline_color": "#E5006E", "outline": 5.0, "shadow": 2.0, "bold": True,
+                  "v": "middle", "h": "right", "margin": 70, "spacing": 1,
+                  "anim": "punch", "sfx": "blip"},
 }
 
 # LLM이 붙이는 내레이션 유형 → ASS 스타일명
 STYLE_TAGNAME = {"기본": "Narration", "일반": "Narration", "강조": "Emphasis", "정보": "Info",
+                 "드립": "Drip", "drip": "Drip",
                  "normal": "Narration", "emphasis": "Emphasis", "info": "Info"}
 # 대사 화자 → ASS 스타일명 (여=기본 Dialogue, 남=DialogueM)
 SPEAKER_TAGNAME = {"여": "Dialogue", "여자": "Dialogue", "f": "Dialogue", "female": "Dialogue",
@@ -95,7 +103,10 @@ _SCALE_KEYS = ("size", "margin", "outline", "shadow",
 #   1.5배만 하면 57px 흰 글씨/반투명이 되어 지금까지 낸 ja12~ja18과 달라진다.
 #   config sub_styles_1080 으로 편별 덮어쓰기 가능.
 STYLE_1080_OVERRIDE = {
-    "narration": {"size": 69, "color": "#111111", "outline": 0, "plate_alpha": 0},
+    # plate_alpha 는 여기서 덮지 않는다 — 사용자가 studio_config 에 잡아둔 투명도(기본 77)를
+    # 그대로 쓴다. 예전엔 0(완전 불투명)으로 강제해 720p 완성본과 1080p 납품본의 노란판이
+    # 달라 보였다(2026-08-13).
+    "narration": {"size": 69, "color": "#111111", "outline": 0},
 }
 
 
@@ -400,13 +411,14 @@ def _banner_reflow(evs, banner_end):
 def build_ass(dialogue, narration, out_ass, width, height, styles=None, banner_end=None):
     styles = styles or {}
     S = {k: {**STYLE_DEFAULT[k], **(styles.get(k) or {})}
-         for k in ("dialogue", "dialogue_m", "narration", "emphasis", "info")}
+         for k in ("dialogue", "dialogue_m", "narration", "emphasis", "info", "drip")}
     # 스타일 태그명 → 애니 종류
     ANIM = {"Dialogue": S["dialogue"].get("anim", "none"),
             "DialogueM": S["dialogue_m"].get("anim", "none"),
             "Narration": S["narration"].get("anim", "none"),
             "Emphasis": S["emphasis"].get("anim", "none"),
-            "Info": S["info"].get("anim", "none")}
+            "Info": S["info"].get("anim", "none"),
+            "Drip": S["drip"].get("anim", "none")}
     L = ["[Script Info]", "ScriptType: v4.00+", f"PlayResX: {width}", f"PlayResY: {height}",
          "WrapStyle: 2", "ScaledBorderAndShadow: yes", "",
          "[V4+ Styles]",
@@ -417,10 +429,12 @@ def build_ass(dialogue, narration, out_ass, width, height, styles=None, banner_e
          _style_line("DialogueM", S["dialogue_m"]),
          _style_line("Narration", S["narration"]),
          _style_line("Emphasis", S["emphasis"]),
-         _style_line("Info", S["info"])]
+         _style_line("Info", S["info"]),
+         _style_line("Drip", S["drip"])]
     # 둥근 배경판 전용 스타일 — 판 색은 PrimaryColour로 칠한다(드로잉은 1차색으로 채워짐).
     #   plate_alpha: 0=불투명 … 255=완전투명. 사용자가 말하는 '투명도 30%' = alpha 약 0x4D.
-    for key, sname in (("narration", "NarPlate"), ("emphasis", "EmpPlate"), ("info", "InfoPlate")):
+    for key, sname in (("narration", "NarPlate"), ("emphasis", "EmpPlate"),
+                       ("info", "InfoPlate"), ("drip", "DripPlate")):
         st = S[key]
         if st.get("plate"):
             L.append(_style_line(sname, {
@@ -442,7 +456,8 @@ def build_ass(dialogue, narration, out_ass, width, height, styles=None, banner_e
     # 배경판 이벤트 — Layer 0(자막보다 아래). 자막은 Layer 1로 올린다.
     PLATE_OF = {"Narration": ("narration", "NarPlate"),
                 "Emphasis": ("emphasis", "EmpPlate"),
-                "Info": ("info", "InfoPlate")}
+                "Info": ("info", "InfoPlate"),
+                "Drip": ("drip", "DripPlate")}
     for style, (skey, sname) in PLATE_OF.items():
         if not S[skey].get("plate"):
             continue

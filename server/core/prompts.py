@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""LLM 프롬프트 빌더 — 딸감별사 톤(3min/cinema), 예산, 묶음리뷰, 시간규칙."""
+"""LLM 프롬프트 빌더 — 톤(3min/cinema/gootabari), 예산, 묶음리뷰, 시간규칙."""
 
 def _meta_block(meta):
     g = ", ".join(meta.get("genres") or []) or (meta.get("genre") or "")
@@ -37,6 +37,7 @@ def _translate():
 NARRATION_STYLES = {
     "3min": "3분휴지형 (담백한 총평 리뷰 · 원음 끄고 해설만)",
     "cinema": "고몽·김시선형 (대사와 주고받는 해설 · 원음 살림)",
+    "gootabari": "구타바리형 (냉소·병맛 초압축 반말 · 괄호 드립자막)",
 }
 
 
@@ -73,14 +74,77 @@ def _style_cinema():
         + _human_tone() + _translate())
 
 
+def _style_gootabari():
+    """쇼츠 리뷰어 '구타바리' 문체 (사용자 지침서 THE GOOTABARI ARCHITECT V8.2 이식).
+    3min/cinema 와 정반대다 — 정중체가 아니라 **반말**, 총평이 아니라 **도파민**.
+    핵심 4원칙: ①문장 끊어치기 ②어감 변주(~며 금지) ③앵무새 금지 ④명사형 피날레.
+    괄호 드립자막은 _drip_rule()이 따로 지시한다(내레이션 문장과 역할이 다르다)."""
+    return (
+        "[캐릭터] 딸딸기튜브 쇼츠 리뷰어 '구타바리'. 냉소적이고 날카로우며 인과응보와 병맛 상황을 즐긴다. "
+        "목적은 시청자의 도파민을 짧은 시간 안에 터뜨리는 **초압축 내레이션**이다. "
+        "[★어조 — 반드시 지킬 것] 처음부터 끝까지 **반말**로 쓴다. "
+        "존댓말·정중체('~입니다','~습니다','~하죠','~인데요','~네요') 절대 금지. "
+        "3분휴지형·고몽형의 차분한 해설체를 한 줄도 섞지 마라. "
+        "[★① 문장 끊어치기] 긴 문장은 지루함의 원천이다. "
+        "**[현상·상태 정의(명사)] + [이유·배경 설명(과거형)]** 구조로 쪼갠다.\n"
+        " (예: '평범한 회사원 같지만 실상은 살인 청부가 본업인 미친 회사였고.')\n"
+        "[★② 어감 변주] 같은 종결어미의 반복을 엄금한다. **'~고 / ~데 / ~다 / (명사)'**를 "
+        "상황에 맞춰 유동적으로 섞어 리듬을 만든다. "
+        "리듬 예: ~데(시작) → ~고(전개) → ~다(강조) → 명사(최종 임팩트). "
+        "★'~며'는 어떤 경우에도 쓰지 않는다. "
+        "[★③ 앵무새 금지] 화면 속 대사나 대사자막(dialogue)을 내레이션이 그대로 읊는 것을 금지한다. "
+        "내레이션은 대사의 속뜻·상황의 본질·심리 상태를 짚어 임팩트를 보강한다.\n"
+        " (대사: '나 해고할 수 있냐?' → 내레이션: '상사의 비열한 협박에도 눈 하나 깜빡 안 하는 카리스마.')\n"
+        "[★④ 명사형 피날레] 중요한 변곡점과 엔딩은 강렬한 명사로 매듭짓는다 "
+        "('복서의 본능.', '처절한 사투.', '분노 게이지 MAX.'). "
+        "[문장 길이] 한 문장 20단어를 넘기지 않는다. 15~35자가 기본. 짧을수록 세다. "
+        "[구성] 훅으로 연다 → 인물·설정을 쪼개서 던진다 → 사건이 터지는 대목 → 참교육·반전 → 명사형 피날레. "
+        "[★금지] 교훈적인 마무리 금지 — 오직 쾌락과 참교육에 집중한다. "
+        "총평·별점을 문장으로 늘어놓지 마라(stars는 JSON 필드로만 낸다). "
+        "채널 인사·자기소개·구독 요청 금지. 느낌표는 한 편에 한두 번까지. "
+        "[문장 예시 — 이 리듬을 따를 것]\n"
+        "· 출근 첫날부터 공기가 싸했는데.\n"
+        "· 알고 보니 여기 사장이 진짜 물건이었고.\n"
+        "· 참다 참다 결국 터진다.\n"
+        "· 여기서 등장하는 상사의 표정.\n"
+        "· 완벽한 참교육의 서막.\n"
+        "**[AI 문체 금지]** '~에 초점을 둔 구성', '~을 선사합니다', 형용사 3개 이상 나열, "
+        "같은 종결어미 3연속. **자막·대사를 메타적으로 지칭하지 말 것** — "
+        "'자막을 보면', '자막에서', '~라는 대사에서'는 금지. 시청자는 그 장면을 보고 있다. "
+        "**[유튜브 안전]** 약물 직접 언급 금지 — '약 먹이다/약물/수면제/최음제/약 기운' → "
+        "'몽롱물', '분위기가 달라지는데.', '몸 상태가 이상해지고.'로 대체. "
+        "노골적 성적 표현 금지 — 야릇한 긴장은 좋지만 행위 묘사는 안 된다. "
+        "섹스 스킵 구간은 브릿지 한 줄로 넘긴다('그 뒤는 알아서 상상하고.'). "
+        "[대사] 자연스러운 한국어 구어체(번역투 금지), 신음류 제외/(신음). 각 대사에 speaker 지정 — '여'/'남'. "
+        "[자막 길이] 각 항목 25자 이내, 길면 의미 단위로 끊어 여러 항목.\n"
+        + _translate())
+
+
 def _style(kind="3min"):
-    """내레이션 문체 선택. 3min=3분휴지형(총평 리뷰), cinema=고몽·김시선형(대사 주고받기)."""
-    return _style_cinema() if kind == "cinema" else _style_3min()
+    """내레이션 문체 선택. 3min=3분휴지형(총평 리뷰), cinema=고몽·김시선형(대사 주고받기),
+    gootabari=구타바리형(반말 병맛 초압축 + 괄호 드립)."""
+    if kind == "cinema":
+        return _style_cinema()
+    if kind == "gootabari":
+        return _style_gootabari()
+    return _style_3min()
 
 
 def _must_have(kind="3min"):
     """스타일별 '내레이션 필수 요소' + 자기점검. 두 스타일은 요구가 다르므로 섞으면 안 된다
     (예: cinema에 '~작품이었습니다 총평'·'호불호 고지'를 강요하면 문체가 무너진다)."""
+    if kind == "gootabari":
+        return (
+            "[내레이션 필수 요소 — 하나라도 빠지면 실패]\n"
+            " (a) 첫 문장은 훅 — 소개체('이번 작품은~') 말고, 상황을 한 방에 세우는 한 줄로 연다.\n"
+            " (b) 끊어치기 최소 2회 — [현상·상태 정의] + [이유·배경(과거형)] 구조.\n"
+            " (c) 앵무새 금지 — 대사가 이미 말한 내용을 내레이션이 다시 말하지 않는다.\n"
+            " (d) 사건이 터지는 대목(반전·참교육·자업자득)을 반드시 짚는다.\n"
+            " (e) 괄호 드립자막(style=\"드립\") 3개 이상 — 2~5자.\n"
+            " (f) 마지막은 명사형 피날레. 교훈·정리·인사로 늘어지지 않는다.\n"
+            "[자기점검] 출력 전에 확인: 존댓말이 한 줄이라도 있으면 전부 다시 쓴다. "
+            "'~며'를 썼는가? 같은 어미가 3연속인가? 드립이 괄호 없이 나가거나 5자를 넘는가? "
+            "대사를 그대로 읊은 줄이 있는가? 교훈으로 끝나지 않았는가?\n")
     if kind == "cinema":
         return (
             "[내레이션 필수 요소 — 하나라도 빠지면 실패]\n"
@@ -245,21 +309,61 @@ _SEC_PER_SENT = 5.4      # 3분휴지 실측 — 문장 개수 산정용
 # → 아래 값은 측정치가 아니라 설계 판단이다. 대사가 화면의 40% 안팎을 쓴다고 보고 잡았다.
 _CINEMA_SPEECH_RATIO = 0.6
 
+# gootabari(구타바리형)는 문장이 짧고 빠르게 끊어친다 — 같은 60초라도 문장 수는 더 많고
+# 문장당 글자는 더 적다. 대사 원음을 조금 살리므로(드립 자막이 뜨는 동안 대사가 들린다)
+# 발화 비율은 3min(1.0)과 cinema(0.6) 사이. 아래 값도 측정치가 아니라 설계 판단이다.
+_GOOTA_SPEECH_RATIO = 0.72
+_GOOTA_SEC_PER_SENT = 3.2
+
 
 def narration_budget(target_sec, style="3min"):
     """목표 길이(초) → (문장 수 하한, 상한, 대략 글자수). 글자수는 TTS 발화속도 기준.
     3min : 내레이션이 영상을 거의 다 덮는다 → 60초 = 10~13문장·346자
-    cinema: 대사 구간에는 내레이션이 없다 → 60초 = 6~9문장·207자"""
+    cinema: 대사 구간에는 내레이션이 없다 → 60초 = 6~9문장·207자
+    gootabari: 짧게 끊어치므로 문장은 많고 글자는 적다 → 60초 = 12~15문장·249자"""
     try:
         target_sec = float(target_sec)
     except (TypeError, ValueError):
         target_sec = 60.0
     target_sec = max(10.0, min(1800.0, target_sec))    # 10초~30분 안으로
-    ratio = _CINEMA_SPEECH_RATIO if style == "cinema" else 1.0
+    if style == "cinema":
+        ratio, per = _CINEMA_SPEECH_RATIO, _SEC_PER_SENT
+    elif style == "gootabari":
+        ratio, per = _GOOTA_SPEECH_RATIO, _GOOTA_SEC_PER_SENT
+    else:
+        ratio, per = 1.0, _SEC_PER_SENT
     speak_sec = target_sec * ratio
-    n = max(3, round(speak_sec / _SEC_PER_SENT))
+    n = max(3, round(speak_sec / per))
     chars = int(speak_sec * _TTS_CHARS_PER_SEC * _BREATH)
     return n - 1, n + 2, chars
+
+
+def _roundup_gootabari(pos, target_sec, lo, hi, chars):
+    """구타바리형 전용 묶음/단독 규칙. 3min·cinema의 오프너("이번 작품은 ~입니다")와
+    아웃트로("지금까지 딸감별사였습니다")를 그대로 쓰면 존댓말 금지와 정면충돌하므로
+    같은 자리를 반말·명사형으로 다시 쓴다."""
+    budget = (f" · 분량은 약 {int(target_sec)}초 — 음성으로 읽는 내레이션 {lo}~{hi}문장, "
+              f"합쳐 {chars}자 안팎. 괄호 드립자막은 이 개수에 포함하지 않는다.\n")
+    if pos == "solo":
+        return ("[★단독 리뷰] 이 내레이션은 이 작품 하나로 완결되는 독립 영상이다(묶음 아님).\n"
+                " · 첫 문장은 **훅**이다. '이번 작품은 ~입니다' 같은 소개체로 열지 마라 — "
+                "상황을 한 방에 던지고 바로 들어간다.\n"
+                " · 채널 인사·자기소개·구독/좋아요 요청·'오늘은 ~을 준비했습니다' 금지.\n"
+                + budget +
+                " · 마지막은 **명사형 피날레**로 끊는다('완벽한 자업자득.'). "
+                "총평·교훈·마무리 인사로 늘어지지 마라.\n")
+    opener = {"first": "먼저", "mid": "다음은", "last": "마지막"}[pos]
+    kind = "첫" if pos == "first" else ("마지막" if pos == "last" else "중간")
+    b = ("[★묶음 리뷰의 한 꼭지] 이 내레이션은 여러 작품을 이어붙인 리뷰 영상의 "
+         f"'{kind}' 꼭지다. 독립 영상이 아니다.\n"
+         f" · 첫 문장은 '{opener}, OOO(배우)의 신작.'처럼 **명사로 툭** 던지고 바로 상황으로 들어간다. "
+         "존댓말 소개체 금지.\n"
+         " · 채널 인사·자기소개·구독/좋아요 요청 금지.\n"
+         + budget +
+         " · 마지막 문장은 명사형으로 끊어 다음 꼭지로 넘어갈 수 있게 한다.\n")
+    if pos == "last":
+        b += (" · 마지막 꼭지지만 인사·교훈은 붙이지 않는다. 가장 센 명사형 피날레로 닫는다.\n")
+    return b
 
 
 def _roundup_block(pos="mid", target_sec=60, style="3min"):
@@ -269,6 +373,8 @@ def _roundup_block(pos="mid", target_sec=60, style="3min"):
     pos='solo'는 묶음이 아니라 이 작품 하나로 완결되는 단독 영상(풀오토 기본)."""
     pos = pos if pos in ("first", "mid", "last", "solo") else "mid"
     lo, hi, chars = narration_budget(target_sec, style)
+    if style == "gootabari":
+        return _roundup_gootabari(pos, target_sec, lo, hi, chars)
     if pos == "solo":
         tail = (" 대사가 흐르는 구간에는 내레이션이 없으므로 문장 수가 적다.\n"
                 if style == "cinema" else "\n")
@@ -370,11 +476,14 @@ def prompt_auto(meta, segs, target_sec=60, hint="", pos="mid", style="3min"):
             f"{_hint_block(hint)}"
             f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n"
             f"{_roundup_block(pos, target_sec, style)}{_timeline_rule()}{_style(style)}\n"
+            f"{_drip_rule(style)}{_goota_checklist(style)}"
             f"[규칙] {_safe_keep_rule()}(1)무음·잡담·반복·비스토리 라인은 버린다. "
             f"(2)스토리(설정·관계·전환·갈등·결말)를 드러내는 핵심 구간만 keep으로 골라 **합쳐서 {target_sec}초 ±20% 목표**. "
             f"(3)도입~결말 흐름이 보이게 고루 분포. 시간은 원본 영상 기준 초.\n"
             f"[출력 JSON만] {{\"summary\":\"3~5줄\",\"stars\":1~5,\"keep\":[[시작,끝],...],"
-            f"\"dialogue\":[{{\"start\":초,\"end\":초,\"ko\":\"\",\"speaker\":\"여|남\"}}],\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\",\"style\":\"기본|강조|정보\"}}]}}")
+            f"\"dialogue\":[{{\"start\":초,\"end\":초,\"ko\":\"\",\"speaker\":\"여|남\"}}],"
+            f"\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\","
+            f"\"style\":\"{_nar_style_out(True, style)}\"}}]}}")
 
 
 def prompt_highlight(meta, segs, target_sec=60, hint="", pos="mid", style="3min",
@@ -394,7 +503,8 @@ def prompt_highlight(meta, segs, target_sec=60, hint="", pos="mid", style="3min"
             f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n"
             f"{_visual_block(visual)}"
             f"{_roundup_block(pos, target_sec, style)}{_timeline_rule()}{_style(style)}\n"
-            f"{_dialogue_note(with_dialogue)}{_nar_style_rule(nar_rich)}{_cutin_rule(cutin_tags)}"
+            f"{_dialogue_note(with_dialogue)}{_nar_style_rule(nar_rich, style)}{_cutin_rule(cutin_tags)}"
+            f"{_goota_checklist(style)}"
             f"[하이라이트 규칙] {_safe_keep_rule()}"
             f"(1)잡담·무음·반복은 버린다. "
             f"(2)★고루 분포 금지★ — 앞·중간·뒤 균등이 아니라 **후킹 밀도가 가장 높은 순간에 집중**. "
@@ -410,14 +520,40 @@ def prompt_highlight(meta, segs, target_sec=60, hint="", pos="mid", style="3min"
             f"{_dialogue_out(with_dialogue)}"
             f"{_cutin_out(cutin_tags)}"
             f"\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\","
-            f"\"style\":\"{_nar_style_out(nar_rich)}\"}}]}}")
+            f"\"style\":\"{_nar_style_out(nar_rich, style)}\"}}]}}")
 
 
-def _nar_style_rule(rich):
+def _drip_rule(style):
+    """구타바리 시그니처 '괄호 드립자막'. 다른 스타일에서는 아무것도 붙이지 않는다.
+
+    드립은 narration 배열 안에 style="드립"으로 들어오지만 **음성으로 읽지 않는다** —
+    stages.write_narration이 TTS용 SRT에서 빼고 화면(ASS Drip 스타일)에만 남긴다."""
+    if style != "gootabari":
+        return ""
+    return ("[★괄호 드립자막 — 구타바리의 시그니처] narration 항목 중 일부를 style=\"드립\"으로 낸다.\n"
+            " · text는 **반드시 소괄호로 감싸고 2~5글자**로 제한한다(가독성). "
+            "예: (지림), (입벌구), (풀악셀), (개꿀), (자업자득), (현타)\n"
+            " · 내용은 속마음·상황 풍자·의성어·밈. 대사를 그대로 옮기는 것은 금지.\n"
+            " · 드립은 **성우가 읽지 않는다**(화면 전용 자막). 읽을 문장은 style=\"기본\"에만 쓴다.\n"
+            " · 리액션이 필요한 순간(반전·어이없는 대사·민망한 장면)에만 — 60초 기준 3~6개. "
+            "남발하면 촌스럽다. 각 드립은 1.2~2.0초.\n"
+            " · 드립은 기본 내레이션과 시간이 겹쳐도 된다(화면 다른 자리에 뜬다). "
+            "단 드립끼리는 겹치지 마라.\n")
+
+
+def _goota_checklist(style):
+    """구타바리형일 때만 필수요소·자기점검을 붙인다(다른 스타일의 프롬프트는 그대로 유지)."""
+    return _must_have("gootabari") if style == "gootabari" else ""
+
+
+def _nar_style_rule(rich, style="3min"):
     """내레이션 유형(강조·정보) 사용 여부.
 
     기본은 **끔** — '강조'/'정보'는 색만 바뀔 뿐 실제 연출 효과가 없어서(2026-07-13 사용자
-    피드백) 화면만 산만해진다. 필요할 때만 GUI에서 켠다."""
+    피드백) 화면만 산만해진다. 필요할 때만 GUI에서 켠다.
+    구타바리형은 대신 '드립'을 쓴다(_drip_rule)."""
+    if style == "gootabari":
+        return _drip_rule(style)
     if rich:
         return ("[내레이션 유형] style 지정 — '기본'(장면 중계)/'강조'(훅·반전·총평)/"
                 "'정보'(스펙·레이블·수치). '강조'는 남발하지 말고 총평과 결정적 한 줄에만.\n")
@@ -425,7 +561,9 @@ def _nar_style_rule(rich):
             "'강조'·'정보' 유형은 쓰지 마라(사용 안 함).\n")
 
 
-def _nar_style_out(rich):
+def _nar_style_out(rich, style="3min"):
+    if style == "gootabari":
+        return "기본|드립"
     return "기본|강조|정보" if rich else "기본"
 
 
@@ -466,7 +604,7 @@ def prompt_manual(meta, segs, target_sec=60, hint="", pos="mid", style="3min",
             f"[메타]\n{_meta_block(meta)}\n[일본어자막] 번호\\t시작초\\t끝초\\t대사\n{body}\n"
             f"{_visual_block(visual)}"
             f"{_roundup_block(pos, target_sec, style)}{_timeline_rule()}{_style(style)}\n"
-            f"{_dialogue_note(with_dialogue)}{_nar_style_rule(nar_rich)}{_cutin_rule(cutin_tags)}"
+            f"{_dialogue_note(with_dialogue)}{_nar_style_rule(nar_rich, style)}{_cutin_rule(cutin_tags)}"
             f"[규칙] {_safe_keep_rule()}(1)무음·잡담·반복·의미없는 짧은 라인은 버린다. "
             f"(2)스토리(설정·관계·전환·갈등·결말)를 드러내는 핵심 구간만 keep으로 골라 **합쳐서 {target_sec}초 ±20% 목표**. "
             f"(3)정사 선별은 하지 말 것(이미 제거됨). 시간은 이 자막 기준 초.\n"
@@ -476,6 +614,6 @@ def prompt_manual(meta, segs, target_sec=60, hint="", pos="mid", style="3min",
             f"{_dialogue_out(with_dialogue)}"
             f"{_cutin_out(cutin_tags)}"
             f"\"narration\":[{{\"start\":초,\"end\":초,\"text\":\"\","
-            f"\"style\":\"{_nar_style_out(nar_rich)}\"}}]}}")
+            f"\"style\":\"{_nar_style_out(nar_rich, style)}\"}}]}}")
 
 

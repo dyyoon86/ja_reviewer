@@ -192,6 +192,8 @@ audio{width:100%;margin:8px 0}
 .pk-line.nar{color:#bfe3c9}
 .pk-line.nar.emph{color:#ffd23f;font-weight:700}
 .pk-line.nar.info{color:#9fdcff}
+.pk-line.nar.drip{color:#ff7ab8;font-weight:700}
+.pk-line.nar.drip .pk-tag{background:#4a2338;color:#ff9fce}
 .pk-line.muted{color:#777}
 /* ── 잘라내기 모달 ── */
 .modal{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;

@@ -649,7 +649,7 @@ $("#btnRegenNar").onclick = () => {
   const code=$("#code").value.trim();
   log("── 🔁 내레이션 재생성 시작 (컷·대사 유지) ──"); setBadge("badgeSubs","run");
   fetch("/regen/narration",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    code
+    code, style:narStyle()          // ② 에서 고른 문체 그대로 재생성(구타바리형이면 반말로)
   })}).then(r=>r.json()).then(j=>runJob(j.job, (res)=>{
     setBadge("badgeSubs","done");
     log(`✔ 내레이션 재생성 완료 (${res.count}줄) — 마음에 들면 TTS·굽기를 다시 실행하세요`,"ok");
@@ -781,7 +781,7 @@ function buildPickPreview(result){
       const st=n.style||"기본";
       _chunk25(n.text).forEach((c,ci)=>{
         body.insertAdjacentHTML("beforeend",
-          `<div class="pk-line nar ${st==="강조"?"emph":st==="정보"?"info":""}"><span class="pk-tag">${ci===0?"내레":"·"}</span>${_esc(c)}</div>`);
+          `<div class="pk-line nar ${st==="강조"?"emph":st==="정보"?"info":st==="드립"?"drip":""}"><span class="pk-tag">${ci===0?(st==="드립"?"드립":"내레"):"·"}</span>${_esc(c)}</div>`);
       });
     });
     if(!body.children.length) body.innerHTML='<div class="pk-line muted">이 구간 자막 없음</div>';
@@ -1439,7 +1439,7 @@ let subsData=null;
 function subsRow(kind, it){
   const isN = kind==="nar";
   const sel = isN
-    ? `<select data-f="style">${(subsData.styles||["기본","강조","정보"]).map(s=>`<option ${((it.style||"기본")===s)?"selected":""}>${s}</option>`).join("")}</select>`
+    ? `<select data-f="style">${(subsData.styles||["기본","강조","정보","드립"]).map(s=>`<option ${((it.style||"기본")===s)?"selected":""}>${s}</option>`).join("")}</select>`
     : `<select data-f="speaker">${(subsData.speakers||["여","남"]).map(s=>`<option ${((it.speaker||"여")===s)?"selected":""}>${s}</option>`).join("")}</select>`;
   const d=document.createElement("div"); d.className="subs-row";
   d.innerHTML =

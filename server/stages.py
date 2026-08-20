@@ -110,9 +110,14 @@ def steps_status(outdir, code, video=None):
 
 
 def write_narration(outdir, code, nar_rt):
-    """내레이션 출력 — SRT + JSON. 내레이션은 존댓말 완결문장이라 25자 분할 안 함(끊김·시간겹침 방지).
-    화면 줄바꿈은 굽기(ASS)에서 자동 처리. TTS도 완결문장이 자연스러움."""
-    P.write_srt([(s, e, t) for s, e, t, *_ in nar_rt], outdir / f"{code}_내레이션.srt", maxlen=0)
+    """내레이션 출력 — SRT + JSON. 내레이션은 완결문장이라 25자 분할 안 함(끊김·시간겹침 방지).
+    화면 줄바꿈은 굽기(ASS)에서 자동 처리. TTS도 완결문장이 자연스러움.
+
+    ★style='드립'(구타바리형 괄호 드립자막)은 **SRT에서 뺀다** — SRT는 TTS 입력이라
+    남겨두면 성우가 '(지림)'을 소리내어 읽는다. 화면에는 떠야 하므로 JSON에는 남긴다
+    (굽기·미리보기는 _내레이션.json을 읽는다)."""
+    spoken = [(s, e, t) for s, e, t, *x in nar_rt if (x[0] if x else "기본") != "드립"]
+    P.write_srt(spoken, outdir / f"{code}_내레이션.srt", maxlen=0)
     data = [{"start": round(s, 3), "end": round(e, 3), "text": t, "style": (x[0] if x else "기본")}
             for s, e, t, *x in nar_rt]
     (outdir / f"{code}_내레이션.json").write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -918,7 +923,7 @@ def stage_burn(c, code, styles, em, source=None, banner=True, parts=None, cutins
             from server.core import sfx as SFX
             from server.core.subs import STYLE_DEFAULT, STYLE_TAGNAME
             st_all = {**STYLE_DEFAULT, **(styles or {})}
-            key = {"Emphasis": "emphasis", "Info": "info"}
+            key = {"Emphasis": "emphasis", "Info": "info", "Drip": "drip"}
             events = []
             for d in json.loads(njson.read_text(encoding="utf-8")):
                 tag = STYLE_TAGNAME.get(d.get("style", "기본"), "Narration")

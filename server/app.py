@@ -961,7 +961,8 @@ async def regen_narration_route(req: Request):
         try:
             from server.core.regen import regen_narration
             outdir = work_dir(c, code)
-            new_nar = regen_narration(outdir, c["meta_api"], log=lambda m: jlog(jid, m))
+            new_nar = regen_narration(outdir, c["meta_api"], log=lambda m: jlog(jid, m),
+                                      style=body.get("style", "3min"))
             jfile(jid, "내레이션 SRT", outdir / f"{code}_내레이션.srt")
             jfile(jid, "내레이션 JSON", outdir / f"{code}_내레이션.json")
             jdone(jid, {"step": "regen_narration", "code": code, "count": len(new_nar)})
@@ -1191,8 +1192,10 @@ BANNER_CANVAS_W = 1920
 
 _NAR_STYLE_KEY = {"기본": "narration", "일반": "narration",
                   "강조": "emphasis", "정보": "info",
+                  "드립": "drip", "drip": "drip",
                   "normal": "narration", "emphasis": "emphasis", "info": "info"}
-_NAR_STYLES = ["기본", "강조", "정보"]
+# '드립'은 구타바리형(내레이션 문체 gootabari) 전용 괄호 자막 — 화면에만 뜨고 TTS는 안 읽는다.
+_NAR_STYLES = ["기본", "강조", "정보", "드립"]
 
 
 # ─── 자막 편집 (③ 결과를 화면에서 고치고 다시 굽기) ─────────────────────────
@@ -1292,7 +1295,9 @@ def preview_data(code: str, source: str = ""):
     return {"code": code, "video": str(src),
             "duration": P.video_duration(str(src)),
             "layers": layers, "subs": subs,
-            "styles": c.get("sub_styles") or P.STYLE_DEFAULT,
+            # 설정(sub_styles)은 일부 키만 덮어쓴 부분집합일 수 있다. 기본값 위에 얹어
+            # 보내야 새로 생긴 유형(drip)도 미리보기에서 제 모양으로 보인다.
+            "styles": {**P.STYLE_DEFAULT, **(c.get("sub_styles") or {})},
             "anim": P.BANNER_ANIM, "canvas_w": BANNER_CANVAS_W}
 
 
