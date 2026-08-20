@@ -263,13 +263,17 @@ def html_info(m: dict, mb: str, t: dict) -> str:
     #   ③ 작았다 — 품번 96→104, 배우 46→52, 메타 26→30, 카드 여백도 키웠다.
     #   폰트도 Jua(둥근 캐주얼체) → Paperlogy(채널 자막과 같은 계열)로 통일.
     #   품번만 Black Han Sans 유지(임팩트).
+    # ★2026-08-19 3사이즈 색상 복원 — 6057447이 .sz span을 지우면서 B·W·H가 회색
+    #   한 덩어리가 됐다(원래는 c1 컬러). 글자(B/W/H)만 브랜드색, 숫자는 흰색으로
+    #   되살린다. 이 항목만 raw HTML이라 _h() 이스케이프를 건너뛴다(값은 전부 숫자).
     spec = []
     if m["bust"] and m["waist"] and m["hip"]:
-        spec.append(f'B{m["bust"]} · W{m["waist"]} · H{m["hip"]}')
-    if m["cup"]:    spec.append(f'{m["cup"]}컵')
-    if m["height"]: spec.append(f'{m["height"]}cm')
+        spec.append(f'<span class=sz><i>B</i>{m["bust"]}<b>·</b>'
+                    f'<i>W</i>{m["waist"]}<b>·</b><i>H</i>{m["hip"]}</span>')
+    if m["cup"]:    spec.append(_h(f'{m["cup"]}컵'))
+    if m["height"]: spec.append(_h(f'{m["height"]}cm'))
     spec_html = ("<div class=spec>"
-                 + "".join(f"<span class=pill>{_h(s)}</span>" for s in spec)
+                 + "".join(f"<span class=pill>{s}</span>" for s in spec)
                  + "</div>") if spec else ""
 
     bits = []
@@ -308,6 +312,8 @@ def html_info(m: dict, mb: str, t: dict) -> str:
 .spec{{margin-top:20px;display:flex;gap:12px;flex-wrap:wrap}}
 .spec .pill{{font-size:34px;line-height:1;color:#fff;padding:12px 22px;border-radius:999px;
  background:rgba(255,255,255,.10);border:1.5px solid {t['accent']}66;letter-spacing:.01em}}
+.spec .sz i{{color:{t['c1']};font-style:normal;font-weight:700}}
+.spec .sz b{{color:{t['c1']};font-weight:700;margin:0 3px}}
 .meta{{margin-top:20px;font-size:30px;color:#e6e6ee;letter-spacing:-.01em;font-weight:400;
  display:flex;align-items:center;gap:14px;flex-wrap:wrap;max-width:1500px}}
 .meta .dot{{color:{t['c1']}}}
@@ -344,8 +350,9 @@ def html_wm(m: dict, mb: str, t: dict) -> str:
     #   3사이즈 노출 보강. 1080p 리프레임 납품본에서 옛 크기는 화면 대비 너무 작았다.
     #   컵·키까지 넣어 인포카드가 사라진 뒤에도 스펙을 계속 볼 수 있게 한다.
     meas = ""
-    if m["bust"] and m["waist"] and m["hip"]:
-        meas = f'B{m["bust"]}·W{m["waist"]}·H{m["hip"]}'
+    if m["bust"] and m["waist"] and m["hip"]:   # ★B/W/H 글자만 브랜드색(위 인포카드와 동일 규칙)
+        meas = (f'<span class=sz><i>B</i>{m["bust"]}<b>·</b>'
+                f'<i>W</i>{m["waist"]}<b>·</b><i>H</i>{m["hip"]}</span>')
     ck = " ".join(x for x in [f'{m["cup"]}컵' if m["cup"] else "",
                               f'{m["height"]}cm' if m["height"] else ""] if x)
     sub = " · ".join(x for x in [m["release"], f'★ {m["star"]}' if m["star"] else "",
@@ -364,6 +371,9 @@ def html_wm(m: dict, mb: str, t: dict) -> str:
  color:#fff;letter-spacing:.01em}}
 .name{{font-size:34px;line-height:1;color:{t['accent']};letter-spacing:-.01em}}
 .sub{{font-size:26px;line-height:1;color:#c9c9d4;letter-spacing:-.01em;font-weight:400}}
+.sub .sz{{color:#fff;font-weight:700}}
+.sub .sz i{{color:{t['c1']};font-style:normal;font-weight:700}}
+.sub .sz b{{color:{t['c1']};font-weight:700;margin:0 2px}}
 </style><div class=f>
  <div class=panel>
   <div class=face></div>
