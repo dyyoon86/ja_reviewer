@@ -54,13 +54,42 @@ class MetaNotFound(Exception):
     호출측의 except Exception 을 뚫고 나가 큐 워커까지 죽는다."""
 
 
-def _meta_api_base():
-    """studio_config.json의 meta_api(우분투 DB 서버). 없으면 기본값."""
+class SpecMissing(Exception):
+    """3사이즈(B/W/H)를 못 채웠다 — **배너를 만들지 않고 멈춘다**.
+
+    ★MetaNotFound 와 일부러 별개 계층으로 둔다. stage_banner 는 MetaNotFound 를
+      '아직 크롤링 안 된 신작'으로 보고 배너만 건너뛰고 계속 가는데, 스펙 누락까지
+      거기 얹으면 배너가 통째로 빠진 채 조용히 납품된다(더 나쁘다).
+    """
+
+
+def _cfg(key, default=None):
     try:
         cfg = json.load(open(os.path.join(HERE, "studio_config.json"), encoding="utf-8"))
-        return (cfg.get("meta_api") or "").rstrip("/")
+        v = cfg.get(key)
+        return default if v is None else v
     except Exception:
-        return "http://172.30.1.40:8770"
+        return default
+
+
+def _meta_api_base():
+    """studio_config.json의 meta_api(우분투 DB 서버). 없으면 기본값."""
+    return (_cfg("meta_api", "http://172.30.1.40:8770") or "").rstrip("/")
+
+
+def _alias_map():
+    """`actress_alias.json` — 배우명(한국어 또는 변형 한자) → actresses.name_ja.
+
+    DB 매칭이 끝내 안 될 때 **파일만 떨구면 이어지는** 탈출구다. 한자 표기가
+    사이트마다 다르거나(七島舞/七嶋舞) 크롤러가 한국어명만 남긴 행에서 쓴다.
+    '_' 로 시작하는 키는 설명용이라 무시한다.
+    """
+    try:
+        m = json.load(open(os.path.join(HERE, "actress_alias.json"), encoding="utf-8"))
+        return {k.strip(): v.strip() for k, v in m.items()
+                if not k.startswith("_") and isinstance(v, str) and v.strip()}
+    except Exception:
+        return {}
 
 
 def _fetch_remote(code: str):
@@ -79,15 +108,59 @@ def _fetch_remote(code: str):
     return m
 
 
+def _actress_row(db, w):
+    """작품행 → actresses 행. 이름이 안 맞으면 **사진 경로**로 되짚는다.
+
+    ★3사이즈·컵·키·일본어 배우명은 한 덩어리로 이 한 행에서 온다. 못 찾으면 넷이
+      동시에 비는데 화면에는 '3사이즈가 없다'로만 보여 원인을 알기 어렵다.
+      실제로 끊기는 경우가 셋 있었다(2026-08-28 ja20 조사):
+        ① `works.actress_ja` 가 아예 NULL — 전체 works 의 84%가 이 상태다.
+           크롤러(jav_scraper)는 이 컬럼을 안 채우고 fetch_actress 를 따로 돌려야 채워진다.
+        ② 한자 표기가 사이트마다 다름(七島舞/七嶋舞, 개명 병기 河北彩花（河北彩伽）).
+        ③ actresses 행은 있는데 수치가 빔 → 그건 여기서 못 고친다(fetch_measurements 몫).
+      ①②는 `works.actress_photo` 로 복구된다 — 사진 파일 경로는 배우를 유일하게
+      가리키기 때문이다(실측: 이 경로로 1,113개 작품이 3사이즈까지 즉시 복구된다.
+      photo_path 가 두 명 이상에 겹치는 경우가 5건 있어 **정확히 1행일 때만** 채택한다).
+    """
+    ja = (w.get("actress_ja") or "").strip()
+    if ja:
+        r = db.execute("SELECT * FROM actresses WHERE name_ja=?", (ja,)).fetchone()
+        if r:
+            return r
+        base = re.split(r"[（(]", ja)[0].strip()          # 개명 병기 벗겨서 한 번 더
+        if base and base != ja:
+            r = db.execute("SELECT * FROM actresses WHERE name_ja=? OR name_ja LIKE ?",
+                           (base, base + "（%")).fetchone()
+            if r:
+                print(f"[gen_infocard] 배우 '{ja}' → '{r['name_ja']}' (병기 표기 정규화)")
+                return r
+    photo = (w.get("actress_photo") or "").strip()
+    if photo:
+        rows = db.execute("SELECT * FROM actresses WHERE photo_path=?", (photo,)).fetchall()
+        if len(rows) == 1:
+            print(f"[gen_infocard] actress_ja 로 못 찾음 → 사진 경로로 배우 확정: "
+                  f"'{rows[0]['name_ja']}'")
+            return rows[0]
+    alias = _alias_map()                                  # 마지막 탈출구: 수동 별칭 파일
+    for key in (ja, (w.get("actress") or "").strip()):
+        tgt = alias.get(key)
+        if tgt:
+            r = db.execute("SELECT * FROM actresses WHERE name_ja=?", (tgt,)).fetchone()
+            if r:
+                print(f"[gen_infocard] actress_alias.json: '{key}' → '{tgt}'")
+                return r
+            print(f"[gen_infocard] ⚠ actress_alias.json 의 '{key}' → '{tgt}' 가 "
+                  f"actresses 에 없습니다")
+    return None
+
+
 def fetch_meta(code: str) -> dict:
     db = sqlite3.connect(DB); db.row_factory = sqlite3.Row
     w = db.execute("SELECT * FROM works WHERE code=?", (code,)).fetchone()
     a = None
     if w:
         w = dict(w)
-        if w.get("actress_ja"):
-            a = db.execute("SELECT * FROM actresses WHERE name_ja=?",
-                           (w["actress_ja"],)).fetchone()
+        a = _actress_row(db, w)
     db.close()
     if not w:
         # 로컬 DB에 없음 = 신작. 우분투 meta_api(매일 크롤링)로 폴백.
@@ -106,14 +179,52 @@ def fetch_meta(code: str) -> dict:
         #   포기하면 워터마크 얼굴 슬롯이 딸기 마스코트로 떨어진다(2026-07-24 ja13 사례:
         #   11편 전부 얼굴 없이 납품될 뻔). 작품만 신작이고 배우는 로컬 DB에 이미 있는
         #   경우가 대부분이므로, 이름으로 로컬 actresses를 한 번 더 조회해 사진을 붙인다.
-        if w.get("actress_ja"):
-            db2 = sqlite3.connect(DB); db2.row_factory = sqlite3.Row
-            a = db2.execute("SELECT * FROM actresses WHERE name_ja=?",
-                            (w["actress_ja"],)).fetchone()
-            db2.close()
-            if a:
-                print(f"[gen_infocard] 배우 '{w['actress_ja']}' 로컬 DB에서 사진 확보")
+        db2 = sqlite3.connect(DB); db2.row_factory = sqlite3.Row
+        a = _actress_row(db2, w)
+        db2.close()
+        if a:
+            print(f"[gen_infocard] 배우 '{a['name_ja']}' 로컬 DB에서 사진 확보")
     a = dict(a) if a else {}
+
+    # ── 3사이즈는 **반드시** 들어간다 (2026-08-28 규칙) ─────────────────────
+    # 예전에는 비어도 경고 한 줄 없이 그냥 그려서 ja20 12편 중 6편이 스펙 없는 배너로
+    # 납품될 뻔했다. 이제 소스를 3단으로 두고, 그래도 못 채우면 **배너를 안 만든다**.
+    SPEC = ("bust", "waist", "hip", "cup", "height")
+    BWH = ("bust", "waist", "hip")
+    spec = {k: a.get(k) for k in SPEC}
+    if not all(spec[k] for k in BWH):
+        # ② meta_api 의 work 응답은 배우 수치를 flatten 해서 같이 준다. 로컬 actresses 에
+        #    행이 아예 없는 신작은 이 값이 유일한 출처인데 여태 통째로 버려지고 있었다.
+        filled = [k for k in SPEC if not spec[k] and w.get(k)]
+        for k in filled:
+            spec[k] = w[k]
+        if filled and all(spec[k] for k in BWH):
+            print(f"[gen_infocard] 3사이즈를 meta_api 응답에서 채웠습니다({','.join(filled)})")
+
+    if not all(spec[k] for k in BWH):
+        who_ja = (w.get("actress_ja") or "").strip()
+        who_ko = (w.get("actress") or "").strip()
+        who = who_ja or who_ko or "?"
+        # 배우가 특정되지 않는 작품(기획물·다인 출연)은 애초에 스펙이 존재하지 않는다.
+        solo = bool(who_ja or who_ko) and "," not in who_ko
+        if not solo:
+            print(f"[gen_infocard] · '{code}' 배우 특정 불가(기획물/다인) — "
+                  f"3사이즈 없이 진행합니다")
+        elif not _cfg("require_spec", True) or os.environ.get("JA_ALLOW_NOSPEC"):
+            print(f"[gen_infocard] ⚠ '{code}' 3사이즈 없음(배우 {who}) — "
+                  f"require_spec 해제 상태라 그대로 만듭니다")
+        else:
+            raise SpecMissing(
+                f"'{code}' 3사이즈(B/W/H)를 못 채워 배너를 만들지 않았습니다. 배우: {who}\n"
+                f"  채우는 법 —\n"
+                f"   1) actresses 행에 수치가 없다면:  jav_scrap/fetch_measurements.py "
+                f"--retry-miss   (우분투 venv + Tor 필요)\n"
+                f"   2) 배우 연결이 안 된 것이면:      works.actress_ja 를 잇거나 "
+                f"ja_reviewer/actress_alias.json 에 '{who}' → 한자명 한 줄 추가\n"
+                f"   3) 수동으로 넣을 값이 있으면:     tools/_fill_actress_ja20.py 를 본떠 "
+                f"로컬·우분투 DB 양쪽에 반영\n"
+                f"  일부러 스펙 없이 만들려면: studio_config.json 에 \"require_spec\": false "
+                f"(또는 환경변수 JA_ALLOW_NOSPEC=1)")
 
     likes = w.get("likes") or 0
     dis   = w.get("dislikes") or 0
@@ -143,9 +254,18 @@ def fetch_meta(code: str) -> dict:
 
     # 제목: hook_title(한글 번역) 우선. title이 배우이름과 같으면(크롤러가 제목 대신
     # 배우이름을 넣은 행) 이름이 두 번 찍히므로 영/일 원제 → 품번으로 폴백.
+    # ★크롤러가 제목을 못 얻으면 "START-627 - 미야지마 메이" 같은 **자리표시자**를 넣는다.
+    #   이건 배우이름과 '같지' 않아 기존 조건을 빠져나가고, 그대로 그리면 큰 품번 +
+    #   제목줄 + 배우줄로 같은 정보가 3중으로 찍힌다(ja20 START-627·START-622·FNS-248).
+    #   품번으로 폴백해두면 렌더 쪽이 '제목==품번'을 이미 숨기므로 줄이 깔끔하게 빠진다.
     title = w.get("hook_title") or w.get("title") or ""
-    if not title.strip() or title.strip() == (w.get("actress") or "").strip():
+    _t = title.strip()
+    _ko = (w.get("actress") or "").strip()
+    _placeholder = bool(re.match(rf"^{re.escape(w['code'])}\s*[-–—]\s*", _t))
+    if not _t or _t == _ko or _placeholder:
         title = w.get("title_en") or w.get("title_ja") or w["code"]
+        if _placeholder:
+            print(f"[gen_infocard] 제목이 자리표시자('{_t}') — 제목 줄을 비웁니다")
 
     return {
         "thumb":    thumb,
@@ -160,8 +280,8 @@ def fetch_meta(code: str) -> dict:
         "views":    man(w.get("views")),
         "like_pct": like_pct,
         "star":     star,
-        "bust":     a.get("bust"), "waist": a.get("waist"), "hip": a.get("hip"),
-        "cup":      a.get("cup"),  "height": a.get("height"),
+        "bust":     spec["bust"], "waist": spec["waist"], "hip": spec["hip"],
+        "cup":      spec["cup"],  "height": spec["height"],
     }
 
 # ────────────────────────────── 테마 색 추출 ──────────────────────────────

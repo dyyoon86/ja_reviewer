@@ -809,6 +809,11 @@ def stage_banner(c, code, em, hold=2.0, preview=True):
     try:
         r = GIC.generate(code, outdir=str(icdir), hold=hold, assets_only=True,
                          preview_anim=preview, log=em.log)
+    except GIC.SpecMissing as e:
+        # ★3사이즈 없는 배너는 만들지 않는다(2026-08-28 규칙). MetaNotFound 처럼 조용히
+        #   건너뛰면 스펙 빠진 카드가 그대로 납품된다 — 이 편만 실패로 남기고 멈춘다.
+        em.log(f"✗ 배너 중단 — {e}")
+        raise
     except GIC.MetaNotFound as e:
         # ★ 신작은 로컬 DB에도, 아직 크롤링 전이면 우분투 meta_api에도 없을 수 있다.
         #   그렇다고 배너 하나 때문에 파이프라인 전체를 죽이면 안 된다 — 배너만 건너뛰고

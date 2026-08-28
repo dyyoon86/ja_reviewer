@@ -1,0 +1,11 @@
+{
+  "_읽어보세요": "배우명(한국어 또는 변형 한자) → actresses.name_ja 매핑. gen_infocard 가 works.actress_ja → 병기표기 정규화 → actress_photo 역추적 순으로 다 실패했을 때 마지막으로 본다. '_' 로 시작하는 키는 무시된다.",
+  "_언제쓰나": "배너 생성이 SpecMissing 으로 멈추고 원인이 '배우 연결 안 됨'일 때. 오른쪽 값은 actresses 테이블에 실제로 있는 name_ja 여야 한다(없으면 경고만 뜨고 그냥 지나간다).",
+  "_확인법": ".venv/Scripts/python.exe -c \"import gen_infocard as G; print(G.fetch_meta('품번'))\"",
+
+  "미야지마 메이": "宮島めい",
+  "타다이 마히로": "唯井まひろ",
+  "아카리 츠무기": "明里つむぎ",
+  "카와키타 사이카": "河北彩花（河北彩伽）",
+  "호시조라 네루": "星空ねる"
+}
