@@ -31,6 +31,24 @@ NSFW_CLASSES = {
 #    쓸 수 있는 신호는 **살 노출의 지속 비율**이다 — 옷을 벗었다는 뜻이라, 실측에서
 #    정사 구간만 45~100%로 치솟고 대화 구간은 0%였다. 이걸 구간(윈도우) 단위로 판정한다.
 SKIN_CLASSES = {"ARMPITS_EXPOSED", "BELLY_EXPOSED"}
+
+# 3) ★ 엄격 모드 — "속옷 노출·노출 의상까지 배제" (2026-08-28 사용자 기준).
+#    ja20 01회에서 EXPOSED 5종도 살노출 비율도 0 인데 눈으로는 명백히 걸리는 구간이
+#    두 종류 있었다. 납품본 프레임에 NudeNet 전 클래스를 찍어 실측한 결과:
+#      · 속옷(팬티) 노출  → FEMALE_GENITALIA_COVERED 0.36 / BUTTOCKS_COVERED
+#        착의 대화 장면에서는 아예 안 뜨는 클래스라 그대로 신호로 쓸 수 있다.
+#      · 크롭탑·노출 상의 → FEMALE_BREAST_COVERED 로 잡아보려 했으나 **실패했다**.
+#        점수(단독 0.35~0.52)로도, 개수(동시 2~3개)로도 안 갈린다. 눈검사로 합격시킨
+#        납품본 11편에 그대로 돌려보니 '2개 이상' 규칙이 **143프레임 / 7편**을 잡았다
+#        (검은 니트 인터뷰 38, 얼굴 클로즈업 57 — 전부 오탐). 이 파일 위쪽 주석이
+#        원래부터 옳았다: BREAST_COVERED 는 착의 대화에서도 뜨므로 신호로 쓸 수 없다.
+#        → 노출 의상은 자동 판정을 포기하고 몽타주 눈검사에 맡긴다.
+#    ★BUTTOCKS_COVERED 는 **쓰면 안 된다**(2026-08-28 실측으로 제외). 바지·치마를 입은
+#      엉덩이가 프레임에 들어오기만 해도 뜬다 — 멀쩡한 정장 차림 현관 대화 장면에서
+#      0.61 까지 나와 66프레임이 걸렸다(FNS-248 36~70초, 눈검사로는 완전히 깨끗한 구간).
+#      FEMALE_GENITALIA_COVERED 만 남긴다 — 이건 속옷이 실제로 화면에 나와야 뜬다.
+UNDERWEAR_CLASSES = {"FEMALE_GENITALIA_COVERED"}
+UNDERWEAR_THRESHOLD = 0.30
 SKIN_WINDOW = 20.0    # 판정 윈도우(초)
 SKIN_RATIO = 0.30     # 윈도우 안 살노출 프레임 비율이 이 이상이면 정사 구간으로 본다
 
@@ -38,6 +56,19 @@ DEFAULT_THRESHOLD = 0.35   # 실측: 본편 노출 0.42~0.48 / 인터뷰 구간 
 DEFAULT_STEP = 2.0         # 프레임 샘플 간격(초)
 
 _DETECTOR = None
+
+
+def strict_hits(res, threshold=UNDERWEAR_THRESHOLD):
+    """한 프레임의 검출 결과에서 **엄격 모드** 위반을 돌려준다 — [(class, score)].
+
+    EXPOSED 5종은 호출측이 이미 보고 있으므로 여기서는 그 밖의 두 규칙만 본다.
+    """
+    out = []
+    for x in (res or []):
+        cls, sc = x.get("class"), float(x.get("score", 0))
+        if cls in UNDERWEAR_CLASSES and sc >= threshold:
+            out.append((cls, round(sc, 2)))
+    return out
 
 
 def _detector():
@@ -49,7 +80,7 @@ def _detector():
 
 
 def scan_video(video, step=0.25, threshold=DEFAULT_THRESHOLD, log=print, progress=None,
-               duration=None, want_skin=False):
+               duration=None, want_skin=False, strict=False):
     """영상 **전 구간**을 step 간격으로 전수 검사. 반환: [(t, class, score), ...].
     want_skin=True면 (노출프레임, 살노출시각들, 총프레임수) — 정사신 윈도우 판정용.
     ffmpeg 1회 호출(fps 필터, 순차 디코딩) + detect_batch — 71초 완성본 0.25s 간격이 5초.
@@ -102,6 +133,10 @@ def scan_video(video, step=0.25, threshold=DEFAULT_THRESHOLD, log=print, progres
                         found.append((round(t, 2), cls, round(sc, 2)))
                     elif cls in SKIN_CLASSES and sc >= 0.30:
                         skin = True
+                if strict:
+                    # 속옷·노출 의상 — EXPOSED 로는 안 잡히는 것들(strict_hits 주석 참조)
+                    for cls, sc in strict_hits(res):
+                        found.append((round(t, 2), cls, sc))
                 if skin:
                     skins.append(round(t, 2))
             if progress:
@@ -112,13 +147,14 @@ def scan_video(video, step=0.25, threshold=DEFAULT_THRESHOLD, log=print, progres
     return (found, skins, n_frames) if want_skin else found
 
 
-def check_final(video, step=0.25, threshold=DEFAULT_THRESHOLD, log=print):
+def check_final(video, step=0.25, threshold=DEFAULT_THRESHOLD, log=print, strict=False):
     """최후 방어선 — 실제로 나가는 완성본을 전수 검사한다.
     keep 단위 가드는 2초 간격 샘플이라 컷 경계에 스치는 노출을 놓칠 수 있다.
     여기서는 최종 산출물 자체를 촘촘히 훑어 '나가는 물건에 노출 없음'을 보증한다.
     반환: [(t, class, score)] — 비어 있으면 통과."""
-    log(f"완성본 전수 노출 검사(NudeNet, {step}s 간격)...")
-    hits = scan_video(video, step, threshold, log)
+    log(f"완성본 전수 노출 검사(NudeNet, {step}s 간격"
+        + (", 엄격=속옷·노출의상 포함)..." if strict else ")..."))
+    hits = scan_video(video, step, threshold, log, strict=strict)
     if not hits:
         log("✔ 완성본 전수 검사 통과 — 노출 검출 0")
         return hits

@@ -63,10 +63,15 @@ def crop_filter(cfg, video):
     return crop
 
 
-def scan(video, ranges, crop, step, threshold, log=print):
-    """구간별 판정. 반환: {구간index: {'hits': [...], 'skin': 비율, 'n': 프레임수}}"""
+def scan(video, ranges, crop, step, threshold, log=print, strict=False, width=640):
+    """구간별 판정. 반환: {구간index: {'hits': [...], 'skin': 비율, 'n': 프레임수}}
+
+    strict=True 면 `nsfw.strict_hits` 규칙(속옷 COVERED, 노출 상의 = BREAST_COVERED
+    다중 검출)을 함께 본다 — "속옷 노출까지 배제" 기준용.
+    ★width 를 640 으로 줄이면 작은 COVERED 영역을 놓친다. 엄격 모드는 기본 1280 을 쓴다.
+    """
     det = nsfw._detector()
-    vf = (crop + ",scale=640:-1") if crop else "scale=640:-1"
+    vf = (crop + f",scale={width}:-1") if crop else f"scale={width}:-1"
     out = {}
     with tempfile.TemporaryDirectory() as td:
         for i, (a, b) in enumerate(ranges):
@@ -97,6 +102,9 @@ def scan(video, ranges, crop, step, threshold, log=print):
                         hits.append((round(t, 2), cls, round(sc, 2)))
                     elif cls in nsfw.SKIN_CLASSES and sc >= threshold:
                         got_skin = True
+                if strict:
+                    for cls, sc in nsfw.strict_hits(dets):
+                        hits.append((round(t, 2), cls, sc))
                 if got_skin:
                     skin += 1
                 os.remove(f)
@@ -200,8 +208,15 @@ def main():
     ap.add_argument("--duck", type=float, default=0.3, help="해설 중 원음 볼륨")
     ap.add_argument("--regen-nar", action="store_true",
                     help="내레이션을 새로 쓴다(TTS 전량 재생성). 기본은 기존 문장·음성 재사용")
+    ap.add_argument("--carve-first", action="store_true",
+                    help="세그먼트 통째 삭제 대신 처음부터 걸린 지점만 도려낸다")
+    ap.add_argument("--strict", action="store_true",
+                    help="속옷 노출·노출 의상까지 배제(nsfw.strict_hits 규칙 추가)")
+    ap.add_argument("--width", type=int, default=0,
+                    help="판정 프레임 폭(0=자동: 기본 640, --strict 면 1280)")
     ap.add_argument("--dry", action="store_true", help="판정만 하고 재컷하지 않음")
     args = ap.parse_args()
+    W = args.width or (1280 if args.strict else 640)
 
     cfg = _common.load_cfg()
     if args.out:
@@ -236,16 +251,22 @@ def main():
 
             crop = crop_filter(cfg, clean)
             em.log(f"납품 화면 기준 스캔 — crop={crop or '없음(리프레임 OFF)'}")
-            rep = scan(clean, keep, crop, args.step, args.threshold, em.log)
+            rep = scan(clean, keep, crop, args.step, args.threshold, em.log,
+                       strict=args.strict, width=W)
             bad = pick(keep, rep, args.skin_ratio)
 
             total_old = sum(b - a for a, b in keep)
             new_keep = [seg for j, seg in enumerate(keep) if j not in bad]
             mode = "세그먼트 삭제"
             total_new = sum(b - a for a, b in new_keep)
-            if bad and total_new < args.min_total:
-                # 폴백 — 통째로 버리면 남는 게 없다. 걸린 지점만 도려낸다.
-                mode = "부분 도려내기(폴백)"
+            if bad and (args.carve_first or total_new < args.min_total):
+                # 걸린 지점만 도려낸다.
+                # ★기본은 '세그먼트 통째 삭제'인데, 노출이 한두 프레임만 스치는 컷까지
+                #   통째로 버려 멀쩡한 대화 수십 초가 같이 날아간다(ja20 03회: 6구간 중
+                #   바니수트가 보이는 건 일부인데 얼굴 클로즈업 컷까지 함께 삭제됐다).
+                #   --carve-first 면 처음부터 도려내기로 간다 — 판정 오탐이 나도 ±pad 만
+                #   잘려 피해가 작다. 도려낸 조각은 어차피 아래에서 재검사한다.
+                mode = ("부분 도려내기" if args.carve_first else "부분 도려내기(폴백)")
                 new_keep = []
                 for j, seg in enumerate(keep):
                     if j not in bad:
@@ -254,7 +275,8 @@ def main():
                     if not pieces:
                         continue
                     # 살아남은 조각 재검사 — 여전히 걸리면 버린다
-                    rep2 = scan(clean, pieces, crop, args.step, args.threshold, em.log)
+                    rep2 = scan(clean, pieces, crop, args.step, args.threshold, em.log,
+                                strict=args.strict, width=W)
                     bad2 = pick(pieces, rep2, args.skin_ratio)
                     new_keep += [p for k, p in enumerate(pieces) if k not in bad2]
                 new_keep.sort()

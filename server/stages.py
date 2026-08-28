@@ -952,9 +952,13 @@ def stage_burn(c, code, styles, em, source=None, banner=True, parts=None, cutins
     if c.get("nsfw_final_check", True):
         try:
             from server.core import nsfw
+            # ★엄격 모드 기본 ON(2026-08-28) — EXPOSED 5종만 보면 속옷·노출 의상이
+            #   그대로 통과한다(ja20 실측: "노출 0 통과"인데 눈으로는 명백히 걸림).
+            #   모자이크는 여기서도 못 잡는다 — 그건 몽타주 눈검사 몫이다.
             hits = nsfw.check_final(out, step=float(c.get("nsfw_final_step", 0.25)),
                                     threshold=float(c.get("nsfw_threshold", nsfw.DEFAULT_THRESHOLD)),
-                                    log=em.log)
+                                    log=em.log,
+                                    strict=bool(c.get("nsfw_final_strict", True)))
             flagged = bool(hits)
         except ImportError:
             em.log("※ NudeNet 미설치 — 완성본 전수 검사 생략")
