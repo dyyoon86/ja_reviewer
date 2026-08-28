@@ -26,7 +26,7 @@ from server.core.regen import regen_narration
 from batch_clean import CliEmitter
 from batch_produce import ensure_voicebox, hide_narration
 
-OUT_DIR = r"C:\Users\yoon\ja_reviewer_out\ja15"
+OUT_DIR = r"F:\ja_reviewer_out\ja15"
 ORDER = ["SNOS-293", "SNOS-301", "SNOS-318", "SNOS-326", "SNOS-327"]
 
 

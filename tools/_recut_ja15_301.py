@@ -30,7 +30,7 @@ from batch_clean import CliEmitter
 from batch_produce import ensure_voicebox, hide_narration
 
 CODE = "SNOS-301"
-OUT_DIR = r"C:\Users\yoon\ja_reviewer_out\ja15"
+OUT_DIR = r"F:\ja_reviewer_out\ja15"
 SEQ = (2, 5)          # 모음집 5편 중 2번째 — "두 번째 작품"
 
 NEW_KEEP = [

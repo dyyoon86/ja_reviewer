@@ -28,7 +28,7 @@ sys.stderr.reconfigure(encoding="utf-8")
 
 import _common  # noqa
 
-OUT = Path(r"C:\Users\yoon\ja_reviewer_out\ja13")
+OUT = Path(r"F:\ja_reviewer_out\ja13")
 DEST = OUT / "_배너시안"
 JAVDB = Path(r"E:\vscode\workspace\jav_scrap\jav_2026.db")
 

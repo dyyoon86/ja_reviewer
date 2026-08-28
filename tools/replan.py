@@ -6,8 +6,8 @@ plan.json의 keep을 LLM으로 다시 고르고 final.mp4를 재컷한다.
 (SRT 재타이밍은 GUI ③ 자막 단계 또는 /step/subs 로 다시 실행)
 
 사용:
-    python tools/replan.py C:/Users/yoon/ja_reviewer_out/JUR-088
-    python tools/replan.py C:/Users/yoon/ja_reviewer_out/JUR-088 --llm claude --target 60
+    python tools/replan.py F:/ja_reviewer_out/JUR-088
+    python tools/replan.py F:/ja_reviewer_out/JUR-088 --llm claude --target 60
 """
 import sys
 from pathlib import Path

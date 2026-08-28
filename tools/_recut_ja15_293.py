@@ -33,7 +33,7 @@ from batch_clean import CliEmitter
 from batch_produce import ensure_voicebox, hide_narration
 
 CODE = "SNOS-293"
-OUT_DIR = r"C:\Users\yoon\ja_reviewer_out\ja15"
+OUT_DIR = r"F:\ja_reviewer_out\ja15"
 SEQ = (1, 5)          # 모음집 5편 중 1번째 — "첫 번째 작품" 서수 인트로 유지
 
 NEW_KEEP = [

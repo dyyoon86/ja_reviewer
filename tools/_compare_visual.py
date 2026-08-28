@@ -12,7 +12,7 @@ sys.path.insert(0, "tools")
 import _common  # noqa
 from server import stages
 
-BASE = Path(r"C:\Users\yoon\ja_reviewer_out\ja13")
+BASE = Path(r"F:\ja_reviewer_out\ja13")
 CODES = "MIZD-531 EBWH-342 DANDYA-043 HMN-880 START-614 MFYD-165 PRED-886 PRWF-014 EBWH-348 START-600 PRED-879".split()
 
 

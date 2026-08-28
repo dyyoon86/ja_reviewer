@@ -33,7 +33,7 @@ from batch_clean import CliEmitter
 from batch_produce import ensure_voicebox, hide_narration
 
 CODE = "SNOS-327"
-OUT_DIR = r"C:\Users\yoon\ja_reviewer_out\ja15"
+OUT_DIR = r"F:\ja_reviewer_out\ja15"
 SEQ = (5, 5)          # 모음집 5편 중 5번째 — batch_produce와 동일한 서수 인트로 유지
 
 NEW_KEEP = [

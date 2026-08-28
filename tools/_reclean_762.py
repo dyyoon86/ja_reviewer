@@ -24,7 +24,7 @@ from server.core import moan, nsfw, intimacy
 
 CODE = "MIDA-762"
 SRC = Path(r"C:\Users\yoon\Desktop\2026-04-23_JA_Review\ja16\MIDA-762-이시카와 미오.mp4")
-OUT = Path(r"C:\Users\yoon\ja_reviewer_out\ja16") / CODE
+OUT = Path(r"F:\ja_reviewer_out\ja16") / CODE
 
 # 완화 설정 — 살노출 윈도우 판정을 얼마나 느슨하게 볼지
 RELAXED_SKIN_RATIO = 0.60   # 기본 0.30 → 윈도우의 60% 이상이 살노출일 때만 정사로 본다

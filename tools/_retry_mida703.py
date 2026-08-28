@@ -24,7 +24,7 @@ from server import pipeline as P
 from server.stages import NullLock
 
 CODE = "MIDA-703"
-OUT = r"C:\Users\yoon\ja_reviewer_out\ja19"
+OUT = r"F:\ja_reviewer_out\ja19"
 META = "http://127.0.0.1:8770"
 
 

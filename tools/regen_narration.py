@@ -3,7 +3,7 @@
 """내레이션 재생성 CLI — 로직은 server/core/regen.py (GUI ③ 버튼과 공유).
 
 사용:
-    python tools/regen_narration.py C:/Users/yoon/ja_reviewer_out/SNOS-285
+    python tools/regen_narration.py F:/ja_reviewer_out/SNOS-285
 """
 import sys
 from pathlib import Path

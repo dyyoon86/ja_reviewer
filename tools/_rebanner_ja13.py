@@ -21,7 +21,7 @@ import _common  # noqa
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import gen_infocard as GIC  # noqa: E402
 
-OUT = Path(r"C:\Users\yoon\ja_reviewer_out\ja13")
+OUT = Path(r"F:\ja_reviewer_out\ja13")
 JAVDB = Path(r"E:\vscode\workspace\jav_scrap\jav_2026.db")
 
 CODES = ["MIZD-531", "EBWH-342", "DANDYA-043", "HMN-880", "START-614", "MFYD-165",
