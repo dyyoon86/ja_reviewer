@@ -599,6 +599,38 @@ def _cutin_filter(cutins, w, h, start_idx, pos="tr", scale=0.26, fade=0.2):
     return inputs, parts, idx
 
 
+def _fix_nar_coords(nar, nar_srt, video, log=print):
+    """내레이션 JSON이 **클린본(소스) 좌표**로 남은 경우 최종컷 SRT 좌표로 교정한다.
+
+    ★ja19 사고(2026-08-21 발견): burn_subs 는 유형(style)이 필요해 SRT 보다
+      `{code}_내레이션.json` 을 우선한다. 그런데 그 JSON 이 재컷 **전** 좌표로 남은 편이
+      있었다(ABF-376·FNS-244·SOAV-139). 시각이 영상 길이 밖이라 내레이션 자막이
+      화면에 **아예 안 떴다** — 음성만 나오니 "싱크가 안 맞는다"로 보인다.
+      SRT 끝시각만 보던 `tools/_sec2_check.py` ③ 은 SRT 가 멀쩡해서 못 걸렀다.
+    → JSON 이 영상 밖이면 SRT(최종컷 좌표) 시각을 쓰고 유형만 문장으로 되찾는다.
+      '드립'은 SRT 에 없으므로(TTS 가 읽지 않게 뺀다) 이 경로에서는 함께 빠진다.
+    """
+    if not nar:
+        return nar
+    try:
+        dur = float(video_duration(str(video)))
+    except Exception:
+        return nar
+    nar_end = max(e for _, e, *_ in nar)
+    if not dur or nar_end <= dur + 1.0:
+        return nar                                   # 정상 — 그대로 쓴다
+    if not nar_srt or max(e for _, e, *_ in nar_srt) > dur + 1.0:
+        log(f"※ 내레이션 JSON 시각이 영상({dur:.0f}s) 밖인데 SRT 도 마찬가지 — 그대로 굽습니다")
+        return nar
+    style = {" ".join(str(t).split()): s for _, _, t, s in nar}     # 문장 → 유형
+    fixed = [(s, e, t, style.get(" ".join(str(t).split()), "기본")) for s, e, t in nar_srt]
+    log(f"※ 내레이션 JSON 이 클린본 좌표입니다(끝 {nar_end:.0f}s > 영상 {dur:.0f}s) "
+        f"— 최종컷 SRT 시각으로 교정해 굽습니다({len(fixed)}문장)")
+    if len(fixed) != len(nar):
+        log(f"   ※ 문장 {len(nar)}→{len(fixed)} — SRT 에 없는 유형(드립 등)은 이번 굽기에서 빠집니다")
+    return fixed
+
+
 def burn_subs(video, dialogue_srt, narration_srt, out_video, styles=None,
               narration_json=None, dialogue_json=None, log=print,
               banner=None, banner_anim=None, subs=True, screen_flash=True,
@@ -614,11 +646,13 @@ def burn_subs(video, dialogue_srt, narration_srt, out_video, styles=None,
         dlg = [(float(d["start"]), float(d["end"]), d["text"], d.get("speaker", "여")) for d in dd]
     else:
         dlg = srt_parse(dialogue_srt) if dialogue_srt and Path(dialogue_srt).is_file() else []
+    nar_srt = srt_parse(narration_srt) if narration_srt and Path(narration_srt).is_file() else []
     if narration_json and Path(narration_json).is_file():     # 유형(style) 포함 내레이션
         data = json.loads(Path(narration_json).read_text(encoding="utf-8"))
         nar = [(float(d["start"]), float(d["end"]), d["text"], d.get("style", "기본")) for d in data]
+        nar = _fix_nar_coords(nar, nar_srt, video, log)       # 클린본 좌표 방어(아래 주석)
     else:
-        nar = srt_parse(narration_srt) if narration_srt and Path(narration_srt).is_file() else []
+        nar = nar_srt
     if subs and not dlg and not nar:
         raise RuntimeError("입힐 자막(SRT)이 없습니다.")
     if not subs and not banner:

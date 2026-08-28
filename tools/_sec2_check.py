@@ -7,6 +7,10 @@
   ② keep 재료 부족 — keep 합계가 target×min_keep_ratio 근처면 본편형 의심.
   ③ 내레이션 srt 끝시각 > 영상 길이 — `_내레이션.json`(클린본 좌표)으로 srt를 쓰면
     최종컷 좌표가 통째로 밀려 내레이션이 화면에 하나도 안 나온 채 납품된다.
+  ④ 내레이션 **json** 끝시각 > 영상 길이 — ③의 거울상(ja19 사고 2026-08-21).
+    srt 는 최종컷 좌표로 멀쩡한데 json 만 클린본 좌표로 남은 경우다. 굽기(burn_subs)는
+    유형(style) 때문에 srt 보다 json 을 우선하므로, ③만 보면 통과시켜 놓고
+    자막이 영상 밖에 박힌 납품본이 나간다(ja19 3편이 이렇게 나갔다).
 
 사용: .venv\\Scripts\\python.exe tools\\_sec2_check.py "C:\\Users\\yoon\\ja_reviewer_out\\ja19"
 """
@@ -39,6 +43,17 @@ def srt_end(p: Path):
         return 0.0
     h, m, s, ms = times[-1]
     return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
+
+
+def json_end(p: Path):
+    """내레이션 json 마지막 항목의 끝 시각(초). 없으면 0. (④ 검사용)"""
+    if not p.is_file():
+        return 0.0
+    try:
+        data = json.loads(p.read_text(encoding="utf-8-sig"))
+        return max(float(d["end"]) for d in data) if data else 0.0
+    except Exception:
+        return 0.0
 
 
 def srt_count(p: Path):
@@ -104,6 +119,7 @@ def main():
         vid = d / f"{code}_final.mp4"
         vdur = dur(vid) if vid.is_file() else 0.0
         nend = srt_end(d / f"{code}_내레이션.srt")
+        njend = json_end(d / f"{code}_내레이션.json")   # ④ 굽기가 실제로 읽는 쪽
 
         flags = []
         if not dlg_in:
@@ -130,6 +146,12 @@ def main():
             flags.append(f"★내레이션밖({nend:.0f}s>{vdur:.0f}s)")
             problems.append(f"{code}: 내레이션 srt 끝 {nend:.1f}s > 영상 {vdur:.1f}s "
                             f"— 클린본 좌표로 srt를 쓴 사고. stage_subs 재실행")
+        # ④ 굽기는 json 을 우선한다 — srt 가 멀쩡해도 json 이 밖이면 자막이 안 뜬다.
+        if vdur and njend > vdur + 0.5:
+            flags.append(f"★내레이션json밖({njend:.0f}s>{vdur:.0f}s)")
+            problems.append(f"{code}: 내레이션 json 끝 {njend:.1f}s > 영상 {vdur:.1f}s "
+                            f"— 굽기가 읽는 쪽이 클린본 좌표다(srt 는 {nend:.1f}s 로 정상). "
+                            f"json 시각을 srt 로 맞춘 뒤 재굽기")
         rows.append((code, f"{nseg}구간 {ksum:.0f}s",
                      f"대사 {len(dlg_in)}/{dsrt}" + (f"(+{dlg_out}밖)" if dlg_out else ""),
                      f"내레이션 {len(nar)}/{nsrt}", f"{vdur:.0f}s", " ".join(flags) or "OK"))
