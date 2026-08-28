@@ -974,6 +974,54 @@ $("#btnBurn").onclick=()=>{
   }));
 };
 
+// 🚦 납품 전 최종검사 — 완성본 파일 자체를 엄격 기준으로 전수 검사.
+// ①②③ 스캔은 '원본에서 자를 곳'을 찾지만, 이건 '이미 만든 물건을 올려도 되는가'를 본다.
+// ★기본 검사는 EXPOSED 5종만 봐서 속옷·크롭탑 차림이 그대로 통과한다 → 엄격 기본 ON.
+// ★모자이크 행위 장면은 NudeNet이 원리적으로 못 잡는다 — 안내를 항상 같이 띄운다.
+$("#btnFinalCheck").onclick = () => {
+  const code = curCode();
+  const out = $("#finalCheckOut");
+  const btn = $("#btnFinalCheck"); const old = btn.textContent;
+  const strict = $("#finalStrict") ? $("#finalStrict").checked : true;
+
+  const run = (path) => {
+    if(!path){ log("검사할 완성본이 없습니다 — 먼저 ④ 굽기를 하세요","warn");
+               btn.disabled=false; btn.textContent=old; return; }
+    log("── 🚦 납품 전 최종검사 시작 ── "+path);
+    fetch("/final/check",{method:"POST",headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({path, strict})})
+      .then(r=>r.json()).then(j=>{
+        if(!j.job){ log("검사 시작 실패","warn"); btn.disabled=false; btn.textContent=old; return; }
+        runJob(j.job,(res)=>{
+          btn.disabled=false; btn.textContent=old;
+          const rs=(res && res.ranges)||[];
+          out.style.display="block";
+          if(!rs.length){
+            btn.textContent="🚦 최종검사 ✓";
+            out.innerHTML='<b class="ok">✔ 자동 검사 통과</b> — 노출·속옷·노출의상 검출 0<br>'
+              +'※ <b>모자이크(행위) 장면은 자동으로 안 잡힙니다.</b> 몽타주 눈검사를 함께 하세요.';
+            log("✔ 최종검사 통과","ok");
+          }else{
+            btn.textContent="🚦 최종검사 ★"+rs.length;
+            out.innerHTML='<b class="warn">🚨 '+res.n_hits+'프레임 / '+rs.length+'구간 검출</b> — 이대로 납품하면 안 됩니다.<br>'
+              +rs.map(([a,b])=>hhmmss(a)+" ~ "+hhmmss(b)).join(" · ")
+              +'<br>※ 완성본 좌표입니다. 해당 장면을 원본에서 찾아 잘라내고 다시 구우세요.'
+              +'<br>※ <b>모자이크 장면은 여기 안 잡힙니다</b> — 몽타주 눈검사를 함께 하세요.';
+            log("🚨 최종검사 "+rs.length+"구간 검출 — 재작업 필요","warn");
+          }
+        },()=>{ btn.disabled=false; btn.textContent=old; });
+      })
+      .catch(e=>{ log("요청 실패: "+e,"warn"); btn.disabled=false; btn.textContent=old; });
+  };
+
+  btn.disabled=true; btn.textContent="🚦 검사 중…";
+  if(code){
+    fetch("/state/"+encodeURIComponent(code)).then(r=>r.json())
+      .then(st=>run((st && st.subbed) || videoPath))
+      .catch(()=>run(videoPath));
+  } else { run(videoPath); }
+};
+
 // 인코딩 체크 시에만 대상영상 입력줄 표시
 if($("#icEncode")) $("#icEncode").onchange=()=>{
   $("#icSrcRow").style.display=$("#icEncode").checked?"":"none";

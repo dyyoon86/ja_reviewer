@@ -630,6 +630,64 @@ async def nsfw_scan(req: Request):
     return {"job": jid}
 
 
+@app.post("/final/check")
+async def final_check(req: Request):
+    """④' 납품 전 최종검사 — **나가는 파일 자체**를 엄격 기준으로 전수 검사한다.
+
+    ★기존 /nsfw/scan 은 원본에서 자를 곳을 찾는 용도이고 EXPOSED 5종만 본다.
+      이 엔드포인트는 '이미 만들어진 완성본을 그대로 올려도 되는가'를 판정하며
+      속옷(GENITALIA/BUTTOCKS_COVERED)·노출 의상(BREAST_COVERED 다중검출)까지 본다.
+    ★모자이크 행위 장면은 NudeNet 이 원리적으로 못 잡는다(부위가 가려져 EXPOSED 가
+      안 뜬다). 그래서 결과에 항상 '몽타주 눈검사도 하라'는 안내를 남긴다.
+    {path, step?, threshold?, strict?, pad?} → {ranges:[[a,b],...], hits:[...]}"""
+    body = await req.json(); c = load_cfg()
+    path = body["path"]
+    if not Path(path).is_file():
+        raise HTTPException(400, f"영상을 찾을 수 없습니다: {path}")
+    jid = new_job()
+
+    def work():
+        try:
+            from server.core import nsfw
+            total = P.video_duration(path)
+            strict = bool(body.get("strict", c.get("nsfw_final_strict", True)))
+            step = float(body.get("step", c.get("nsfw_final_step", 0.25)))
+            pad = float(body.get("pad", 1.5))
+            jstep(jid, 1, 1, f"납품 전 최종검사 ({total:.0f}초 · {step}s 간격"
+                             + (" · 엄격)" if strict else ")"))
+            hits = nsfw.check_final(
+                path, step=step,
+                threshold=float(body.get("threshold", c.get("nsfw_threshold",
+                                                            nsfw.DEFAULT_THRESHOLD))),
+                log=lambda m: jlog(jid, m), strict=strict)
+            # 검출 시각을 ±pad 로 부풀려 병합 → GUI 가 '삭제 구간'으로 바로 쓸 수 있게
+            spans = []
+            for t, _cls, _sc in sorted(hits):
+                a, b = max(0.0, t - pad), min(total, t + pad)
+                if spans and a <= spans[-1][1]:
+                    spans[-1][1] = max(spans[-1][1], b)
+                else:
+                    spans.append([a, b])
+            if hits:
+                jlog(jid, f"🚨 {len(hits)}프레임 / {len(spans)}구간 검출 — 목록을 확인하고 "
+                          f"'① 선택 구간 잘라내기'로 잘라내세요.")
+            else:
+                jlog(jid, "✔ 자동 검사 통과 — 노출·속옷·노출의상 검출 0")
+            jlog(jid, "※ 모자이크(행위) 장면은 NudeNet이 원리적으로 못 잡습니다. "
+                      "납품 전 몽타주 눈검사를 반드시 함께 하세요.")
+            jdone(jid, {"mode": "final_check", "strict": strict,
+                        "ranges": [[round(a, 2), round(b, 2)] for a, b in spans],
+                        "hits": [{"t": t, "class": cls, "score": sc} for t, cls, sc in hits[:200]],
+                        "total": total, "n_hits": len(hits)})
+        except ImportError:
+            jerr(jid, RuntimeError("NudeNet이 설치되지 않았습니다 (pip install nudenet)"))
+        except Exception as e:
+            jerr(jid, e)
+
+    run_bg(work)
+    return {"job": jid}
+
+
 @app.get("/assets")
 def assets_status():
     """에셋 현황 — 태그별 짤 개수 + 폴더 경로(GUI가 '어디에 넣는지' 보여준다)."""
