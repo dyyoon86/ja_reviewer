@@ -173,12 +173,30 @@ def evaluate(video, keep=None, srt_files=(), log=print, cfg=None):
     log(f"  정지 화면 {len(fz)}건 · 무음 {len(si)}건")
 
     cov = subtitle_coverage(srt_files, dur)
-    min_cov = float(cfg.get("eval_min_sub_coverage", 0.30))
+    # ★기준 0.30은 너무 헐거웠다 — ja20에서 커버리지 51%짜리가 '통과'로 납품까지 갔다.
+    #   번역 누락은 이제 stages._translate_all이 원천에서 막지만, 재컷으로 대사가 깎이는
+    #   경로가 남아 있으므로 마지막 그물은 조인다(경고일 뿐 굽기를 막지는 않는다).
+    min_cov = float(cfg.get("eval_min_sub_coverage", 0.50))
     if cov < min_cov:
         issues.append({"kind": "subs", "t": 0,
                        "detail": f"자막이 영상의 {cov * 100:.0f}%만 덮음(기준 {min_cov * 100:.0f}%) "
-                                 f"— 자막 누락/타이밍 붕괴 의심"})
+                                 f"— 대사 번역 누락/타이밍 붕괴 의심. "
+                                 f"_정밀전사.json 과 _대사.srt 의 줄 수를 비교하세요"})
     log(f"  자막 커버리지 {cov * 100:.0f}%")
+
+    # ★내레이션 밀도 — '내레이션이 통째로 날아간' 사고(ja20 START-627: 98초에 2줄)를
+    #   납품 전에 잡는다. 기준은 프롬프트·재생성과 같은 단일 밀도 규칙을 쓴다.
+    nsrt = [f for f in srt_files if f and "내레이션" in str(f)]
+    if nsrt:
+        from .prompts import narration_lines
+        n_have = sum(len(srt_parse(f)) for f in nsrt if Path(f).is_file())
+        n_want = narration_lines(dur)
+        if n_have < max(3, round(n_want * 0.7)):
+            issues.append({"kind": "narration", "t": 0,
+                           "detail": f"내레이션이 {n_have}줄뿐 (영상 {dur:.0f}초 기준 {n_want}줄) "
+                                     f"— 재컷으로 잘려나간 것으로 의심. ③ 자막을 다시 실행하면 "
+                                     f"컷 확정본 기준으로 다시 짭니다"})
+        log(f"  내레이션 {n_have}줄 (목표 {n_want}줄)")
 
     if issues:
         log(f"⚠ 자체 검사: 결함 {len(issues)}건 — 결과를 확인하세요")

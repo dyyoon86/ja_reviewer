@@ -15,7 +15,8 @@ from pathlib import Path
 
 from .common import s2srt, retime, parse_keep, video_duration, invalidate_derived
 from .llm import fetch_meta, _cli_path, call_llm
-from .prompts import prompt_manual
+from .prompts import (prompt_manual, narration_lines,
+                      NAR_SEC_PER_LINE, NAR_LINES_MIN, NAR_LINES_MAX)
 from .cutter import cut_video
 
 # 내레이션 슬롯 배분 기준 (2026-07-30, "초반 내레이션이 숨도 안 쉰다" 대응)
@@ -105,17 +106,32 @@ def _dialogue_before(slot_start, dialogue, window=15.0):
     return lines
 
 
-def narration_slots(video_sec, lo=5, hi=10, per=15.0):
+def _final_to_trim(off, keep_segs):
+    """최종 영상 기준 초 → 클린본(trim) 기준 초. retime의 역함수.
+
+    ★경계는 **다음 구간의 머리**로 보낸다. `off <= acc + d`로 잡으면 이음매에 정확히
+    걸린 값이 앞 구간의 끝으로 떨어져, 그 뒤 keep 경계 클램프와 만나면 길이 0짜리
+    창이 되어 슬롯이 통째로 사라진다(START-627 7번째 슬롯 = 영상 마지막 20초 공백).
+    """
+    if not keep_segs:
+        return 0.0
+    acc = 0.0
+    last = len(keep_segs) - 1
+    for i, (a, b) in enumerate(keep_segs):
+        d = b - a
+        if off < acc + d or i == last:
+            return a + max(0.0, min(off - acc, d))
+        acc += d
+    return keep_segs[last][1]
+
+
+def narration_slots(video_sec, lo=NAR_LINES_MIN, hi=NAR_LINES_MAX, per=NAR_SEC_PER_LINE):
     """영상 길이 → 내레이션 슬롯 수.
 
-    2026-08-03 사용자 지시("내레이션 짧아도 된다")로 10초당 1줄(6~14) → 15초당 1줄(5~10)로
-    낮췄다. 촘촘하게 채우면 쓸 말이 떨어져 같은 소재를 반복한다(ADN-795: 14줄 중 4줄이
-    '웃음기/표정/얼굴/미소'). 벤치마킹 휴지도둑(120만 조회)도 '전환점만' 짚는 저밀도다."""
-    try:
-        v = float(video_sec)
-    except (TypeError, ValueError):
-        return lo
-    return max(lo, min(hi, round(v / per)))
+    ★밀도 규칙은 prompts.narration_lines 한 곳에만 있다 — 예전엔 여기(15초당 1줄)와
+    프롬프트 예산(narration_budget, 5.4초당 1문장)이 3배 어긋나 있었다. 이 함수는
+    기존 호출부(GUI·tools) 호환을 위한 얇은 위임이다."""
+    return narration_lines(video_sec, lo, hi, per)
 
 
 def regen_narration(folder: Path, meta_api: str, log=print, seq=None, slots=None,
@@ -394,6 +410,61 @@ def regen_narration(folder: Path, meta_api: str, log=print, seq=None, slots=None
                 free.append((cur, ke))
         return [(round(a, 2), round(b, 2)) for a, b in free if b - a >= 0.05]
 
+    def windows_even(keep_segs, dlg, n_slots, min_len=NAR_SLOT_MIN):
+        """최종 영상 시간축을 n_slots 등분해 **구획마다 한 자리씩** — 전체에 고르게 깔린다.
+
+        구획 안에 '대사 없는 틈'이 있으면 그 틈을 쓰고(대사와 안 겹침), 없으면 구획
+        안에 그냥 놓는다. 3min(딸감별사) 문체는 프롬프트 설계상 "내레이션이 영상을
+        거의 다 덮는" 문체이고 원음은 mux에서 더킹되므로 대사 위에 얹혀도 된다.
+        대사를 피하는 것만 우선하면 대사가 빽빽한 하이라이트에서 자리가 말라
+        내레이션이 한쪽으로 뭉친다 — ja20 START-627 실측: 대사가 영상의 67%를 덮어
+        쓸 틈이 3개뿐 → 98초 중 0~6초에 2줄, 45초 공백, 마지막 11초에 4줄.
+        cinema 문체는 대사 원음을 들려주는 것이 핵심이라 이 함수를 쓰지 않는다.
+        """
+        total = sum(b - a for a, b in keep_segs)
+        if total <= 0 or n_slots < 1:
+            return None
+        # 대사 없는 틈을 최종 좌표로 환산해 둔다(구획 안에서 우선 후보로 쓴다)
+        freef, acc = [], 0.0
+        for ka, kb in keep_segs:
+            for fa, fb in free_intervals(keep_segs, dlg):
+                a, b = max(fa, ka), min(fb, kb)
+                if b - a > 0.05:
+                    freef.append((acc + (a - ka), acc + (b - ka)))
+            acc += kb - ka
+        span = total / n_slots
+        want = min(min_len, span * 0.8)
+        raw = []
+        for k in range(n_slots):
+            lo, hi = k * span, (k + 1) * span
+            cand = [(max(fa, lo), min(fb, hi)) for fa, fb in freef
+                    if min(fb, hi) - max(fa, lo) >= min(want, span * 0.6)]
+            if cand:
+                a, b = max(cand, key=lambda w: w[1] - w[0])
+                raw.append((a, min(b, a + max(want, min_len))))
+            else:
+                mid = (lo + hi) / 2.0
+                raw.append((mid - want / 2, mid + want / 2))
+        out, prev = [], -1e9
+        for a, b in raw:
+            a = max(a, prev + NAR_ITEM_GAP, 0.0)
+            b = min(max(b, a + 0.6), total)
+            if a >= total:
+                break
+            prev = b
+            ts, te = _final_to_trim(a, keep_segs), _final_to_trim(b, keep_segs)
+            # 창이 keep 경계를 넘으면 뒤쪽을 잘라 한 구간 안에 가둔다
+            # (넘어가면 retime에서 시간이 튀어 문장이 엉뚱한 장면에 붙는다)
+            edge = next((kb for ka, kb in keep_segs if ka <= ts <= kb), None)
+            if edge is not None:
+                te = min(te, edge)
+                if te - ts < 0.4:      # 구간 꼬리에 걸렸으면 앞으로 늘려 살린다
+                    te = min(edge, ts + want)
+            if te - ts < 0.4:
+                continue
+            out.append((round(ts, 2), round(te, 2)))
+        return out if len(out) >= 3 else None
+
     def windows_from_free(keep_segs, dlg, n_slots):
         """대사 없는 틈에만 슬롯을 놓는다 → 내레이션이 대사를 앞지르지 않는다.
         목표 개수보다 틈이 적으면 긴 틈을 반으로 쪼개 늘리고(각 조각 ≥ NAR_SLOT_MIN),
@@ -465,6 +536,13 @@ def regen_narration(folder: Path, meta_api: str, log=print, seq=None, slots=None
 
     def compute_gap_windows(keep_segs, n_slots=6):
         if not keep_segs: return []
+        # 3min·gootabari는 내레이션이 주 오디오다(원음 더킹) → 영상 전체에 고르게 깐다.
+        # cinema만 대사 원음을 살려야 하므로 '대사 없는 틈'에만 놓는다.
+        if style != "cinema":
+            w = windows_even(keep_segs, dialogue, n_slots)
+            if w:
+                return w
+            log("  ※ 균등 배치 실패 — 대사-회피 배치로 후퇴")
         w = windows_from_free(keep_segs, dialogue, n_slots)
         if w:
             return w
@@ -504,8 +582,9 @@ def regen_narration(folder: Path, meta_api: str, log=print, seq=None, slots=None
     # 그게 정상이다 — 자리가 없는데 밀어넣던 것이 대사와 겹치는 원인이었다.
     MAX_SLOTS = len(gap_windows)
     if MAX_SLOTS < SLOT_TARGET:
-        log(f"  대사 없는 틈이 {MAX_SLOTS}개 — 내레이션을 그만큼만 놓는다"
-            f"(목표 {SLOT_TARGET}개, 대사와 겹치지 않게)")
+        why = ("대사 원음을 살려야 해 대사 없는 틈에만 놓는다" if style == "cinema"
+               else "컷이 짧거나 이음매에 걸려 자리가 줄었다")
+        log(f"  확보된 자리 {MAX_SLOTS}개 / 목표 {SLOT_TARGET}개 — {why}")
     # ── 슬롯 설명 빌드 — **창 개수가 곧 문장 수**다 ──────────────────────
     # ★ 예전엔 n_total을 기존 plan의 내레이션 개수에서 가져왔다. 그러면 앞선 실행이
     #   plan을 적은 개수로 덮어쓴 뒤에는 창이 늘어나도 그만큼만 요청하게 된다

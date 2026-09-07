@@ -45,9 +45,11 @@ from server.core.prompts import (
     _must_have, _style_3min, _style_gootabari, _hint_block, _timeline_rule,
     _TTS_CHARS_PER_SEC, _BREATH, _SEC_PER_SENT, _CINEMA_SPEECH_RATIO,
     _GOOTA_SPEECH_RATIO, _GOOTA_SEC_PER_SENT, _drip_rule,
-    narration_budget, _roundup_block, _roundup_gootabari,
+    narration_budget, narration_lines, NAR_SEC_PER_LINE,
+    NAR_LINES_MIN, NAR_LINES_MAX, NAR_CHARS_PER_LINE,
+    _roundup_block, _roundup_gootabari,
     prompt_auto, prompt_highlight, prompt_manual,
-    prompt_block, prompt_dialogue_fix,
+    prompt_block, prompt_dialogue_fix, prompt_story,
 )
 from server.core.cutter import (
     has_nvenc, _vcodec_args, cut_video, _kf_after, _kf_before,

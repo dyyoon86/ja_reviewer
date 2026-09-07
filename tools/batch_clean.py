@@ -58,10 +58,29 @@ def main():
     ap.add_argument("--out", help="out_dir 오버라이드 (예: ...\\ja_reviewer_out\\ja15). "
                                   "생략 시 studio_config.json의 out_dir. 모음집을 연달아 "
                                   "돌릴 때 config를 건드리지 않으려고 둔다.")
+    ap.add_argument("--only", default="",
+                    help="이 품번만 처리(쉼표 구분). 설정을 바꿔 한 편만 시험할 때 쓴다.")
+    ap.add_argument("--redo", action="store_true",
+                    help="클린본이 있어도 다시 자른다(중간본·클린본 삭제 후 재실행)")
+    ap.add_argument("--threshold-override", action="append", default=[], metavar="품번=값",
+                    help="편별 CLIP 임계(intimacy_threshold) 지정. 여러 번 가능. "
+                         "낮으면 더 자르고 높으면 덜 자른다. 기본값이 과해 클린본이 "
+                         "너무 짧아진 편만 올려 잡을 때 쓴다. 예: --threshold-override SNOS-401=0.015")
     args = ap.parse_args()
+
+    thr_ov = {}
+    for kv in args.threshold_override:
+        k, _, v = kv.partition("=")
+        thr_ov[k.strip().upper()] = float(v)
 
     folder = Path(args.folder)
     videos = sorted(folder.glob("*.mp4"))
+    only = {c.strip().upper() for c in args.only.split(",") if c.strip()}
+    if only:
+        videos = [v for v in videos if guess_code(v.name).upper() in only]
+        if not videos:
+            print(f"--only 에 해당하는 영상이 없습니다: {', '.join(sorted(only))}")
+            sys.exit(1)
     if not videos:
         print(f"mp4 없음: {folder}")
         sys.exit(1)
@@ -69,7 +88,13 @@ def main():
     cfg = _common.load_cfg()
     if args.out:
         cfg["out_dir"] = args.out
-    print(f"대상 {len(videos)}개 / out_dir={cfg['out_dir']} / clean_mode={cfg.get('clean_mode', 'chain')}")
+    # 줄거리 교차 검증의 기준(사이트 소개문)을 이 폴더의 랭킹 txt에서 읽는다
+    cfg["rank_src"] = str(folder)
+    base_thr = cfg.get("intimacy_threshold", 0.02)
+    print(f"대상 {len(videos)}개 / out_dir={cfg['out_dir']} / clean_mode={cfg.get('clean_mode', 'chain')}"
+          f" / intimacy_threshold={base_thr}")
+    if thr_ov:
+        print("편별 임계: " + ", ".join(f"{k}={v}" for k, v in sorted(thr_ov.items())))
 
     results = []
     for i, v in enumerate(videos, 1):
@@ -79,6 +104,21 @@ def main():
             results.append((v.name, "품번 추정 실패 — 건너뜀", None))
             continue
         t0 = time.time()
+        # ★편별 임계 — 작품마다 CLIP margin 분포가 다르다. 대사가 거의 없는 본편형은
+        #   기본 임계로 자르면 남는 게 없어진다(ABF-382: 전부 제거로 실패).
+        if code.upper() in thr_ov:
+            cfg["intimacy_threshold"] = thr_ov[code.upper()]
+            print(f"[{code}] 임계 오버라이드: intimacy_threshold={cfg['intimacy_threshold']}")
+        else:
+            cfg["intimacy_threshold"] = base_thr
+        if args.redo:
+            # 클린본·중간본만 지운다 — 풀전사(_원본전사)와 줄거리는 그대로 재사용한다
+            d = stages.work_dir(cfg, code)
+            for f in (f"{code}_클린.mp4", f"{code}_클린_s1.mp4", f"{code}_클린_s2.mp4"):
+                fp = d / f
+                if fp.is_file():
+                    fp.unlink()
+                    print(f"[{code}] --redo: {f} 삭제")
         try:
             r = stages.stage_clean(cfg, code, str(v), CliEmitter(code), gpu=NullLock())
             el = time.time() - t0

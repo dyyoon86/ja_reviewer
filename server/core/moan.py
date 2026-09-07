@@ -85,9 +85,16 @@ def is_weak(text):
 
 
 def scan_audio(video, model_name="small", log=print, progress=None,
-               window=None, min_len=8.0, pad=5.0, merge_gap=8.0):
+               window=None, min_len=8.0, pad=5.0, merge_gap=8.0, save_segs=None,
+               segs=None):
     """영상을 전사해 '내용 있는 대사가 없는' 구간(신음/흥분속삭임/무음)을 삭제 후보로
     돌려준다. 반환: (ranges, stats) — ranges=[(a,b)], stats={dialogue, moan, ...}
+
+    save_segs: 경로를 주면 **원본 전체 전사본**을 JSON으로 남긴다.
+      ★이 전사는 원본 100~225분 전체를 훑은 유일한 기록이다. 클린 판정에만 쓰고
+        버려 왔는데, 그러면 섹션②는 살아남은 몇 분만 보고 요약·내레이션을 쓰게 된다
+        (실측 ABF-382: 원본에 내용 대사 104줄인데 클린본은 1.6분 — 15~20줄뿐).
+        여기서 저장해 두면 섹션②가 '전체 줄거리'를 알고 컷을 고를 수 있다. 비용 0.
 
     대사 버블 방식: 강한 대사 [시작-pad, 끝+pad]만 보호, 보호 밖 공백 min_len초
     이상이면 삭제 후보. window 인자는 구 30초 윈도우 방식의 잔재로 무시된다(호환용).
@@ -96,14 +103,34 @@ def scan_audio(video, model_name="small", log=print, progress=None,
     from .common import video_duration
 
     total = video_duration(video) or 0.0
-    log(f"신음·정사 구간 스캔 — {model_name} 전사({total / 60:.0f}분)")
-    # ★ 배치 전사(BatchedInferencePipeline)는 절대 쓰면 안 된다 — 세그먼트를 뭉쳐버린다.
-    #   실측(같은 120초): 순차 42세그 vs 배치 3세그(45초짜리 덩어리). 텍스트는 살아도
-    #   타임스탬프가 뭉개져서 '대사가 있는 시각'을 알 수 없고, 대사 있는 구간을
-    #   '대사 없음'으로 오판해 과다 삭제한다(실측: 123분 중 102분 삭제).
-    #   여기서는 시각 정확도가 전부이므로 순차 전사를 쓴다.
-    segs = transcribe(video, model_name, log=log, progress=progress,
-                      beam_size=1, batched=False)
+    if segs:
+        # 호출측이 이미 풀전사를 해 두었다(섹션① 1단계). 같은 영상을 두 번 전사하지 않는다.
+        log(f"신음·정사 구간 판정 — 앞서 만든 풀전사 {len(segs)}세그 재사용")
+    else:
+        log(f"신음·정사 구간 스캔 — {model_name} 전사({total / 60:.0f}분)")
+        # ★ 배치 전사(BatchedInferencePipeline)는 절대 쓰면 안 된다 — 세그먼트를 뭉쳐버린다.
+        #   실측(같은 120초): 순차 42세그 vs 배치 3세그(45초짜리 덩어리). 텍스트는 살아도
+        #   타임스탬프가 뭉개져서 '대사가 있는 시각'을 알 수 없고, 대사 있는 구간을
+        #   '대사 없음'으로 오판해 과다 삭제한다(실측: 123분 중 102분 삭제).
+        #   여기서는 시각 정확도가 전부이므로 순차 전사를 쓴다.
+        segs = transcribe(video, model_name, log=log, progress=progress,
+                          beam_size=1, batched=False)
+
+    if save_segs:
+        try:
+            import json
+            from pathlib import Path as _P
+            _P(save_segs).write_text(json.dumps(
+                [{"start": round(a, 3), "end": round(b, 3), "text": t} for a, b, t in segs],
+                ensure_ascii=False, indent=1), encoding="utf-8")
+            # 사람이 바로 읽을 수 있게 SRT도 같이 남긴다(원본 전체를 훑어볼 유일한 수단)
+            from .common import write_srt
+            write_srt([(a, b, t) for a, b, t in segs],
+                      _P(save_segs).with_suffix(".srt"))
+            log(f"원본 전사본 저장: {_P(save_segs).name} ({len(segs)}세그) "
+                f"— 섹션②가 전체 줄거리를 파악하는 데 쓴다")
+        except OSError as e:
+            log(f"※ 원본 전사본 저장 실패({e}) — 진행에는 지장 없음")
 
     strong = []    # 내용 있는 대사 (보호 버블의 씨앗)
     n_weak = 0

@@ -161,12 +161,53 @@ class NullLock:
 
 
 # ─── 스테이지 코어 ───────────────────────────────────────────────────────────
-def _chain_clean(c, code, video, em, gpu, outdir, clean):
-    """⓪-A **3중 필터 순차 클린** — 수동 모드의 '⚡ 순차 자동 클린'과 같은 흐름을 자동에서도.
+def full_transcribe(c, code, video, em, gpu=None):
+    """섹션① 1단계 — **원본 전체 풀전사**. `{code}_원본전사.json` + `.srt`.
 
-    순서 2️⃣소리 → 3️⃣의미 → 1️⃣화면 (실측 근거, 123분 원본):
-      분당 스캔 비용이 STT 0.69s < CLIP 1.06s < NN 1.44s라 **제일 싼 스캔에게 제일 긴
-      영상을 맡기고**, 제일 비싼 NN은 마지막에 남은 몇 분만 보게 한다(총 6:32 → 2:03).
+    ★자르기보다 먼저 한다. 예전에는 이 전사가 2️⃣ 소리 필터 **안에** 숨어 있어서,
+      필터의 부산물일 뿐 산출물이 아니었다 — 그래서 원본에 무슨 내용이 있었는지
+      아무도 모른 채 99%가 잘려나가는 일이 생겼다(ABF-382: 101분 → 1.6분).
+      전사를 독립 단계로 올리면 ① 원본 내용이 항상 파일로 남고 ② 그걸로 줄거리를
+      먼저 세워 사람이 자르기 전에 확인할 수 있다.
+    비용은 그대로다 — 2️⃣ 소리 필터가 이 전사본을 그대로 받아 쓰므로 전사는 한 번뿐이다.
+    """
+    gpu = gpu or NullLock()
+    outdir = work_dir(c, code)
+    js = outdir / f"{code}_원본전사.json"
+    if js.is_file():
+        try:
+            rows = json.loads(js.read_text(encoding="utf-8"))
+            if rows:
+                em.log(f"풀전사 재사용: {js.name} ({len(rows)}세그)")
+                return [(r["start"], r["end"], r["text"]) for r in rows]
+        except Exception:
+            pass
+    total = P.video_duration(video) or 0.0
+    em.log(f"원본 전체 전사 — {c.get('scan_model', 'small')} ({total / 60:.0f}분). "
+           f"이 전사본이 자르기 판정과 줄거리의 공통 재료다")
+    with gpu:
+        segs = P.transcribe(video, c.get("scan_model", "small"), em.log,
+                            lambda fr: em.prog(fr, "풀전사"), beam_size=1, batched=False)
+    js.write_text(json.dumps(
+        [{"start": round(a, 3), "end": round(b, 3), "text": t} for a, b, t in segs],
+        ensure_ascii=False, indent=1), encoding="utf-8")
+    P.write_srt([(a, b, t) for a, b, t in segs], outdir / f"{code}_원본전사.srt")
+    em.file("원본 전체 전사", outdir / f"{code}_원본전사.srt")
+    worklog(outdir, code, f"⓪-1 풀전사({c.get('scan_model', 'small')}) — {len(segs)}세그, "
+                          f"원본 {total / 60:.0f}분")
+    return segs
+
+
+def _chain_clean(c, code, video, em, gpu, outdir, clean):
+    """⓪ 클린 — **풀전사 → 줄거리 → 3중 필터 자르기** 순서.
+
+    1) 풀전사   원본 전체 STT. 무엇이 잘려나가는지 알 수 있는 유일한 기록
+    2) 줄거리   그 전사로 전체 줄거리 요약 + 사이트 소개문 교차 검증(soft-fail)
+    3) 자르기   2️⃣소리 → 3️⃣의미 → 1️⃣화면 순차 절단
+
+    자르기 순서의 근거(실측, 123분 원본): 분당 스캔 비용이 STT 0.69s < CLIP 1.06s <
+      NN 1.44s라 **제일 싼 스캔에게 제일 긴 영상을 맡기고**, 제일 비싼 NN은 마지막에
+      남은 몇 분만 보게 한다(총 6:32 → 2:03).
     각 단계: 스캔 → 검출되면 그 자리에서 컷 → 잘린 영상으로 다음 스캔.
     NN 단독(구 방식)이 못 잡던 '옷 입은 채 어두운 조명 애무'를 3️⃣ CLIP이 잡고,
     NN이 정사로 오판하던 '노출 의상 대화'를 2️⃣ 소리가 되살린다."""
@@ -175,15 +216,41 @@ def _chain_clean(c, code, video, em, gpu, outdir, clean):
     orig_total = P.video_duration(video) or 0.0
     n_all = 0
 
+    # ── 1) 풀전사 ────────────────────────────────────────────────────────────
+    em.step(1, 5, f"⓪-1 원본 풀전사 — {orig_total / 60:.0f}분")
+    save_state(outdir, code, video=str(video), source_video=str(video))
+    full_segs = full_transcribe(c, code, video, em, gpu)
+
+    # ── 2) 줄거리 요약 ───────────────────────────────────────────────────────
+    #    자르기 **전에** 만든다 — 사람이 "원본이 무슨 내용인지" 먼저 볼 수 있어야 한다.
+    #    메타·LLM이 없어도 클린은 계속되어야 하므로 전부 soft-fail.
+    em.step(2, 5, "⓪-2 전체 줄거리 요약 (사이트 소개문과 교차 검증)")
+    if c.get("story_in_clean", True):
+        try:
+            meta = {}
+            try:
+                meta = P.fetch_meta(c["meta_api"], code, em.log)
+            except Exception as e:
+                em.log(f"※ 메타 조회 실패({e}) — 메타 없이 줄거리만 만듭니다")
+            story_brief(c, code, meta, c.get("llm", "claude"), em, video=str(video))
+        except Exception as e:
+            em.log(f"※ 줄거리 요약 실패({type(e).__name__}: {e}) — 자르기는 계속합니다")
+    else:
+        em.log("줄거리 요약 꺼짐(story_in_clean=false) — 건너뜁니다")
+
+    # ── 3) 자르기 ────────────────────────────────────────────────────────────
     stages = [
+        # 위에서 만든 풀전사를 그대로 받아 쓴다 — 같은 영상을 두 번 전사하지 않는다.
         ("2️⃣ 소리(신음·정사)", lambda v, t: moan.scan_audio(
             v, model_name=c.get("scan_model", "small"), log=em.log,
             progress=lambda fr: em.prog(fr, "소리 스캔"),
-            pad=float(c.get("cut_pad_moan", 5.0)))[0]),
+            pad=float(c.get("cut_pad_moan", 5.0)),
+            segs=full_segs)[0]),
         ("3️⃣ 의미(스킨십·애무)", lambda v, t: intimacy.scan_intimacy(
             v, step=float(c.get("intimacy_step", 2.0)),
             threshold=float(c.get("intimacy_threshold", 0.02)),
             min_dur=float(c.get("intimacy_min_dur", 14.0)),
+            smooth_sec=(float(c["intimacy_smooth"]) if c.get("intimacy_smooth") else None),
             log=em.log, duration=t,
             progress=lambda fr: em.prog(fr, "의미 스캔"))),
         ("1️⃣ 화면(NN 노출)", lambda v, t: nsfw.build_map(
@@ -197,7 +264,7 @@ def _chain_clean(c, code, video, em, gpu, outdir, clean):
     tmp_prev = None
     for i, (label, scan) in enumerate(stages, 1):
         total = P.video_duration(src) or 0.0
-        em.step(i, len(stages), f"⓪ {label} — {total / 60:.0f}분")
+        em.step(i + 2, 5, f"⓪-3 자르기 {label} — {total / 60:.0f}분")
         with gpu:
             bad = scan(src, total)
         if not bad:
@@ -267,6 +334,24 @@ def stage_clean(c, code, video, em, gpu=None):
     if clean.is_file():
         em.log(f"클린본 재사용: {clean}")
         save_state(outdir, code, video=str(clean), source_video=str(video), cleaned=True)
+        # ★ 클린본은 있는데 풀전사·줄거리가 없는 경우(그 기능을 넣기 전에 클린한 편)
+        #   여기서 채운다 — 다시 자르지 않고 빠진 산출물만 만든다.
+        if not (outdir / f"{code}_원본전사.json").is_file():
+            try:
+                em.log("풀전사가 없습니다(구버전 클린본) — 원본으로 지금 만듭니다")
+                full_transcribe(c, code, video, em, gpu)
+            except Exception as e:
+                em.log(f"※ 풀전사 실패({type(e).__name__}: {e})")
+        if c.get("story_in_clean", True) and not (outdir / f"{code}_줄거리.md").is_file():
+            try:
+                meta = {}
+                try:
+                    meta = P.fetch_meta(c["meta_api"], code, em.log)
+                except Exception as e:
+                    em.log(f"※ 메타 조회 실패({e}) — 메타 없이 줄거리만")
+                story_brief(c, code, meta, c.get("llm", "claude"), em, video=str(video))
+            except Exception as e:
+                em.log(f"※ 줄거리 요약 실패({type(e).__name__}: {e})")
         return {"step": "clean", "code": code, "clean": str(clean), "reused": True}
 
     if c.get("clean_mode", "chain") == "chain":
@@ -395,6 +480,291 @@ def _guard_keep(keep, segs, log):
     return keep
 
 
+# ─── 목표 길이 / 대사 번역 / 내레이션 보강 헬퍼 ──────────────────────────────
+TARGET_FLOOR = 25.0     # 이보다 짧은 클린본은 한 편으로 못 쓴다(⓪ 클린이 깨진 것)
+
+
+def fit_target(target, video, log=print):
+    """목표 길이를 **클린본 실제 길이**에 맞춘다 — 한 편은 config target_sec(2분) 기준.
+
+    ⓪ 클린 결과는 작품마다 6초~11분으로 제각각인데 예전엔 target을 그대로 썼다:
+      · 클린본이 목표보다 짧으면 → 못 채울 목표 기준으로 내레이션 분량이 잡혀
+        영상에 안 들어간다(ja20 SNOS-360: 클린본 6초에 목표 120초 → 7초 영상 납품).
+      · 클린본이 목표보다 길면 → 목표 그대로가 맞다.
+    → target = min(설정값, 클린본 길이). TARGET_FLOOR 미만이면 ⓪ 클린이 과하게
+      잘라낸 것으로 보고 여기서 멈춘다(전사·AI·TTS 낭비 차단).
+    """
+    try:
+        src = float(P.video_duration(str(video)) or 0)
+    except Exception:
+        src = 0.0
+    target = int(target or 0)
+    if src <= 0:
+        return target
+    if src < TARGET_FLOOR:
+        raise RuntimeError(
+            f"클린본이 {src:.0f}초뿐입니다 — 한 편으로 쓸 수 없습니다"
+            f"(⓪ 노출 제거가 과하게 잘라낸 것으로 보입니다). "
+            f"원본을 다시 클린하거나 수동 모드에서 구간을 직접 고르세요.")
+    if target and src < target:
+        log(f"목표 길이 조정: {target}초 → {int(src)}초 "
+            f"(클린본이 목표보다 짧음 — 클린본 길이에 맞춰 내레이션 분량도 함께 줄어듭니다)")
+        return int(src)
+    return target
+
+
+def _translate_all(meta, fine, llm, em, min_ratio=0.85, rounds=2, tol=0.6):
+    """정밀 전사의 **모든 줄**을 번역한다 — 빠진 줄은 그 줄만 모아 다시 태운다.
+
+    prompt_dialogue_fix는 "모든 줄을 빠짐없이"라고 지시하지만 LLM은 입력이 길면
+    뒷부분을 뭉텅이로 빠뜨린다(ja20 실측 자막 커버리지 51~77%). 지시로는 못 막으므로
+    **출력을 입력과 대조해** 누락분만 재요청한다. tol=시간 매칭 허용오차(초).
+    """
+    got, todo = [], list(fine)
+    for r in range(rounds + 1):
+        if not todo:
+            break
+        res = P.call_llm(P.prompt_dialogue_fix(meta, todo), llm, em.log)
+        rows = [d for d in (res.get("dialogue") or [])
+                if str(d.get("ko") or d.get("text") or "").strip()]
+        got.extend(rows)
+        starts = sorted(float(d.get("start", 0)) for d in rows)
+        miss = []
+        for seg in todo:
+            a = float(seg[0])
+            if not any(abs(a - x) <= tol for x in starts):
+                miss.append(seg)
+        if not miss:
+            todo = []
+            break
+        # 한 줄도 매칭이 안 되면 LLM이 시간을 통째로 갈아버린 것이다 — 다시 태워도
+        # 같은 결과가 나오므로 받은 줄을 그대로 쓰고 끝낸다(무한 재시도 방지).
+        if len(miss) == len(todo) and rows:
+            em.log("  ※ 번역 결과의 시각이 입력과 달라 대조를 건너뜁니다"
+                   f"(받은 {len(rows)}줄 그대로 사용)")
+            todo = []
+            break
+        if len(rows) >= len(todo) * min_ratio and len(miss) <= 2:
+            todo = []
+            break
+        todo = miss
+        if todo and r < rounds:
+            em.log(f"  대사 번역 누락 {len(todo)}줄 — 그 줄만 다시 번역합니다({r + 2}차)")
+    if todo:
+        em.log(f"  ⚠ 끝내 번역하지 못한 대사 {len(todo)}줄 — 그만큼 자막이 빕니다")
+    got.sort(key=lambda d: float(d.get("start", 0)))
+    return got
+
+
+def story_brief(c, code, meta, llm, em, video=None):
+    """원본 **전체** 전사 → '전체 줄거리 브리핑'. 컷 선정·내레이션의 배경지식이 된다.
+
+    왜 필요한가: 섹션②는 클린본만 본다. 클린이 공격적일수록 LLM이 보는 것은 원본의
+    몇 %뿐이라, 이야기의 앞뒤가 사라진 채 요약·컷선정·내레이션을 하게 된다.
+      실측 ABF-382 — 원본 101분 전사 179세그(내용 대사 104줄) → 클린본 1.6분.
+      섹션②가 보는 것은 그중 15~20줄. 나머지 84줄은 존재조차 모른다.
+
+    재료는 공짜다: 섹션①의 2️⃣ 소리 필터가 원본 전체를 이미 전사해 두었다
+    ({code}_원본전사.json). 그 파일이 없으면(구버전 클린본) source_video로 한 번
+    전사해 만들어 둔다. 결과는 {code}_줄거리.txt 에 캐시해 재실행 때 다시 안 만든다.
+
+    반환: 프롬프트에 넣을 브리핑 문자열(없거나 실패하면 "").
+    """
+    if not c.get("story_brief", True):
+        return ""
+    outdir = work_dir(c, code)
+    cache = outdir / f"{code}_줄거리.txt"
+    if cache.is_file():
+        t = cache.read_text(encoding="utf-8").strip()
+        if t:
+            em.log(f"전체 줄거리 브리핑 재사용 ({cache.name})")
+            return t
+
+    src = outdir / f"{code}_원본전사.json"
+    if not src.is_file():
+        # 구버전 클린본 — 원본이 남아 있으면 한 번만 전사해 만든다(small, 100분 ≈ 1~2분)
+        st = load_state(outdir, code)
+        orig = st.get("source_video")
+        if not (orig and Path(orig).is_file()):
+            em.log("※ 원본 전사본도 원본 영상도 없습니다 — 전체 줄거리 없이 진행합니다")
+            return ""
+        if Path(orig) == Path(video or ""):
+            return ""      # 클린을 안 거친 영상이면 어차피 전사가 곧 전체다
+        try:
+            em.log(f"원본 전사본이 없어 지금 만듭니다 — {Path(orig).name} "
+                   f"({c.get('scan_model', 'small')})")
+            segs = P.transcribe_scan(str(orig), c.get("scan_model", "small"), em.log,
+                                     lambda fr: em.prog(fr, "원본 전사"))
+            src.write_text(json.dumps(
+                [{"start": round(a, 3), "end": round(b, 3), "text": t} for a, b, t in segs],
+                ensure_ascii=False, indent=1), encoding="utf-8")
+            # 사람이 원본 전체를 훑어볼 수 있게 SRT도 같이 (섹션1 경로와 동일)
+            P.write_srt([(a, b, t) for a, b, t in segs], src.with_suffix(".srt"))
+            em.log(f"원본 전사본 생성: {src.name} / {src.with_suffix('.srt').name} "
+                   f"({len(segs)}세그)")
+        except Exception as e:
+            em.log(f"※ 원본 전사 실패({type(e).__name__}: {e}) — 전체 줄거리 없이 진행")
+            return ""
+
+    try:
+        rows = [(d["start"], d["end"], d["text"])
+                for d in json.loads(src.read_text(encoding="utf-8"))]
+    except Exception as e:
+        em.log(f"※ 원본 전사본을 읽지 못했습니다({e}) — 전체 줄거리 없이 진행")
+        return ""
+    if len(rows) < 8:
+        em.log(f"원본 대사가 {len(rows)}줄뿐 — 줄거리 브리핑 생략(대사 없는 본편형)")
+        return ""
+
+    site = _site_desc(c, code, meta, em)
+    em.log(f"전체 줄거리 파악 중 — 원본 {len(rows)}세그를 {llm}에게 통째로 보냅니다"
+           + (" (사이트 소개문과 교차 검증)" if site else ""))
+    try:
+        r = P.call_llm(P.prompt_story(meta, rows, site_desc=site), llm, em.log)
+    except Exception as e:
+        em.log(f"※ 줄거리 브리핑 실패({type(e).__name__}: {e}) — 없이 진행합니다")
+        return ""
+
+    def _lines(key):
+        v = r.get(key) or []
+        return [str(x).strip() for x in v if str(x).strip()] if isinstance(v, list) \
+            else ([str(v).strip()] if str(v).strip() else [])
+
+    SECTIONS = (("story", "전체 줄거리(원본 전 구간 — 잘려나간 부분 포함)"),
+                ("cast", "등장인물·관계"),
+                ("turns", "이야기가 꺾이는 지점"),
+                ("hooks", "리뷰에 쓸 만한 순간"))
+    parts = []
+    for key, title in SECTIONS:
+        ls = _lines(key)
+        if ls:
+            parts.append(f"[{title}]\n" + "\n".join(f" · {x}" for x in ls))
+    brief = "\n".join(parts).strip()
+    if not brief:
+        return ""
+
+    # ── 교차 검증 판정 ──────────────────────────────────────────────────────
+    verdict = str(r.get("match") or "").strip()
+    note = str(r.get("match_note") or "").strip()
+    if verdict:
+        mark = {"일치": "✔", "부분일치": "△", "불일치": "✘"}.get(verdict, "·")
+        em.log(f"  {mark} 사이트 소개문 교차 검증: {verdict}" + (f" — {note}" if note else ""))
+        if verdict == "불일치":
+            em.log("  ⚠ 전사에서 읽어낸 이야기가 사이트 소개와 다릅니다 — "
+                   "STT 오인식일 수 있으니 줄거리를 눈으로 확인하세요")
+        worklog(outdir, code, f"줄거리 교차 검증 {mark} {verdict}" + (f" — {note}" if note else ""))
+        # 판정도 프롬프트에 같이 넘긴다 — 어긋난다는 걸 알면 LLM이 더 신중해진다
+        brief = (f"[사이트 소개문과의 대조] {verdict}" + (f" — {note}" if note else "")
+                 + "\n" + brief)
+
+    try:
+        cache.write_text(brief, encoding="utf-8")
+        _write_story_md(outdir, code, meta, r, site, verdict, note, SECTIONS, _lines)
+    except OSError:
+        pass
+    em.log(f"전체 줄거리 확보: 줄거리 {len(_lines('story'))}줄 · 전환점 {len(_lines('turns'))}개 "
+           f"· 후킹 후보 {len(_lines('hooks'))}개")
+    em.file("줄거리 요약(읽기용)", outdir / f"{code}_줄거리.md")
+    return brief
+
+
+def _site_desc(c, code, meta, em):
+    """작품 소개문 — 교차 검증의 기준. 랭킹 txt를 우선, 없으면 메타 API의 description."""
+    src = c.get("rank_src")
+    if src:
+        try:
+            import sys as _sys
+            tools = str(Path(__file__).resolve().parent.parent / "tools")
+            if tools not in _sys.path:
+                _sys.path.insert(0, tools)
+            from _ranklist import load_details, find_rank_file
+            d = load_details(find_rank_file(src)).get(code.upper()) or {}
+            if d.get("desc"):
+                return d["desc"]
+        except Exception as e:
+            em.log(f"※ 랭킹 txt에서 소개문을 못 읽었습니다({type(e).__name__}: {e})")
+    return str(meta.get("description") or "").strip()
+
+
+def _write_story_md(outdir, code, meta, r, site, verdict, note, sections, lines):
+    """사람이 읽는 줄거리 요약 — 사이트 소개문 원문과 전사 기반 줄거리를 나란히 둔다."""
+    mark = {"일치": "✅ 일치", "부분일치": "⚠️ 부분일치", "불일치": "❌ 불일치"}.get(verdict, "— 검증 안 함")
+    head = " · ".join(x for x in [
+        f"**배우** {meta.get('actress')}" if meta.get("actress") else "",
+        f"**레이블** {meta.get('label')}" if meta.get("label") else "",
+        f"**러닝타임** {meta.get('runtime_mins')}분" if meta.get("runtime_mins") else "",
+    ] if x)
+    L = [f"# {code} — 줄거리 요약", ""]
+    if head:
+        L += [head, ""]
+    L += ["> 원본 **전체** 일본어 전사를 읽고 만든 요약이다. 클린본에서 잘려나간 구간의",
+          "> 내용까지 들어 있다. 이 문서가 컷 선정과 내레이션의 근거가 된다.", "",
+          "## 사이트 소개문과 대조", "",
+          "| | |", "|---|---|", f"| 판정 | {mark} |"]
+    if note:
+        L.append(f"| 근거 | {note} |")
+    L.append("")
+    if verdict == "불일치":
+        L += ["> ⚠️ **전사에서 읽어낸 이야기가 사이트 소개와 다르다.** STT 오인식이거나",
+              "> 화자를 잘못 물었을 수 있다. 아래 줄거리를 그대로 믿지 말고 확인할 것.", ""]
+    if site:
+        L += ["<details><summary>사이트 소개문 원문</summary>", "", f"> {site}", "", "</details>", ""]
+    for key, title in sections:
+        ls = lines(key)
+        if not ls:
+            continue
+        L += [f"## {title}", ""]
+        L += [f"- {x}" for x in ls]
+        L.append("")
+    L += ["---", "",
+          f"만든 것 — `{code}_원본전사.json`(원본 전체 전사) → 이 요약 → 컷 선정 프롬프트.",
+          f"프롬프트에 실제로 들어가는 텍스트는 `{code}_줄거리.txt`.", ""]
+    (Path(outdir) / f"{code}_줄거리.md").write_text("\n".join(L), encoding="utf-8")
+
+
+def ensure_narration(c, code, em, ratio=0.7):
+    """내레이션이 최종 영상 길이에 비해 부족하면 **컷 확정본 기준으로 다시 짠다**.
+
+    내레이션은 keep이 확정되기 전에 LLM이 한 번에 써낸 것이라, 그 뒤 노출 가드·눈검사
+    재컷(_drop_keep)으로 keep이 깎이면 retime이 밖으로 나간 항목을 버린다:
+      ja20 START-627  keep 144→98s, 내레이션 5→2줄 (98초 영상에 50초·90초 두 줄뿐)
+      ja20 SNOS-373   keep 145→54s, 내레이션 9→4줄 (인트로가 통째로 소실)
+    영상 길이 기준 슬롯 수(narration_slots)의 ratio에 미달하면 regen_narration으로
+    다시 배치한다. 실패는 soft-fail(남은 줄로 진행).
+    """
+    if not c.get("nar_autofill", True):
+        return None
+    outdir = work_dir(c, code)
+    fin = outdir / f"{code}_final.mp4"
+    vsec = P.video_duration(str(fin)) if fin.is_file() else 0
+    if not vsec:
+        return None
+    from server.core.regen import narration_slots, regen_narration
+    want = narration_slots(vsec)
+    srt = outdir / f"{code}_내레이션.srt"
+    have = len(P.srt_parse(srt)) if srt.is_file() else 0
+    if have >= max(3, round(want * ratio)):
+        return None
+    em.log(f"내레이션 {have}줄 / 영상 {vsec:.0f}초 기준 목표 {want}줄 "
+           f"— 컷이 확정된 지금 다시 짭니다")
+    st = load_state(outdir, code)
+    # seq는 모음집 서수 (i, n) 쌍이다 — 단독 편이면 None. 잘못된 형태가 들어오면
+    # regen이 seq[0]에서 죽으므로(TypeError) 여기서 걸러 단독으로 떨어뜨린다.
+    seq = st.get("seq")
+    if not (isinstance(seq, (list, tuple)) and len(seq) == 2):
+        seq = None
+    try:
+        new = regen_narration(outdir, c["meta_api"], log=em.log,
+                              seq=seq, style=st.get("style") or "3min")
+    except Exception as e:
+        em.log(f"※ 내레이션 재생성 실패({type(e).__name__}: {e}) — 남은 {have}줄로 진행합니다")
+        return None
+    worklog(outdir, code,
+            f"내레이션 재생성 — {have}→{len(new)}줄 (영상 {vsec:.0f}s, 목표 {want}줄)")
+    em.file("내레이션 자막", srt)
+    return new
+
+
 def _reduce_transcript(meta, segs, llm, em, limit=25000, block_sec=1200):
     """전사가 토큰 한도를 넘보면 map-reduce — 20분 블록별로 '줄거리+핵심 대사 후보'만 뽑아
     최종 선정 프롬프트 입력을 항상 작게 고정한다. 반환: (선정용 세그, 전체줄거리 hint 조각).
@@ -451,6 +821,10 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
     video = video or st.get("video")
     if not video or not Path(video).is_file():
         raise RuntimeError("전사에 쓴 영상 경로를 찾을 수 없습니다. ① 전사를 다시 실행하세요.")
+    # ★목표 길이는 클린본 길이에 종속된다 — 클린본이 목표보다 짧으면 그 길이가 목표다.
+    #   내레이션 분량(narration_budget)도 이 target에서 나오므로 여기서 맞춰야
+    #   짧은 영상에 2분치 내레이션이 잡히는 사고가 안 난다.
+    target = fit_target(target, video, em.log)
     segs = [(d["start"], d["end"], d["text"])
             for d in json.loads(tj.read_text(encoding="utf-8"))]
     em.step(1, 3, "메타 조회")
@@ -494,7 +868,10 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
     try:
         plan_segs, story = _reduce_transcript(m, segs, llm, em,
                                               limit=int(c.get("map_reduce_chars", 25000)))
-        full_hint = "\n".join(x for x in ((hint or "").strip(), story) if x)
+        # ★ 전체 줄거리 브리핑 — 클린본만 보면 잘려나간 이야기를 모른 채 컷을 고르게 된다.
+        #   섹션①이 남긴 원본 전사본으로 먼저 줄거리를 세워 힌트 맨 앞에 붙인다.
+        brief = story_brief(c, code, m, llm, em, video=video)
+        full_hint = "\n".join(x for x in (brief, (hint or "").strip(), story) if x)
         # 화면 시각정보 — 클린본 프레임을 비전(claude -p)이 읽어 '장면/화면글자' 브리핑을 만들고
         #   프롬프트에 넣어준다. LLM이 오디오 자막만이 아니라 화면 행동·표정·소품까지 알고
         #   대사/내레이션을 쓴다(config visual_brief, 기본 off). 실패는 soft-fail(없이 진행).
@@ -586,12 +963,20 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
             if fine:
                 em.log(f"러프 전사로 대체: keep 안 {len(fine)}줄로 대사자막 생성")
         if fine:
+            # 정밀 전사본을 남긴다 — 번역 누락(자막 커버리지 하락)을 나중에 감사하고
+            # 그 줄만 다시 번역할 수 있어야 한다. 예전엔 메모리에만 있어 추적 불가였다.
             try:
-                fix = P.call_llm(P.prompt_dialogue_fix(m, fine), llm, em.log)
-                dlg = fix.get("dialogue") or []
+                (outdir / f"{code}_정밀전사.json").write_text(
+                    json.dumps([{"start": round(a, 3), "end": round(b, 3), "text": t}
+                                for a, b, t in fine], ensure_ascii=False, indent=1),
+                    encoding="utf-8")
+            except OSError:
+                pass
+            try:
+                dlg = _translate_all(m, fine, llm, em)
                 if dlg:
                     res["dialogue"] = dlg
-                    em.log(f"대사자막 생성(정밀 전사본): {len(dlg)}줄")
+                    em.log(f"대사자막 생성(정밀 전사본): 일본어 {len(fine)}줄 → 한글 {len(dlg)}줄")
                 elif not res.get("dialogue"):
                     em.log("⚠ 대사 번역이 0줄입니다 — 대사자막 없이 내레이션만 나갑니다")
             except Exception as e:
@@ -665,7 +1050,7 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
                     f"[{it.get('beat') or ('hook' + str(it.get('hook', '')))}] {it['reason']}")
     (outdir / f"{code}_plan.json").write_text(
         json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
-    save_state(outdir, code, target=target, llm=llm,
+    save_state(outdir, code, target=target, llm=llm, style=style,
                summary=res.get("summary", ""), stars=P.clamp_stars(res.get("stars")))
     em.file("AI 결과(plan)", outdir / f"{code}_plan.json")
     em.file("최종 영상", final)
@@ -709,9 +1094,15 @@ def stage_subs(c, code, em):
         (outdir / f"{code}_짤.json").write_text(
             json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
         em.log(f"상황 짤 {len(data)}개 (컷 기준으로 시간 재계산)")
+    # ★ 컷이 확정된 지금이 내레이션을 판정할 자리다 — 위 retime은 keep 밖 항목을 버리므로
+    #   노출 가드·눈검사 재컷을 거친 뒤에는 내레이션이 인트로 한 줄만 남기도 한다.
+    #   영상 길이 기준 슬롯 수에 미달하면 다시 짠다(ensure_narration, soft-fail).
+    ensure_narration(c, code, em)
+    nar_n = len(P.srt_parse(outdir / f"{code}_내레이션.srt"))         if (outdir / f"{code}_내레이션.srt").is_file() else 0
     return {"step": "subs", "code": code,
             "srt_dialogue": str(outdir / f"{code}_대사.srt"),
             "srt_narration": str(outdir / f"{code}_내레이션.srt"),
+            "narration_count": nar_n,
             "summary": res.get("summary", ""), "stars": P.clamp_stars(res.get("stars"))}
 
 
