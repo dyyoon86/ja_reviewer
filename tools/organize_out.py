@@ -187,6 +187,8 @@ def main():
     ap.add_argument("--only", default="", help="이 품번만(쉼표 구분)")
     ap.add_argument("--relink", action="store_true", help="기존 _산출물/을 지우고 다시 만든다")
     ap.add_argument("--copy", action="store_true", help="하드링크 대신 복사(다른 드라이브로 뺄 때)")
+    ap.add_argument("--src", help="원본 영상 폴더(랭킹 txt가 있는 곳). 주면 out_dir 밑에 "
+                                  "_순위/ 를 만들어 'NN위_품번_배우' 이름으로 정리한다")
     args = ap.parse_args()
 
     cfg = _common.load_cfg()
@@ -227,6 +229,49 @@ def main():
            "알고리즘 설명은 저장소의 `docs/파이프라인_알고리즘.md` 참고.", ""]
     (outdir / "00_안내.md").write_text("\n".join(idx), encoding="utf-8")
     print(f"\n✔ 배치 안내: {outdir / '00_안내.md'}")
+
+    # ── 순위 뷰 ──────────────────────────────────────────────────────────────
+    # 품번 폴더만 보면 뭐가 1위인지 알 수 없다(사용자 지적). 폴더명을 바꾸면 코드가
+    # 품번으로 경로를 찾으므로 못 바꾼다 — 대신 하드링크로 '순위 이름' 뷰를 따로 만든다.
+    if not args.src:
+        return 0
+    try:
+        from _ranklist import load_rank, find_rank_file, match_videos, load_details
+        rf = find_rank_file(args.src)
+        pairs, _m, _e = match_videos(load_rank(rf), args.src)
+        det = load_details(rf)
+    except Exception as e:
+        print(f"※ 랭킹을 못 읽어 _순위/ 생략({e})")
+        return 0
+
+    rankdir = outdir / "_순위"
+    if rankdir.is_dir():
+        shutil.rmtree(rankdir, ignore_errors=True)
+    rankdir.mkdir(parents=True, exist_ok=True)
+    lines = ["# 순위별 보기", "",
+             "품번 폴더는 그대로 두고 하드링크로 만든 뷰다(디스크 0바이트).",
+             "재생 순서는 **꼴찌 → 1위** 카운트다운이다.", "",
+             "| 재생 | 순위 | 품번 | 배우 | 👍/👎 |", "|---|---|---|---|---|"]
+    for play, (rank, code, _v) in enumerate(sorted(pairs, key=lambda x: -x[0]), 1):
+        src_dir = outdir / code
+        if not src_dir.is_dir():
+            continue
+        d = det.get(code.upper()) or {}
+        act = d.get("actress", "")
+        name = f"{rank:02d}위_{code}" + (f"_{act}" if act else "")
+        dst = rankdir / name
+        n = 0
+        for f in sorted(src_dir.iterdir()):
+            if f.is_file() and not f.name.endswith((".part", ".hold")):
+                if link_or_copy(f, dst / f.name, args.copy, print) != "건너뜀":
+                    n += 1
+        lk, dk = d.get("likes"), d.get("dislikes")
+        pop = f"{lk}/{dk}" if lk is not None else "—"
+        lines.append(f"| {play}번째 | **{rank}위** | `{code}` | {act} | {pop} |")
+        print(f"  _순위/{name}  ({n}개)")
+    (rankdir / "00_순위.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    top = sorted(pairs)[0][1] if pairs else "?"
+    print(f"\n✔ 순위 뷰: {rankdir}   (1위 = {top})")
     return 0
 
 

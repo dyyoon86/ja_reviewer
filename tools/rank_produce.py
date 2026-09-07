@@ -51,6 +51,8 @@ def main():
     ap.add_argument("--seq", metavar="i/n",
                     help="서수 인트로를 강제 지정(예: 9/12). --only 로 한 편만 다시 돌릴 때 "
                          "todo 가 1개라 seq 가 (1,1) 로 잘못 잡히는 것을 막는다.")
+    ap.add_argument("--style", help="문체 오버라이드(3min|cinema|gootabari|jindong|naeson). "
+                                    "생략 시 state의 style")
     ap.add_argument("--keep-nar", action="store_true",
                     help="★확정한 내레이션을 그대로 쓰고 재생성을 건너뛴다. 기본은 regen 이라 "
                          "사람이 검수해 확정한 대본이 새 LLM 출력으로 덮어써진다(ja16 사고).")
@@ -71,6 +73,13 @@ def main():
     items = load_rank(rank_f)
     pairs, missing, extra = match_videos(items, args.src)
     order = [(r, c) for r, c, _v in pairs]
+    # 순위·호감도 — 내레이션의 '판단 전용 팩트'로 넘긴다(카운트다운 연출에도 쓰인다)
+    try:
+        from _ranklist import load_details
+        details = load_details(rank_f)
+    except Exception as e:
+        print(f"※ 랭킹 상세를 못 읽었습니다({e}) — 순위 연출 없이 진행")
+        details = {}
     if args.reverse:
         order = list(reversed(order))
     # ★seq 는 '실제로 굽는 편'만 세야 한다 — 제외분을 먼저 걷어내고 번호를 매긴다.
@@ -115,8 +124,13 @@ def main():
                 em.log(f"--keep-nar: 확정 대본 그대로 사용 ({srt.name})")
             else:
                 st = stages.load_state(outdir, code)
+                d = details.get(code.upper()) or {}
+                rank_info = {"rank": rank, "total": len(order),
+                             "likes": d.get("likes"), "dislikes": d.get("dislikes"),
+                             "views": d.get("views")}
                 regen_narration(outdir, cfg["meta_api"], log=em.log, seq=seq,
-                                style=st.get("style") or "3min")
+                                style=args.style or st.get("style") or "3min",
+                                rank=rank_info)
                 stages.save_state(outdir, code, seq=list(seq))   # 나중 재실행이 서수를 안다
 
             step = "배너"

@@ -105,6 +105,16 @@ def load_details(path):
                 out[cur][LABELS[s]] = val
         elif s.startswith("⏱"):
             out[cur]["runtime"] = s[1:].strip()
+        elif s.startswith("👁"):
+            m2 = re.search(r"([\d,]+)", s)
+            if m2:
+                out[cur]["views"] = int(m2.group(1).replace(",", ""))
+        elif s.startswith("👍"):
+            # "👍 46 / 👎 1 (+45)"
+            m2 = re.search(r"👍\s*([\d,]+).*?👎\s*([\d,]+)", s)
+            if m2:
+                out[cur]["likes"] = int(m2.group(1).replace(",", ""))
+                out[cur]["dislikes"] = int(m2.group(2).replace(",", ""))
         elif ISO.match(s):
             for prev in range(i - 1, -1, -1):
                 p = lines[prev].strip()

@@ -83,6 +83,7 @@ PROMPTS_NEUTRAL = [
 DEFAULT_STEP = 2.0        # 프레임 샘플 간격(초)
 DEFAULT_THRESHOLD = 0.02  # 스무딩된 margin 임계 (실측: 애무 0.027~0.046 / 대화 -0.004~+0.014)
 DEFAULT_MIN_DUR = 14.0    # 이 시간 이상 지속돼야 스킨십 구간 (고립 스파이크 오탐 제거)
+# (아래 SMOOTH_SEC 와 짝 — 둘을 같이 내려야 짧은 장면이 잡힌다)
 SMOOTH_SEC = 14.0         # 이동평균 폭(초)
 REL_DELTA = 0.010         # 상대 임계 = 이 작품의 margin 중앙값 + 이 값 (절대 임계는 하한)
 MAX_CUT_RATIO = 0.90      # 이 비율을 넘게 잘라내려 하면 임계를 올려 완화(전멸 방지)
