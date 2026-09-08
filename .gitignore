@@ -15,3 +15,6 @@ models/
 # OMC 상태/설정 백업
 .omc/
 studio_config.json.bak*
+
+# 편집 중 실수로 생긴 임시/백업 파일
+*.bak_*
