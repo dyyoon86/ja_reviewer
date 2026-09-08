@@ -1236,7 +1236,10 @@ S{n_total}: "표정 하나로 다 끌고 가는 작품. 완벽한 참교육의 �
         if len(t) <= lim:
             it["text"] = t
             continue
-        parts = re.findall(r"[^.!?]+[.!?]?", t)
+        # ★마침표 뒤에 공백이나 문장 끝이 올 때만 자른다. 예전 규칙(r"[^.!?]+[.!?]?")은
+        #   "S1 넘버.원 스타일" 의 가운데 마침표에서 끊어 뒤를 통째로 버렸다
+        #   (ja21 SNOS-310: "…하카타 이로하, S1 넘버." 로 잘리고 순위 호명까지 소실).
+        parts = re.split(r"(?<=[.!?])\s+", t)
         keep_txt = ""
         for p in parts:
             p = p.strip()
@@ -1290,6 +1293,17 @@ S{n_total}: "표정 하나로 다 끌고 가는 작품. 완벽한 참교육의 �
         result.extend(chunk)
         item_idx += cnt
     new_nar = result
+
+    # ★1번 줄 순위 호명 보증 — 모음집에서 한 편만 호명이 빠지면 바로 티가 난다.
+    #   LLM 이 슬롯 규칙을 어기거나 글자수 강제로 앞이 잘려나가는 일이 실제로 있었다
+    #   (ja21 SNOS-310). 프롬프트에 기대지 않고 여기서 확정적으로 복구한다.
+    if rank and rank.get("rank") and new_nar:
+        head = str(new_nar[0].get("text", "")).strip()
+        if not re.match(r"^\s*\d{1,2}\s*위", head):
+            who = (meta or {}).get("actress") or code
+            fixed = f"{rank['rank']}위, {who}입니다."
+            log(f"  ★1번 줄에 순위 호명이 없어 복구: \"{head[:20]}…\" → \"{fixed}\"")
+            new_nar[0]["text"] = fixed
 
     # plan.json 저장 (trim 좌표 보존)
     plan["narration"] = new_nar
