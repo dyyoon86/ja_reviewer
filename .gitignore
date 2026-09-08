@@ -18,3 +18,7 @@ studio_config.json.bak*
 
 # 편집 중 실수로 생긴 임시/백업 파일
 *.bak_*
+
+# 섹션4 BGM 원곡 — 38MB 바이너리라 저장소에 넣지 않는다.
+# 받는 법은 section4/bgm/출처.md 참고(incompetech 직링크).
+section4/bgm/*.mp3

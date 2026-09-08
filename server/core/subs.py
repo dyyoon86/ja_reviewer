@@ -2,11 +2,15 @@
 # -*- coding: utf-8 -*-
 """⑥ 자막 굽기(ASS 하드섭) + 인포배너 오버레이."""
 import json
+import re
 import subprocess
 from pathlib import Path
 
 from .common import FFMPEG_TIMEOUT, _part_path, _finalize, srt_parse, video_duration, video_wh
 from .cutter import has_nvenc, _vcodec_args
+
+_TAG_RE = re.compile(r"\{[^}]*\}")
+
 
 def _ass_color(hexstr, alpha="00"):
     """#RRGGBB → ASS &HAABBGGRR. alpha는 "80" 같은 hex 문자열 또는 0~255 정수.
@@ -323,6 +327,9 @@ def _plate_events(rows, st, w, h, style_name):
         a, b, text = row[0], row[1], row[2]
         cy = row[3] if len(row) > 3 else None
         lines = str(text).split("\\N")
+        # ★인라인 ASS 오버라이드(노래방 \\k, 색 전환 \\t 등)는 화면에 안 보인다 —
+        #   폭 계산에서 빼야 태그를 넣은 줄의 배경판이 터무니없이 넓어지지 않는다(2026-09-08).
+        lines = [_TAG_RE.sub("", ln) for ln in lines]
         tw = max((_text_width(ln, font, size, st.get("bold", True)) for ln in lines), default=0)
         text_h = line_h * len(lines)
         bw = tw + pad_x * 2
