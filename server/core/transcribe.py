@@ -202,7 +202,18 @@ def transcribe_ranges(video, ranges, model_name="large-v3", log=print, progress=
                 if _looks_hallucinated(t):
                     dropped += 1
                     continue
-                out.append((pa + float(s.start), min(b, pa + float(s.end)), t))
+                s0, s1 = pa + float(s.start), pa + float(s.end)
+                # ★2026-09-08 — 시작 시각을 keep 구간 안으로 **당겨 넣는다**.
+                #   위에서 앞 0.3s 를 패딩해 잘랐고 whisper VAD 가 speech_pad_ms=200 을 더
+                #   얹어, 구간 첫 발화는 시작이 a 보다 최대 0.5s 앞선 채 나온다. 그런데
+                #   호출부(stage_ai)는 `a - 0.05 <= s[0]` 로 걸러서 그 줄을 통째로 버렸다.
+                #   하필 구간 첫 줄이라 여러 문장이 뭉쳐 길다 — MIDA-798 은 3줄 탈락에
+                #   대사 17초가 날아갔고(자막 누락 21%), 소리는 나는데 자막이 없었다.
+                #   패딩은 경계 단어가 잘리지 않게 하려는 것이지 구간 밖으로 나가라는 뜻이
+                #   아니므로, 여기서 [a, b] 안으로 클램프한다.
+                if s1 <= a + 0.05:          # 패딩 영역에만 있던 발화 — 구간 밖이라 버린다
+                    continue
+                out.append((max(a, s0), min(b, s1), t))
                 n += 1
             done += b - a
             if progress and total:

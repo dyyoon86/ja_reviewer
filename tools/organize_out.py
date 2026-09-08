@@ -204,6 +204,12 @@ def main():
         return 1
 
     print(f"out_dir={outdir} / 대상 {len(codes)}편\n")
+    # ★2026-09-07 — --src(순위 뷰)를 쓰면 품번별 _산출물/ 은 만들지 않는다.
+    #   둘 다 같은 파일을 가리키는 하드링크 뷰라 완전히 중복이고, 품번 폴더 안에
+    #   또 하나의 트리가 생겨 오히려 지저분해진다(사용자 지적). 순위 뷰가 상위 호환이다.
+    if args.src:
+        print("  (--src 지정 — 품번별 _산출물/ 대신 _순위/ 로만 정리한다)\n")
+        codes = []
     for code in codes:
         n, missing = organize(outdir, code, args.copy, args.relink, print)
         gap = f"  (아직 없음 {len(missing)}종)" if missing else ""

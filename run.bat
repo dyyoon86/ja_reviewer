@@ -12,10 +12,8 @@ if not exist ".venv" (
     pause
     exit /b 1
   )
-  call ".venv\Scripts\activate.bat"
-  echo [2/3] Installing packages first run only, may take a few minutes ...
-  python -m pip install --upgrade pip
-  pip install -r "server\requirements.txt"
+  
+  call ".venv\Scripts\activate.bat"1
 ) else (
   call ".venv\Scripts\activate.bat"
 )

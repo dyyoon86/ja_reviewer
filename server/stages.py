@@ -951,8 +951,12 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
             if keep2 != keep:
                 keep = keep2
                 res["keep"] = [[a, b] for a, b in keep]
+            # ★2026-09-08 — 시작 시각 포함관계가 아니라 **구간과 겹치는지**로 거른다.
+            #   예전 `a - 0.05 <= s[0] < b + 0.05` 는 구간 첫 발화(패딩 때문에 시작이
+            #   a 보다 앞선다)를 통째로 버려 자막이 통으로 빠졌다. transcribe_ranges 가
+            #   이제 [a,b] 로 클램프하지만, 다른 전사 경로로도 들어오므로 여기서도 막는다.
             fine = [s for s in fine
-                    if any(a - 0.05 <= s[0] < b + 0.05 for a, b in keep)]
+                    if any(min(s[1], b) - max(s[0], a) > 0.05 for a, b in keep)]
         except Exception as e:
             em.log(f"※ 정밀 재전사 실패({type(e).__name__}: {e}) — 러프 전사로 대사자막을 만듭니다")
             fine = []
@@ -1116,6 +1120,15 @@ def stage_tts(c, code, base, profile, language, seed, mux, em,
     entries = P.srt_parse(srt)
     if not entries:
         raise RuntimeError("내레이션 항목이 없습니다.")
+    # ★2026-09-08 — TTS 앞에서 자막을 한 번 더 검증한다(사용자 요청).
+    #   여기를 지나면 음성·하드섭까지 다시 만들어야 하므로 되돌리는 비용이 가장 싼 지점이다.
+    #   final 영상을 재전사해 "소리는 나는데 자막이 없는 구간"까지 본다 — 구조 점검만으로는
+    #   MIKR-118·SNOS-372·MIDA-798 의 자막 누락(21~31%)이 전부 '정상'으로 통과했다.
+    from server.core import precheck
+    precheck.guard(outdir, code, log=em.log,
+                   audio=bool(c.get("tts_precheck_audio", True)),
+                   model=c.get("precheck_model", "small"),
+                   mode=str(c.get("tts_precheck", "block")))
     clipdir = outdir / f"{code}_tts"; clipdir.mkdir(parents=True, exist_ok=True)
     # 화자 선별 — voicebox 생성 편차(실측 0.815~0.920)로 문장 하나가 다른 목소리처럼
     # 들리는 것 방지. seed를 바꿔 후보를 만들고 기준 임베딩에 가까운 것을 채택한다.
