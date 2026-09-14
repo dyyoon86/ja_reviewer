@@ -18,6 +18,7 @@ r"""ja 배치 원커맨드 — 섹션1 → 섹션4를 한 번에 돌린다.
              (통과면 `_사전눈검사/통과.txt` 를 만들고 --from produce)
   4 produce  rank_produce.py --phase burn   배너 + 번인 + 노출 자동검사(TTS 없음)
   5 eyecheck 격리분 프레임 추출 → 사람 확인 대기(있을 때만)
+  5a cover   _cover_corners.py              양쪽 위 모서리 타사 워터마크(SUPJAV 등) 덮개 — 번인 뒤에만
   5b tts     rank_produce.py --phase tts    내레이션 음성 — 재컷 가능성이 끝난 뒤에 뽑는다
   6 intro    section4_intro.py tts → build → render
   7 narsub   add_narsub.py      납품본에 해설 음성 + 해설 자막
@@ -46,7 +47,8 @@ import _common  # noqa: F401
 ROOT = Path(__file__).resolve().parent.parent
 PY = sys.executable
 T = Path(__file__).resolve().parent
-STEPS = ["clean", "review", "check", "precheck", "produce", "eyecheck", "tts", "intro", "narsub", "tidy"]
+STEPS = ["clean", "review", "check", "precheck", "produce", "eyecheck", "cover", "tts", "intro",
+         "narsub", "tidy"]
 
 
 def run(title, cmd, allow_fail=False):
@@ -250,8 +252,12 @@ def main():
             print(f"  {out / '_검수프레임'} 의 프레임을 **눈으로** 보세요.")
             print("  · 오검출이면:  _검수필요 → _완성 으로 옮기고 아래 명령으로 재개")
             print("  · 진짜 노출이면: tools\\_dropfinal.py 로 재컷")
-            print(f"\n  재개: python tools\\run_ja.py --src {src} --out {out} --from tts")
+            print(f"\n  재개: python tools\\run_ja.py --src {src} --out {out} --from cover")
             return 2
+    if "cover" in todo:
+        # 번인이 끝나 _완성 에 모인 뒤에만 의미가 있다(재번인하면 덮개가 날아간다 — 마커로 중복 방지)
+        if run("5a 모서리 워터마크 덮개", [PY, T / "_cover_corners.py", "--out", out]):
+            return 1
     if "tts" in todo:
         # ★음성은 맨 뒤 — 노출검사·눈검사로 재컷될 일이 끝난 영상 길이에 맞춰 한 번만 뽑는다
         if run("5b 내레이션 TTS (섹션3 마무리)",
