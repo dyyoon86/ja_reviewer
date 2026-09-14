@@ -43,6 +43,13 @@ def week_span(ref):
     return monday - dt.timedelta(days=6), monday        # 지난주 화요일 ~ 이번주 월요일
 
 
+def week_label(ref=None):
+    """러닝헤드용 회차 이름 — '9월 둘째 주'. 기준일(생략 시 오늘)이 그 달 몇째 주인지(1~7일=첫째)."""
+    ref = ref or dt.date.today()
+    nth = ["첫째", "둘째", "셋째", "넷째", "다섯째"][min(4, (ref.day - 1) // 7)]
+    return f"{ref.month}월 {nth} 주".replace("첫째 주", "첫 주")
+
+
 def count_remote(a, b):
     cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", SSH_HOST,
            "python3 -c \"import sqlite3;print(sqlite3.connect('%s')"

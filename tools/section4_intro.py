@@ -205,7 +205,8 @@ def cmd_build(args, cfg):
     html = build_html(have, lines, total, pool=args.pool,
                       has_audio=(assets / "narration.wav").is_file(),
                       cap_style=args.cap_style,
-                      has_bgm=(assets / "bgm.mp3").is_file())
+                      has_bgm=(assets / "bgm.mp3").is_file(),
+                      week=args.week)
     (proj / "index.html").write_text(html, encoding="utf-8")
     print(f"\n[OK] {proj / 'index.html'}  ({len(have)}편, {total + 0.8:.1f}초)")
     print(f"   확인:  cd {proj} && npx hyperframes check")
@@ -335,7 +336,9 @@ def main():
     ap.add_argument("cmd", choices=["tts", "build", "render", "merge"])
     ap.add_argument("--out", help="out_dir. 생략 시 config out_dir")
     ap.add_argument("--src", help="원본 폴더(랭킹 txt 위치) — build/merge 에 필요")
-    ap.add_argument("--pool", type=int, default=500, help="이번 주 신작 총량(1번 줄 숫자)")
+    ap.add_argument("--pool", type=int, default=None,
+                    help="이번 주 신작 총량(첫 씬 카운터). 생략 시 수집 DB 실측(jav_week_count)")
+    ap.add_argument("--week", default=None, help="러닝헤드 회차 이름. 생략 시 오늘 기준 'N월 둘째 주'")
     ap.add_argument("--force", action="store_true", help="tts: 기존 wav 무시하고 재생성")
     ap.add_argument("--transition", default="0.6",
                     help="merge: 편 사이 크로스페이드 초. 0 이면 하드컷(기본 0.6)")
@@ -343,6 +346,17 @@ def main():
                     help="자막 연출: punch=펀치줌+휙 패닝(기본) / type=타자체 / slide=위로 슬라이드")
     args = ap.parse_args()
     cfg = _common.load_cfg()
+    # ★회차 이름·신작 수를 코드에 박아 두지 않는다 — 지난주 '9월 첫 주 / 500편' 이 그대로 나갈 뻔했다
+    from jav_week_count import week_label, measure
+    import datetime as _dt
+    args.week = args.week or week_label()
+    if args.pool is None and args.cmd == "build":
+        try:
+            args.pool = measure(_dt.date.today())["pool"]
+            print(f"신작 수 실측: {args.pool}편 / 회차: {args.week}")
+        except Exception as e:
+            args.pool = 500
+            print(f"  [!] 신작 수 실측 실패({e}) — 500 으로 진행")
     if args.cmd in ("build", "merge") and not args.src:
         print("[X] --src (랭킹 txt 가 있는 원본 폴더)가 필요합니다")
         return 1

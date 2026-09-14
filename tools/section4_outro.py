@@ -42,6 +42,7 @@ sys.stderr.reconfigure(encoding="utf-8")
 import _common  # noqa: F401
 from server import pipeline as P
 from section4_html_outro import build as build_html
+from jav_week_count import week_label
 
 ROOT = Path(__file__).resolve().parent.parent
 TPL_DIR = ROOT / "section4"
@@ -381,7 +382,7 @@ def cmd_build(args, cfg):
                       has_audio=(assets / "narration.wav").is_file(),
                       cap_style=args.cap_style,
                       has_bgm=(assets / "bgm.mp3").is_file(),
-                      week=args.week, prev_thumb=prev, tail=TAIL,
+                      week=args.week or week_label(), prev_thumb=prev, tail=TAIL,
                       pool=pool, span_label=span_label)
     (proj / "index.html").write_text(html, encoding="utf-8")
     print(f"\n[OK] {proj / 'index.html'}  ({len(have)}편, {dur_total:.1f}초)")
@@ -432,7 +433,7 @@ def main():
     ap.add_argument("--out", help="out_dir. 생략 시 config out_dir")
     ap.add_argument("--src", help="원본 폴더(랭킹 txt 위치). 생략 시 _중간산출물/_순위/00_순위.md")
     ap.add_argument("--prev", help="지난주 랭킹 영상 썸네일 이미지(선택)")
-    ap.add_argument("--week", default="9월 첫 주", help="러닝헤드에 박히는 회차 이름")
+    ap.add_argument("--week", default=None, help="러닝헤드 회차 이름. 생략 시 오늘 기준 'N월 둘째 주'")
     ap.add_argument("--pool", type=int,
                     help="회차 수집량. 생략 시 수집 DB에서 실측(jav_week_count)")
     ap.add_argument("--span", help="구독 씬에 박히는 회차 범위 문구. 생략 시 실측값")

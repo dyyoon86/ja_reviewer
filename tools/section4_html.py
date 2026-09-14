@@ -92,10 +92,16 @@ def chunk(text, max_chars=20):
 
 
 def build(rows, lines, total, pool=500, has_audio=False, cap_style="punch",
-          has_bgm=False):
+          has_bgm=False, week="이번 주"):
     rows = sorted(rows, key=lambda r: r["rank"])
     desc = sorted(rows, key=lambda r: -r["rank"])          # 12위 → 1위 (재생 순서)
     top1 = rows[0] if rows else None
+    # ★1위 스코어보드 한 줄 — 예전엔 '싫어요 한 분, 누구죠?' 가 박혀 있었다(ja21 1위 46:1 용).
+    #   싫어요 24개인 주에 그대로 나가면 화면이 거짓말을 한다 → 수치에 따라 고른다.
+    _dis = int((top1 or {}).get("dislikes") or 0)
+    who_html = ("싫어요 <u>0개</u>, 만장일치" if _dis == 0 else
+                "싫어요 한 분, <u>누구죠?</u>" if _dis == 1 else
+                f"싫어요도 <u>{_dis}개</u>, 호불호 최강")
     last = desc[0] if desc else None
     likes = sum(r.get("likes") or 0 for r in rows)
     dis = sum(r.get("dislikes") or 0 for r in rows)
@@ -369,7 +375,7 @@ def build(rows, lines, total, pool=500, has_audio=False, cap_style="punch",
       <div id="s1" class="clip sheet" data-start="{s[0][0]}" data-duration="{s[0][1]}"
            data-track-index="1">
         <div class="lead">
-          <div class="kicker">9월 첫 주 신작</div>
+          <div class="kicker">{week} 신작</div>
           <div id="counter">0<i>편</i></div>
         </div>
       </div>
@@ -398,7 +404,7 @@ def build(rows, lines, total, pool=500, has_audio=False, cap_style="punch",
         <div class="lead">
           <div class="kicker">이번 주 1위</div>
           <div class="score"><em>{top1['likes'] if top1 else 0}</em><span>:</span>{top1['dislikes'] if top1 else 0}</div>
-          <div class="who" id="who">싫어요 한 분, <u>누구죠?</u></div>
+          <div class="who" id="who">{who_html}</div>
         </div>
       </div>
 
@@ -417,7 +423,7 @@ def build(rows, lines, total, pool=500, has_audio=False, cap_style="punch",
       <div id="runhead" class="clip runhead" data-start="{frame_from}"
            data-duration="{round(dur_total - frame_from, 2)}" data-track-index="9">
         <div class="bar"></div>
-        <div class="t">9월 첫 주 <em>· JAV 신작 랭킹</em></div>
+        <div class="t">{week} <em>· JAV 신작 랭킹</em></div>
       </div>
 
       <div id="ticker" class="clip ticker" data-start="{frame_from}"

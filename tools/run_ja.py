@@ -184,7 +184,9 @@ def main():
     ap = argparse.ArgumentParser(description="ja 배치 원커맨드(섹션1~4)")
     ap.add_argument("--src", required=True, help="원본 영상 폴더(랭킹 txt 포함)")
     ap.add_argument("--out", required=True, help="배치 출력 폴더")
-    ap.add_argument("--pool", type=int, default=500, help="인트로 1번 줄 숫자(주간 신작 총량)")
+    ap.add_argument("--pool", type=int, default=None,
+                    help="주간 신작 총량. 생략 시 수집 DB 실측(jav_week_count)")
+    ap.add_argument("--week", default=None, help="러닝헤드 회차 이름. 생략 시 오늘 기준 'N월 둘째 주'")
     ap.add_argument("--from", dest="start", default="clean", choices=STEPS)
     ap.add_argument("--to", dest="stop", default="tidy", choices=STEPS)
     ap.add_argument("--skip-intro", action="store_true", help="섹션4 없이 편별 납품본까지만")
@@ -267,12 +269,21 @@ def main():
     if "intro" in todo:
         script = ROOT / "section4" / "멘트.txt"
         print(f"\n[확인] 인트로 대본: {script}")
-        print(f"       주간 신작 총량 --pool {args.pool}")
+        print(f"       주간 신작 총량 --pool {args.pool or '실측'} / 회차 {args.week or '자동'}")
+        opt = (["--pool", args.pool] if args.pool else []) + (["--week", args.week] if args.week else [])
         for c in ("tts", "build", "render"):
             cmd = [PY, T / "section4_intro.py", c, "--out", out]
             if c == "build":
-                cmd += ["--src", src, "--pool", args.pool]
+                cmd += ["--src", src] + opt
             if run(f"6 인트로 {c} (섹션4)", cmd):
+                return 1
+        # ★아웃트로도 같은 단계에서 만든다 — 빠져 있어서 merge 가 붙일 파일이 없었다(ja22 발견).
+        #   대본은 section4/멘트_아웃트로.txt(배치 폴더 _아웃트로/멘트.txt 우선).
+        for c in ("tts", "build", "render"):
+            cmd = [PY, T / "section4_outro.py", c, "--out", out]
+            if c == "build":
+                cmd += ["--src", src] + opt
+            if run(f"6b 아웃트로 {c} (섹션4)", cmd):
                 return 1
     if "narsub" in todo:
         if run("7 해설 음성 + 해설 자막",
