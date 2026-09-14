@@ -39,7 +39,7 @@ from server import stages
 from server.core.cutter import has_nvenc, _vcodec_args
 from _cover_wm import build_cover, border_width
 
-INTRO_DELOGO = (1742, 47, 154, 76)   # x, y, w, h — 인트로 동안 "SUP" 자리
+INTRO_DELOGO = (1742, 47, 154, 150)  # x, y, w, h — 인트로 동안 "SUP"·제작사 로고 자리
 
 
 def gap_patch(wm_png, frame_png, out_png):
@@ -56,8 +56,18 @@ def gap_patch(wm_png, frame_png, out_png):
     a2 = int(round((1 - (1 - a) ** 2) * 255))          # 카드를 두 겹 얹었을 때와 같은 농도
     x_end = W - border_width(frame_png)
     patch = np.zeros_like(wm)
-    patch[cy0:cy1 + 1, cx1 - 28:x_end, :3] = rgb
-    patch[cy0:cy1 + 1, cx1 - 28:x_end, 3] = a2
+    # ★카드 두 겹(≈95%)으로는 흰 "SUP" 이 여전히 비쳤다(ja22 FNS-256 실측). "SUP" 자리
+    #   (x 1765~)에는 한 겹을 더 얹어 ≈99.5% 로 만들고, 왼쪽 60px 은 0→230 으로 번지게 해
+    #   카드 안에서 농도 경계가 보이지 않게 한다. 카드 끝~테두리 틈은 두 겹 농도로 메운다.
+    #   세로는 "SUP" 높이(~y128)까지만 — 그 아래 카드 셋째 줄(발매일·3사이즈·키)이
+    #   오른쪽 끝까지 이어져 있어 덮으면 글자가 먹힌다.
+    x_sup, y_sup = 1705, min(cy1, 128)
+    patch[cy0:y_sup, x_sup:x_end, :3] = rgb
+    patch[cy0:y_sup, x_sup:x_sup + 60, 3] = np.linspace(0, 250, 60).astype(np.uint8)
+    patch[cy0:y_sup, x_sup + 60:x_end, 3] = 250
+    patch[y_sup:cy1 + 1, cx1 - 28:x_end, :3] = rgb
+    patch[cy0:cy1 + 1, cx1 - 28:x_end, 3] = np.maximum(
+        patch[cy0:cy1 + 1, cx1 - 28:x_end, 3], a2)
     Image.fromarray(patch).save(out_png)
     return dict(card_right=int(cx1), top=int(cy0), bottom=int(cy1), alpha=a, alpha2=a2)
 
