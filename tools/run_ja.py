@@ -14,6 +14,8 @@ r"""ja 배치 원커맨드 — 섹션1 → 섹션4를 한 번에 돌린다.
              rank_tighten.py    ├ 마무리①: keep 안 대사 없는 빈 구간 제거(템포)
              rank_renarrate.py  └ 마무리②: 꼴찌 → 1위 순위 호명 내레이션(Claude)
   3 check    check_before_tts.py --fix   자막 누락 자동 수리 + 순위 호명 검사
+  3b precheck 사전 눈검사 — 컷본 2초 몽타주 + 후킹 제목 누락 검사 → 사람 확인 대기
+             (통과면 `_사전눈검사/통과.txt` 를 만들고 --from produce)
   4 produce  rank_produce.py --phase burn   배너 + 번인 + 노출 자동검사(TTS 없음)
   5 eyecheck 격리분 프레임 추출 → 사람 확인 대기(있을 때만)
   5b tts     rank_produce.py --phase tts    내레이션 음성 — 재컷 가능성이 끝난 뒤에 뽑는다
@@ -44,7 +46,7 @@ import _common  # noqa: F401
 ROOT = Path(__file__).resolve().parent.parent
 PY = sys.executable
 T = Path(__file__).resolve().parent
-STEPS = ["clean", "review", "check", "produce", "eyecheck", "tts", "intro", "narsub", "tidy"]
+STEPS = ["clean", "review", "check", "precheck", "produce", "eyecheck", "tts", "intro", "narsub", "tidy"]
 
 
 def run(title, cmd, allow_fail=False):
@@ -72,8 +74,10 @@ def eyecheck(out, log=print):
         log("격리분 없음 — 눈검사 건너뜀")
         return []
     import re
-    logf = out / "_로그" / "produce.log"
-    text = logf.read_text(encoding="utf-8", errors="replace") if logf.is_file() else ""
+    # ★검출 시각은 번인 로그에만 있다. 예전엔 `_로그/produce.log` 한 파일만 봤는데 run_ja 는
+    #   그 파일을 만들지 않아 늘 25/50/75% 지점으로 떨어졌다(ja22 실측) — 로그 폴더 전체를 본다.
+    logs = sorted((out / "_로그").glob("*.log")) if (out / "_로그").is_dir() else []
+    text = "\n".join(f.read_text(encoding="utf-8", errors="replace") for f in logs)
     dst = out / "_검수프레임"
     dst.mkdir(parents=True, exist_ok=True)
     for f in files:
@@ -92,6 +96,55 @@ def eyecheck(out, log=print):
                             str(dst / f"{code}_{t:.1f}s.jpg")])
         log(f"  {code}: 프레임 {len(times)}장 → {dst}")
     return [f.stem for f in files]
+
+
+def precheck(out, src, cfg, log=print):
+    """★사전 눈검사 — 번인·TTS 에 돈을 쓰기 전에 컷본을 사람이 본다.
+
+    ja22 실측: 섹션3 전에 2초 몽타주로 훑어 결박·접촉·가터 클로즈업·화면 'セックス' 자막을
+    4편에서 걸렀다. NudeNet 은 옷 입은 성적 접촉·모자이크·화면 글자를 원리적으로 못 본다.
+    같은 자리에서 **후킹 제목 누락**도 본다 — 비어 있으면 배너가 일본어 원제
+    ('中出し浮気セックス…')를 인트로 5초 동안 크게 띄운다(ja22 12편 전부 비어 있었다).
+
+    반환: 사람이 확인해야 할 게 남았으면 True(멈춤), 통과 표시가 최신이면 False.
+    """
+    from _ranklist import load_rank, find_rank_file, match_videos
+    from server import pipeline as P
+    pairs, _m, _e = match_videos(load_rank(find_rank_file(src)), src)
+    dst = out / "_사전눈검사"
+    dst.mkdir(parents=True, exist_ok=True)
+    ok_mark = dst / "통과.txt"
+    finals, no_hook = [], []
+    for rank, code, _v in pairs:
+        fin = out / code / f"{code}_final.mp4"
+        if not fin.is_file():
+            log(f"  [!] {code}: final.mp4 없음 — 섹션2를 먼저")
+            continue
+        finals.append(fin)
+        img = dst / f"{rank:02d}위_{code}.jpg"
+        if not img.is_file() or img.stat().st_mtime < fin.stat().st_mtime:
+            dur = P.video_duration(str(fin)) or 60.0
+            rows = max(1, -(-int(dur // 2 + 1) // 8))
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(fin), "-vf",
+                            f"fps=1/2,scale=240:-1,tile=8x{rows}", "-frames:v", "1", str(img)])
+        try:
+            m = P.fetch_meta(cfg["meta_api"], code, lambda *_: None)
+            if not str(m.get("hook_title") or "").strip():
+                no_hook.append(code)
+        except Exception as e:
+            log(f"  [!] {code}: 메타 조회 실패({e}) — 후킹 제목 확인 못 함")
+            no_hook.append(code)
+    log(f"  몽타주 {len(finals)}장 → {dst}  (한 칸 = 2초, 가로 8칸 = 16초)")
+    if no_hook:
+        log(f"  ★후킹 제목 없음 {len(no_hook)}편: {', '.join(no_hook)}")
+        log("    → works.hook_title 을 채울 것(한글 20자 이내·노골 표현 금지, 우분투 DB). "
+            "비우면 배너에 일본어 원제가 뜬다")
+        return True
+    newest = max((f.stat().st_mtime for f in finals), default=0)
+    if ok_mark.is_file() and ok_mark.stat().st_mtime >= newest:
+        log("  통과 표시가 최신 컷본보다 새것 — 계속 진행")
+        return False
+    return True
 
 
 def tidy(out, src, log=print):
@@ -171,8 +224,19 @@ def main():
         if run("3 TTS 전 점검 + 자동 수리", [PY, T / "check_before_tts.py", "--out", out,
                                             "--src", src, "--fix"], allow_fail=True):
             print("\n[!] 점검에서 걸린 편이 남아 있습니다. 위 안내대로 고친 뒤")
-            print(f"    python tools\\run_ja.py --src {src} --out {out} --from produce")
+            print(f"    python tools\\run_ja.py --src {src} --out {out} --from precheck")
             return 1
+    if "precheck" in todo:
+        print(f"\n{'=' * 72}\n▌3b 사전 눈검사 (번인·TTS 전)\n{'=' * 72}")
+        if precheck(out, src, cfg):
+            d = out / "_사전눈검사"
+            print(f"\n[일시정지] {d} 의 몽타주를 **눈으로** 보세요.")
+            print("  · 걸리는 구간(노출·성적 접촉·속옷·화면 속 노골 자막·미성년 설정)은 keep 에서 빼고")
+            print("    tools\\rank_renarrate.py 로 대본을 다시 맞춘 뒤 몽타주를 새로 봅니다")
+            print("  · 제외할 편은 원본 폴더 _제외.txt 에 품번을 적습니다")
+            print(f"  · 통과면:  {d / '통과.txt'} 를 만들고 아래 명령으로 재개")
+            print(f"\n  재개: python tools\\run_ja.py --src {src} --out {out} --from produce")
+            return 2
     if "produce" in todo:
         if run("4 배너·번인·노출검사 (섹션3)",
                [PY, T / "rank_produce.py", "--src", src, "--out", out, "--reverse", "--keep-nar",
