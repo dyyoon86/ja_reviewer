@@ -42,7 +42,11 @@ def find_rank_file(src):
         f = src / f"{m.group(1)}.txt"
         if f.is_file():
             return f
-    txts = sorted(src.glob("*.txt"))
+    f = src / f"{src.name}.txt"            # ja22 → ja22.txt
+    if f.is_file():
+        return f
+    # `_제외.txt` 같은 보조 파일(밑줄 시작)은 랭킹 후보가 아니다
+    txts = sorted(t for t in src.glob("*.txt") if not t.name.startswith("_"))
     if len(txts) == 1:
         return txts[0]
     if not txts:
@@ -140,9 +144,20 @@ def match_videos(items, src, renumber=True):
         c = guess_code(v.name)
         if c:
             have.setdefault(c, v)
+    # ★제외 목록 — 소스 폴더의 `_제외.txt`(한 줄에 품번 하나, # 뒤는 사유 메모).
+    #   영상이 있어도 모음집에서 뺄 편(미성년 설정 등). 빠진 순위와 똑같이 당겨 매긴다.
+    excl = set()
+    ef = Path(src) / "_제외.txt"
+    if ef.is_file():
+        for ln in ef.read_text(encoding="utf-8").splitlines():
+            c = ln.split("#", 1)[0].strip().upper()
+            if c:
+                excl.add(c)
     pairs, missing = [], []
     for rank, code in items:
-        if code in have:
+        if code in excl:
+            missing.append(f"{code}(제외)")
+        elif code in have:
             pairs.append((rank, code, have[code]))
         else:
             missing.append(code)

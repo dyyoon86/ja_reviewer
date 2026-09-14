@@ -15,6 +15,7 @@ r"""섹션2 → 섹션3 사이: 순위 호명 내레이션만 다시 쓴다(TTS�
 """
 import argparse
 import json
+import re
 import sys
 import time
 import traceback
@@ -29,6 +30,57 @@ from server import stages
 from server import pipeline as P
 from server.core.regen import regen_narration
 from batch_clean import CliEmitter
+
+
+RANK_HEAD = re.compile(r"^(\s*)\d{1,2}(\s*위)")
+
+
+def relabel_rank(outdir, code, rk, log=print):
+    """첫 줄 'N위' 숫자만 rk 로 바꾼다 — plan.narration / _내레이션.json / _내레이션.srt 셋 다."""
+    sub = lambda t: RANK_HEAD.sub(rf"\g<1>{rk}\g<2>", t, count=1)
+    pf = outdir / f"{code}_plan.json"
+    plan = json.loads(pf.read_text(encoding="utf-8"))
+    nar = sorted(plan.get("narration", []), key=lambda n: n["start"])
+    if nar:
+        nar[0]["text"] = sub(nar[0]["text"])
+        pf.write_text(json.dumps(plan, ensure_ascii=False, indent=1), encoding="utf-8")
+    jf = outdir / f"{code}_내레이션.json"
+    if jf.is_file():
+        js = json.loads(jf.read_text(encoding="utf-8"))
+        if js:
+            js[0]["text"] = sub(js[0]["text"])
+            jf.write_text(json.dumps(js, ensure_ascii=False, indent=1), encoding="utf-8")
+    sf = outdir / f"{code}_내레이션.srt"
+    txt = sf.read_text(encoding="utf-8")
+    # 1번 큐의 텍스트 줄(세 번째 줄)만 바꾼다
+    lines = txt.splitlines()
+    for i, ln in enumerate(lines):
+        if RANK_HEAD.match(ln):
+            lines[i] = sub(ln)
+            break
+    sf.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    log(f"[{code}] 순위 번호만 {rk}위로 수정(대본 유지)")
+
+
+def sync_json_to_srt(outdir, code, log=print):
+    """regen_narration 은 `_내레이션.json` 을 클린본 좌표로 남기고 srt 만 최종컷 좌표로 쓴다.
+    굽기(subs._fix_nar_coords)가 방어하긴 하지만, _sec2_check 가 전편 경고를 띄우고
+    json 을 읽는 다른 도구가 조용히 어긋나므로 여기서 srt 시각으로 맞춰 둔다(문장·유형 불변)."""
+    jf, sf = outdir / f"{code}_내레이션.json", outdir / f"{code}_내레이션.srt"
+    if not (jf.is_file() and sf.is_file()):
+        return
+    nar = json.loads(jf.read_text(encoding="utf-8"))
+    srt = P.srt_parse(sf)
+    body = [n for n in nar if n.get("style") != "드립"]     # 드립은 srt 에 없다
+    if len(body) != len(srt):
+        log(f"[{code}] ※ 내레이션 json {len(body)}줄 ≠ srt {len(srt)}줄 — 시각 동기화 생략")
+        return
+    if all(abs(n["start"] - a) < 0.01 for n, (a, _b, _t) in zip(body, srt)):
+        return
+    for n, (a, b, _t) in zip(body, srt):
+        n["start"], n["end"] = round(a, 3), round(b, 3)
+    jf.write_text(json.dumps(nar, ensure_ascii=False, indent=1), encoding="utf-8")
+    log(f"[{code}] 내레이션 json 시각을 최종컷(srt) 좌표로 동기화")
 
 
 def main():
@@ -72,11 +124,21 @@ def main():
         em = CliEmitter(code)
         t0 = time.time()
         srt_f = outdir / f"{code}_내레이션.srt"
-        if not args.redo and srt_f.is_file():
+        # rank_tighten 이 keep 을 줄였으면 기존 대본은 시각·분량이 안 맞는다 → 무조건 재작성
+        stale = bool(stages.load_state(outdir, code).get("renarrate_needed"))
+        if stale:
+            print(f"[{code}] 컷이 바뀜(빈 구간 제거) — 내레이션을 새 길이에 맞춰 다시 씁니다")
+        if not args.redo and not stale and srt_f.is_file():
             first = P.srt_parse(srt_f)
+            mm = re.match(r"^\s*(\d{1,2})\s*위", first[0][2]) if first else None
+            if mm and int(mm.group(1)) != rk:
+                # 제외·누락으로 순위만 당겨진 경우 — 대본은 그대로 두고 번호만 고친다(Claude 불필요)
+                relabel_rank(outdir, code, rk)
+                first = P.srt_parse(srt_f)
             if first and first[0][2].startswith(f"{rk}위"):
                 # 이미 순위 호명 대본 — 원커맨드 재실행 때 Claude를 다시 부르지 않는다
                 print(f"[{code}] 이미 {rk}위 호명 대본 — 건너뜀(--redo 로 재작성)")
+                sync_json_to_srt(outdir, code)
                 lines += [f"\n{'=' * 60}\n▌{rk}위  {code}  {d.get('actress') or ''}  "
                           f"👍{d.get('likes')}/👎{d.get('dislikes')}\n{'=' * 60}"]
                 lines += [f"  {k}. {t}" for k, (_a, _b, t) in enumerate(first, 1)]
@@ -86,7 +148,8 @@ def main():
             regen_narration(outdir, cfg["meta_api"], log=em.log, seq=(i, n), style=args.style,
                             rank={"rank": rk, "total": n, "likes": d.get("likes"),
                                   "dislikes": d.get("dislikes"), "views": d.get("views")})
-            stages.save_state(outdir, code, seq=[i, n])
+            stages.save_state(outdir, code, seq=[i, n], renarrate_needed=False)
+            sync_json_to_srt(outdir, code)
             srt = P.srt_parse(outdir / f"{code}_내레이션.srt")
             lines += [f"\n{'=' * 60}\n▌{rk}위  {code}  {d.get('actress') or ''}  "
                       f"👍{d.get('likes')}/👎{d.get('dislikes')}\n{'=' * 60}"]

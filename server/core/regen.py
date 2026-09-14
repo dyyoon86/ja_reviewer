@@ -1304,6 +1304,12 @@ S{n_total}: "표정 하나로 다 끌고 가는 작품. 완벽한 참교육의 �
             fixed = f"{rank['rank']}위, {who}입니다."
             log(f"  ★1번 줄에 순위 호명이 없어 복구: \"{head[:20]}…\" → \"{fixed}\"")
             new_nar[0]["text"] = fixed
+        # 배우 별명 괄호("미라이 미우(기부 미우)")는 TTS가 그대로 읽어 어색하다 — 호명 줄에서만 뗀다
+        head = str(new_nar[0].get("text", ""))
+        clean = re.sub(r"\s*[（(][^）)]*[）)]", "", head)
+        if clean != head:
+            log(f"  1번 줄 괄호 별명 제거: \"{head}\" → \"{clean}\"")
+            new_nar[0]["text"] = clean
 
     # plan.json 저장 (trim 좌표 보존)
     plan["narration"] = new_nar

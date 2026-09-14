@@ -11,7 +11,8 @@ r"""ja 배치 원커맨드 — 섹션1 → 섹션4를 한 번에 돌린다.
 단계
   1 clean    batch_clean.py     ⓪ 3중 필터 클린
   2 review   rank_review.py     ①②③ 전사·AI·자막
-             rank_renarrate.py  └ 마무리: 꼴찌 → 1위 순위 호명 내레이션(Claude)
+             rank_tighten.py    ├ 마무리①: keep 안 대사 없는 빈 구간 제거(템포)
+             rank_renarrate.py  └ 마무리②: 꼴찌 → 1위 순위 호명 내레이션(Claude)
   3 check    check_before_tts.py --fix   자막 누락 자동 수리 + 순위 호명 검사
   4 produce  rank_produce.py    ①내레이션 ②배너 ③TTS ④번인
   5 eyecheck 격리분 프레임 추출 → 사람 확인 대기(있을 때만)
@@ -155,6 +156,9 @@ def main():
     if "review" in todo:
         if run("2 리뷰 생성 (섹션2)",
                [PY, T / "rank_review.py", "--src", src, "--out", out, "--style", args.style]):
+            return 1
+        # 대사 없는 빈 구간을 잘라 템포를 올린다 — keep 이 바뀌므로 내레이션보다 먼저.
+        if run("2a 빈 구간 제거 (섹션2 마무리)", [PY, T / "rank_tighten.py", "--out", out]):
             return 1
         # 섹션2 초안은 단독형("이번 작품은~")이라 순위를 모른다. 섹션3은 --keep-nar 로
         # 대본을 그대로 쓰므로, 섹션2 마무리로 꼴찌 → 1위 순위 호명 대본을 확정해 둔다.
