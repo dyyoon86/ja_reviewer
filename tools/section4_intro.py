@@ -120,11 +120,12 @@ def cmd_tts(args, cfg):
 # ────────────────────────────────────────────────────────────── build
 
 def rank_rows(out, src):
-    from _ranklist import load_rank, load_details, find_rank_file
+    from _ranklist import load_rank, load_details, find_rank_file, match_videos
     rf = find_rank_file(src)
     det = load_details(rf)
     rows = []
-    for rank, code in load_rank(rf):
+    # 영상 있는 편만, 빠진 순위는 당겨 매긴 번호 — 편별 내레이션 호명과 같은 번호
+    for rank, code, _v in match_videos(load_rank(rf), src)[0]:
         d = det.get(code, {})
         rows.append({"rank": rank, "code": code, "actress": d.get("actress", ""),
                      "likes": d.get("likes", 0), "dislikes": d.get("dislikes", 0),
@@ -269,6 +270,11 @@ def cmd_merge(args, cfg):
             parts.append(f)
         else:
             print(f"  [!] {r['code']}: _완성 에 없음 — 빠집니다")
+    outro = out / "_아웃트로" / "아웃트로.mp4"
+    if outro.is_file():
+        parts.append(outro)          # 마무리 후킹 — section4_outro.py 가 만든다
+    else:
+        print("※ 아웃트로.mp4 없음 — 마무리 없이 끝납니다 (tools/section4_outro.py)")
     if len(parts) < 2:
         print("[X] 이어붙일 게 없습니다")
         return 1

@@ -11,6 +11,7 @@ r"""ja 배치 원커맨드 — 섹션1 → 섹션4를 한 번에 돌린다.
 단계
   1 clean    batch_clean.py     ⓪ 3중 필터 클린
   2 review   rank_review.py     ①②③ 전사·AI·자막
+             rank_renarrate.py  └ 마무리: 꼴찌 → 1위 순위 호명 내레이션(Claude)
   3 check    check_before_tts.py --fix   자막 누락 자동 수리 + 순위 호명 검사
   4 produce  rank_produce.py    ①내레이션 ②배너 ③TTS ④번인
   5 eyecheck 격리분 프레임 추출 → 사람 확인 대기(있을 때만)
@@ -93,8 +94,10 @@ def eyecheck(out, log=print):
 
 def tidy(out, src, log=print):
     """★최종_업로드용/ 구성 — 재생 순번(꼴찌→1위)을 파일명 앞에 붙인 하드링크."""
-    from _ranklist import load_rank, find_rank_file
-    items = load_rank(find_rank_file(src))
+    from _ranklist import load_rank, find_rank_file, match_videos
+    # 영상 있는 편만, 빠진 순위는 당겨 매긴 번호로(내레이션 호명과 같은 번호)
+    pairs, _m, _e = match_videos(load_rank(find_rank_file(src)), src)
+    items = [(r, c) for r, c, _v in pairs]
     fin = out / "_납품_자막"
     dst = out / "★최종_업로드용"
     dst.mkdir(parents=True, exist_ok=True)
@@ -152,6 +155,11 @@ def main():
     if "review" in todo:
         if run("2 리뷰 생성 (섹션2)",
                [PY, T / "rank_review.py", "--src", src, "--out", out, "--style", args.style]):
+            return 1
+        # 섹션2 초안은 단독형("이번 작품은~")이라 순위를 모른다. 섹션3은 --keep-nar 로
+        # 대본을 그대로 쓰므로, 섹션2 마무리로 꼴찌 → 1위 순위 호명 대본을 확정해 둔다.
+        if run("2b 순위 호명 내레이션 (섹션2 마무리)",
+               [PY, T / "rank_renarrate.py", "--src", src, "--out", out, "--style", args.style]):
             return 1
     if "check" in todo:
         # 자막 누락은 자동 수리한다. 그래도 남으면 사람이 볼 문제라 멈춘다.

@@ -125,12 +125,15 @@ def load_details(path):
     return out
 
 
-def match_videos(items, src):
+def match_videos(items, src, renumber=True):
     """랭킹 목록을 소스 폴더의 mp4와 대조.
     반환: (pairs, missing, extra)
       pairs   = [(순위, 품번, Path)]  — 랭킹 순서, 영상이 실제로 있는 것만
       missing = 랭킹엔 있는데 영상이 없는 품번
       extra   = 영상은 있는데 랭킹에 없는 품번(뒤에 순서대로 덧붙일 후보)
+    renumber: 영상이 빠진 순위가 있으면 남은 편을 1부터 다시 매긴다(기본). 카운트다운
+      내레이션·점검·파일명이 같은 번호를 쓰게 하려는 것 — ja22 KSBJ-446(15위) 누락 때
+      16위가 "15위"로 호명돼야 했다. 원래 번호가 필요하면 False.
     """
     have = {}
     for v in sorted(Path(src).glob("*.mp4")):
@@ -145,6 +148,8 @@ def match_videos(items, src):
             missing.append(code)
     ranked = {c for _, c in items}
     extra = [c for c in have if c not in ranked]
+    if renumber and missing:
+        pairs = [(i, c, v) for i, (_r, c, v) in enumerate(pairs, 1)]
     return pairs, missing, extra
 
 
