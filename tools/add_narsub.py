@@ -49,6 +49,32 @@ def wav_dur(p):
         return 0.0
 
 
+FIT_CHARS = 26   # 58px 한 줄이 액자 안(≈1840px)에 들어가는 안전 글자수
+
+
+def split_long(text, limit=FIT_CHARS):
+    """통짜 모드에서도 **화면 폭을 넘는 줄만** 어절 경계로 균등하게 나눈다.
+
+    ja22 실측: 44~48자 줄이 58px 노란 판 한 줄로 뜨면서 오른쪽이 액자 밖으로 잘렸다
+    ("…복수 얘기로 바"). 짧은 줄은 예전처럼 한 번에 띄운다(조각이 빨리 사라지는 문제 회피)."""
+    if len(text) <= limit:
+        return [text]
+    words = text.split()
+    n = -(-len(text) // limit)                     # 필요한 조각 수
+    target = len(text) / n
+    parts, buf = [], ""
+    for w in words:
+        cand = f"{buf} {w}".strip()
+        if buf and len(cand) > target and len(parts) < n - 1:
+            parts.append(buf)
+            buf = w
+        else:
+            buf = cand
+    if buf:
+        parts.append(buf)
+    return parts
+
+
 def group_words(text, max_chars):
     """어절 단위로 묶는다 — 글자를 쪼개면 조사가 잘려 읽기 어렵다."""
     out, buf = [], ""
@@ -125,7 +151,7 @@ def retimed(out, code, banner_end, max_chars, tail=0.7, kara=None, log=print):
         room = (nxt - 0.15 - (s + dur)) if nxt is not None else tail
         this_tail = max(0.0, min(tail, room))
         if max_chars <= 0:                # 통짜 — 줄을 쪼개지 않는다(조각이 너무 빨리 사라짐)
-            chunks = [str(text)]
+            chunks = split_long(str(text), FIT_CHARS)
         else:
             chunks = group_words(text, max_chars)
         span = sum(len(c) for c in chunks) or 1
