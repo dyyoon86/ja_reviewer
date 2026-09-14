@@ -14,8 +14,9 @@ r"""ja 배치 원커맨드 — 섹션1 → 섹션4를 한 번에 돌린다.
              rank_tighten.py    ├ 마무리①: keep 안 대사 없는 빈 구간 제거(템포)
              rank_renarrate.py  └ 마무리②: 꼴찌 → 1위 순위 호명 내레이션(Claude)
   3 check    check_before_tts.py --fix   자막 누락 자동 수리 + 순위 호명 검사
-  4 produce  rank_produce.py    ①내레이션 ②배너 ③TTS ④번인
+  4 produce  rank_produce.py --phase burn   배너 + 번인 + 노출 자동검사(TTS 없음)
   5 eyecheck 격리분 프레임 추출 → 사람 확인 대기(있을 때만)
+  5b tts     rank_produce.py --phase tts    내레이션 음성 — 재컷 가능성이 끝난 뒤에 뽑는다
   6 intro    section4_intro.py tts → build → render
   7 narsub   add_narsub.py      납품본에 해설 음성 + 해설 자막
   8 tidy     ★최종_업로드용/ 구성 + 00_안내.md
@@ -43,7 +44,7 @@ import _common  # noqa: F401
 ROOT = Path(__file__).resolve().parent.parent
 PY = sys.executable
 T = Path(__file__).resolve().parent
-STEPS = ["clean", "review", "check", "produce", "eyecheck", "intro", "narsub", "tidy"]
+STEPS = ["clean", "review", "check", "produce", "eyecheck", "tts", "intro", "narsub", "tidy"]
 
 
 def run(title, cmd, allow_fail=False):
@@ -146,7 +147,7 @@ def main():
     print(f"배치 {out.name} — 단계: {' → '.join(todo)}")
     print(f"소스 {src}\nvoicebox {cfg.get('tts_base')} / meta {cfg.get('meta_api')}")
 
-    if any(s in todo for s in ("produce", "intro")) and not voicebox_alive(cfg["tts_base"]):
+    if any(s in todo for s in ("tts", "intro")) and not voicebox_alive(cfg["tts_base"]):
         print("\n[X] voicebox 가 응답하지 않습니다 — 먼저 띄우고 다시 실행하세요")
         return 1
 
@@ -173,8 +174,9 @@ def main():
             print(f"    python tools\\run_ja.py --src {src} --out {out} --from produce")
             return 1
     if "produce" in todo:
-        if run("4 최종 생산 (섹션3)",
-               [PY, T / "rank_produce.py", "--src", src, "--out", out, "--reverse", "--keep-nar"]):
+        if run("4 배너·번인·노출검사 (섹션3)",
+               [PY, T / "rank_produce.py", "--src", src, "--out", out, "--reverse", "--keep-nar",
+                "--phase", "burn"]):
             return 1
     if "eyecheck" in todo:
         print(f"\n{'=' * 72}\n▌5 노출 격리분 눈검사\n{'=' * 72}")
@@ -184,8 +186,14 @@ def main():
             print(f"  {out / '_검수프레임'} 의 프레임을 **눈으로** 보세요.")
             print("  · 오검출이면:  _검수필요 → _완성 으로 옮기고 아래 명령으로 재개")
             print("  · 진짜 노출이면: tools\\_dropfinal.py 로 재컷")
-            print(f"\n  재개: python tools\\run_ja.py --src {src} --out {out} --from intro")
+            print(f"\n  재개: python tools\\run_ja.py --src {src} --out {out} --from tts")
             return 2
+    if "tts" in todo:
+        # ★음성은 맨 뒤 — 노출검사·눈검사로 재컷될 일이 끝난 영상 길이에 맞춰 한 번만 뽑는다
+        if run("5b 내레이션 TTS (섹션3 마무리)",
+               [PY, T / "rank_produce.py", "--src", src, "--out", out, "--reverse", "--keep-nar",
+                "--phase", "tts"]):
+            return 1
     if "intro" in todo:
         script = ROOT / "section4" / "멘트.txt"
         print(f"\n[확인] 인트로 대본: {script}")

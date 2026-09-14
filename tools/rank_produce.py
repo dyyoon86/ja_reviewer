@@ -53,6 +53,9 @@ def main():
                          "todo 가 1개라 seq 가 (1,1) 로 잘못 잡히는 것을 막는다.")
     ap.add_argument("--style", help="문체 오버라이드(3min|cinema|gootabari|jindong|naeson). "
                                     "생략 시 state의 style")
+    ap.add_argument("--phase", default="all", choices=["all", "burn", "tts"],
+                    help="burn=배너·번인·노출검사만 / tts=내레이션 음성만 / all=둘 다(예전 방식). "
+                         "원커맨드는 burn → 눈검사 → tts 순으로 나눠 부른다")
     ap.add_argument("--keep-nar", action="store_true",
                     help="★확정한 내레이션을 그대로 쓰고 재생성을 건너뛴다. 기본은 regen 이라 "
                          "사람이 검수해 확정한 대본이 새 LLM 출력으로 덮어써진다(ja16 사고).")
@@ -133,12 +136,17 @@ def main():
                                 rank=rank_info)
                 stages.save_state(outdir, code, seq=list(seq))   # 나중 재실행이 서수를 안다
 
-            step = "배너"
-            b = stages.stage_banner(cfg, code, em, hold=hold)
-            banner_note = "배너 생략" if b.get("skipped") else "배너 OK"
+            banner_note = ""
+            if args.phase in ("all", "burn"):
+                step = "배너"
+                b = stages.stage_banner(cfg, code, em, hold=hold)
+                banner_note = "배너 생략" if b.get("skipped") else "배너 OK"
 
-            step = "TTS"
-            for attempt in (1, 2, 3):
+            # ★TTS 는 번인·노출검사 **뒤**에 돈다(--phase tts). 번인은 내레이션을 숨기고 굽기 때문에
+            #   음성이 필요 없고, 검사에 걸려 재컷하면 invalidate_derived 가 {code}_tts/ 를 지워
+            #   먼저 뽑은 음성이 통째로 버려진다.
+            for attempt in ((1, 2, 3) if args.phase in ("all", "tts") else ()):
+                step = "TTS"
                 if not ensure_voicebox(cfg["tts_base"], em.log):
                     raise RuntimeError("voicebox 재기동 실패 — 수동 확인 필요")
                 try:
@@ -150,18 +158,19 @@ def main():
                         raise
                     em.log(f"⚠ TTS 실패({e}) — voicebox 상태 점검 후 재시도 {attempt}/2")
 
-            step = "번인"
-            dsrt = outdir / f"{code}_대사.srt"
-            has_dlg = dsrt.is_file() and bool(P.srt_parse(str(dsrt)))
-            if not has_dlg:
-                em.log("대사 자막 0줄 — 자막 없이 배너·워터마크만 번인")
-            moved = hide_narration(outdir, code)
-            try:
-                stages.stage_burn(cfg, code, styles, em,
-                                  parts=None if has_dlg else {"subs": False})
-            finally:
-                for hidden, orig in moved:
-                    os.replace(hidden, orig)
+            if args.phase in ("all", "burn"):
+                step = "번인"
+                dsrt = outdir / f"{code}_대사.srt"
+                has_dlg = dsrt.is_file() and bool(P.srt_parse(str(dsrt)))
+                if not has_dlg:
+                    em.log("대사 자막 0줄 — 자막 없이 배너·워터마크만 번인")
+                moved = hide_narration(outdir, code)
+                try:
+                    stages.stage_burn(cfg, code, styles, em,
+                                      parts=None if has_dlg else {"subs": False})
+                finally:
+                    for hidden, orig in moved:
+                        os.replace(hidden, orig)
 
             el = (time.time() - t0) / 60
             results.append((rank, code, f"✔ 완료 ({banner_note}) {el:.1f}분"))
