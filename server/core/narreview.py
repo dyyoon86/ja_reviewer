@@ -16,7 +16,13 @@
 둔다. 판정 근거는 전부 파일에 있는 사실(시각브리핑·줄거리·대사)로 한정하고,
 취향 문제는 건드리지 않는다 — 고칠 수 있는 결함만 집는다.
 
-출력: {code}_내레이션검수.json  {ok, issues:[{n,text,type,why,fix}], note}
+'AI 문체' 판정은 손으로 적은 상투어 목록 대신 **im-not-ai(humanize-korean)**
+룰북을 쓴다(`server/core/humanize_kr.py` 가 읽어 온다). 상투어 다섯 개짜리 목록으로는
+번역투('~를 통해')·이중피동('판단되어진다')·분열문('핵심은 ~라는 점이다')·관통
+은유('잠식한다') 같은 티가 전부 통과했다. 지적한 줄에는 걸린 규칙 ID(D-8 등)를 남겨
+`tools/_apply_narfix.py` 로 대안 문장을 갈아끼울 때 근거를 따라갈 수 있게 한다.
+
+출력: {code}_내레이션검수.json  {ok, issues:[{n,text,type,rule,why,fix}], note, rulebook}
 실패는 soft-fail(ok=None) — 검수 자체가 파이프라인을 막지 않는다.
 """
 import json
@@ -25,6 +31,7 @@ import re
 import subprocess
 from pathlib import Path
 
+from server.core import humanize_kr
 from server.core.llm import _cli_path
 
 # 고칠 수 있는 결함만. '재미없다' 같은 취향은 넣지 않는다(판정이 흔들린다).
@@ -41,8 +48,9 @@ CHECKS = [
     ("사건놓침", "그 시각에 벌어지는 주된 사건을 두고 화면 구석의 사소한 자세·소품을 "
                 "주인공으로 삼았다."),
     ("소재반복", "같은 소재(표정·미소·눈빛 등)를 세 번 이상 우려먹는다."),
-    ("AI상투어", "'매력적인/인상적인/주목할 만한/기대가 됩니다/~하는 모습을 보여줍니다' 같은 "
-                "상투어, 또는 '지금까지 ~였습니다' 류 마무리 인사."),
+    ("AI문체", "아래 [AI 티 룰북]에 걸리는 문장. 걸린 규칙 ID를 rule 에 적는다. "
+              "룰북이 비어 있을 때만 '매력적인/인상적인/주목할 만한/기대가 됩니다/"
+              "~하는 모습을 보여줍니다' 상투어와 '지금까지 ~였습니다' 류 마무리 인사를 본다."),
     ("지시불명", "무엇을 가리키는지 없는 문장('받아든 순간' — 무엇을 받아들었는지 없음)."),
     ("결말누설", "결말·반전의 결과를 그대로 밝힌다."),
 ]
@@ -95,6 +103,14 @@ def review(folder, code=None, model="sonnet", log=print):
         f'[{float(d.get("start", 0)):.0f}s] {d.get("ko") or d.get("text") or ""}'
         for d in dlg[:400]) or "(없음)"
     checks = "\n".join(f" - {k}: {v}" for k, v in CHECKS)
+    # AI 문체 판정 근거 — 설치된 im-not-ai 룰북(없으면 저장소 스냅샷).
+    rules = humanize_kr.rules_block()
+    valid_ids = humanize_kr.rule_ids()
+    rulebook = f"""[AI 티 룰북 - im-not-ai / humanize-korean quick-rules]
+낭독 자막에 나올 수 있는 항목만 추렸다. **'AI문체' 결함은 여기 걸릴 때만** 보고하고,
+걸린 규칙 ID를 rule 에 그대로 적어라(예: "D-8"). 룰북에 없는 취향 지적은 하지 마라.
+빈도 조건('3회+', '한 문단')은 **내레이션 전체를 한 문단으로 보고** 센다.
+{rules}""" if rules else ""
     prompt = f"""너는 영상 리뷰 채널의 내레이션 검수자다. 아래 내레이션을 읽고 **고칠 수 있는 결함만**
 집어내라. 재미·취향에 대한 감상은 쓰지 마라.
 
@@ -108,6 +124,8 @@ def review(folder, code=None, model="sonnet", log=print):
 
 [검사 항목]
 {checks}
+
+{rulebook}
 
 [작품 판정]
 {overview or "(없음)"}
@@ -133,11 +151,20 @@ def review(folder, code=None, model="sonnet", log=print):
  · '개괄없음'·'패러디누락'은 전체 문제이므로 n=0 으로 적는다.
  · fix에는 **그 자리에 대신 쓸 문장**을 한 줄로 제안한다(같은 길이 안에서).
 
+대안 문장(fix)을 쓸 때 — 이 내레이션은 **낭독되는 구어체 다큐 나레이션**이다:
+ · 룰북 예문은 칼럼·리포트 기준이다. 대안을 문어체·기사체로 올리지 마라. 원문의 말투와
+   격식 등급(사실 서술 '~입니다' / 대사 직전 상황 설명 '~는데..')을 **그대로** 유지한다.
+ · 사실·고유명사·수치·배우 이름·작품명은 한 글자도 바꾸거나 빼지 마라. 문체만 손본다.
+ · 원문에 없던 비유·수사·상투구를 대안에 새로 심지 마라("~하는 이유다", "결국", 감각
+   술어 평가문, 사전 은유 — D-9·D-10·D-14 역주입 금지).
+ · 길이는 원문과 비슷하게. 같은 자막 슬롯에서 TTS로 읽혀야 한다.
+
 [검수 대상 내레이션]
 {lines}
 
 출력: JSON만. 설명·머리말 금지.
 {{"ok": true|false, "issues": [{{"n": 줄번호, "text": "문제 문장", "type": "항목명",
+  "rule": "AI문체면 걸린 룰북 ID(예: D-8), 아니면 빈 문자열",
   "why": "왜 결함인지 한 줄", "fix": "대신 쓸 문장"}}], "note": "총평 한 줄"}}"""
 
     try:
@@ -161,14 +188,30 @@ def review(folder, code=None, model="sonnet", log=print):
         log(f"※ 검수: JSON 파싱 실패({ex}) — 건너뜀")
         return {"ok": None, "issues": [], "note": "응답 파싱 실패"}
 
-    out.setdefault("issues", [])
-    out["ok"] = not out["issues"]
+    issues, dropped = [], 0
+    for it in out.get("issues") or []:
+        rid = re.sub(r"[^A-Z0-9]", "", str(it.get("rule") or "").upper())
+        rid = f"{rid[0]}-{rid[1:]}" if len(rid) > 1 and rid[0].isalpha() else ""
+        # 'AI문체'는 룰북에 걸릴 때만 인정한다. 규칙 ID가 없는 지적은 결국
+        # 근거 없는 취향 판정이고, _apply_narfix가 그대로 갈아끼우면 멀쩡한
+        # 줄이 바뀐다 — 룰북을 읽을 수 있을 때만 이 문턱을 건다.
+        if valid_ids and it.get("type") == "AI문체" and rid not in valid_ids:
+            dropped += 1
+            continue
+        it["rule"] = rid
+        issues.append(it)
+    if dropped:
+        log(f"※ 룰북 근거 없는 AI문체 지적 {dropped}건 제외")
+    out["issues"] = issues
+    out["ok"] = not issues
+    out["rulebook"] = humanize_kr.source_note()
     (folder / f"{code}_내레이션검수.json").write_text(
         json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
     if out["issues"]:
         log(f"⚠ 내레이션 검수 결함 {len(out['issues'])}건")
         for it in out["issues"][:6]:
-            log(f"   [{it.get('type')}] {it.get('n')}번: {str(it.get('why'))[:70]}")
+            tag = f"{it.get('type')}/{it['rule']}" if it.get("rule") else it.get("type")
+            log(f"   [{tag}] {it.get('n')}번: {str(it.get('why'))[:70]}")
     else:
         log("✔ 내레이션 검수 통과")
     return out

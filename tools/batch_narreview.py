@@ -23,7 +23,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 sys.stderr.reconfigure(encoding="utf-8")
 
 import _common  # noqa: F401
-from server.core import narreview
+from server.core import humanize_kr, narreview
 from batch_clean import CliEmitter
 
 
@@ -43,6 +43,7 @@ def main():
     if not codes:
         print(f"검수 대상 없음: {out}")
         sys.exit(1)
+    print(f"AI 문체 룰북 — {humanize_kr.source_note()}")
 
     cfg = _common.load_cfg()
     cfg["out_dir"] = str(out)
@@ -61,7 +62,9 @@ def main():
             rows.append((code, f"– 검수 못함({r.get('note')})"))
         elif n:
             bad.append(code)
-            kinds = ", ".join(sorted({str(x.get("type")) for x in r["issues"]}))
+            kinds = ", ".join(sorted(
+                {(f"{x.get('type')}/{x['rule']}" if x.get("rule") else str(x.get("type")))
+                 for x in r["issues"]}))
             rows.append((code, f"⚠ {n}건 [{kinds}] ({(time.time()-t0)/60:.1f}분)"))
         else:
             rows.append((code, f"✔ 통과 ({(time.time()-t0)/60:.1f}분)"))
@@ -75,6 +78,7 @@ def main():
     rep = out / "_내레이션검수.md"
     with rep.open("w", encoding="utf-8") as f:
         f.write("# 내레이션 검수 리포트\n\n")
+        f.write(f"AI 문체 판정 근거: {humanize_kr.source_note()}\n\n")
         for code, note in rows:
             f.write(f"## {code} — {note}\n\n")
             jf = out / code / f"{code}_내레이션검수.json"
@@ -84,7 +88,9 @@ def main():
             if d.get("note"):
                 f.write(f"{d['note']}\n\n")
             for it in d.get("issues") or []:
-                f.write(f"- **[{it.get('type')}] {it.get('n')}번** — {it.get('text','')}\n")
+                tag = (f"{it.get('type')} {it['rule']}" if it.get("rule")
+                       else str(it.get("type")))
+                f.write(f"- **[{tag}] {it.get('n')}번** — {it.get('text','')}\n")
                 f.write(f"  - 왜: {it.get('why','')}\n")
                 f.write(f"  - 대안: {it.get('fix','')}\n")
             f.write("\n")

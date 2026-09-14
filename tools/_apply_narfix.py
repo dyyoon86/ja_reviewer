@@ -79,7 +79,8 @@ def apply_one(folder: Path, code: str, dry=False):
             print(f"    ⚠ {i+1}번 대안이 원문보다 김({len(old)}→{len(new)}자) — "
                   f"음성이 슬롯을 넘길 수 있다")
         print(f"    {i+1}번: {old}")
-        print(f"        → {new}   [{it.get('type')}]")
+        tag = (f"{it.get('type')} {it['rule']}" if it.get("rule") else it.get("type"))
+        print(f"        → {new}   [{tag}]")
         nar[i]["text"] = new
         done.append(i + 1)
     if not done:
@@ -98,14 +99,24 @@ def apply_one(folder: Path, code: str, dry=False):
                 pn[i - 1]["text"] = nar[i - 1]["text"]
         plan["narration"] = pn
         plan_f.write_text(json.dumps(plan, ensure_ascii=False, indent=1), encoding="utf-8")
-    # srt 는 시각을 그대로 두고 본문만 갈아끼운다(재타이밍 불필요)
+    # srt 는 **원래 타임코드를 그대로 두고 본문 줄만** 갈아끼운다.
+    # ★srt를 json 시각으로 다시 쓰면 안 된다: json은 클린본 좌표, srt는 최종컷
+    #   좌표라 두 시간축이 다르다(ja15 SNOS-327 = 160초 차이). 예전엔 json 시각으로
+    #   srt를 통째로 다시 써서, 문장만 고쳤는데 자막이 통째로 밀렸다.
     srt = folder / f"{code}_내레이션.srt"
     if srt.is_file():
-        out = []
-        for k, d in enumerate(nar, 1):
-            out += [str(k), f'{srt_ts(float(d["start"]))} --> {srt_ts(float(d["end"]))}',
-                    d.get("text", ""), ""]
-        srt.write_text("\n".join(out), encoding="utf-8-sig")
+        blocks = [b for b in re.split(r"\r?\n\s*\r?\n", srt.read_text(
+            encoding="utf-8-sig").strip()) if b.strip()]
+        if len(blocks) != len(nar):
+            print(f"    ⚠ srt {len(blocks)}블록 ≠ 내레이션 {len(nar)}줄 — srt는 손대지 않는다"
+                  f" (자막 반영은 수동 확인 필요)")
+        else:
+            out = []
+            for k, (b, d) in enumerate(zip(blocks, nar), 1):
+                ln = b.splitlines()
+                head = ln[:2] if len(ln) >= 2 else [str(k), ""]
+                out.append("\n".join(head + [d.get("text", "")]))
+            srt.write_text("\n\n".join(out) + "\n", encoding="utf-8-sig")
     return f"✔ {len(done)}줄 반영 {done}" + (f" (건너뜀: {', '.join(skipped)})" if skipped else "")
 
 
@@ -131,7 +142,9 @@ def main():
     print("\n요약")
     for c, n in rows:
         print(f"  {c}: {n}")
-    print("\n※ 시각은 안 바뀌었다 — TTS만 다시 뽑고(batch_nar_tts) 재번인하면 된다.")
+    print("\n※ 시각은 안 바뀌었다 — TTS만 다시 뽑고 재번인하면 된다."
+          "\n   ★ _regen_tts.py --keep-nar 로 뽑을 것. batch_nar_tts / 그냥 _regen_tts 는"
+          "\n   regen_narration으로 대본을 다시 써서 방금 반영한 줄이 날아간다.")
 
 
 if __name__ == "__main__":

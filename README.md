@@ -44,12 +44,14 @@
 | `bgm.py` | demucs BGM 제거(시스템 파이썬 외부 호출 — venv엔 torch 없음) |
 | `selfeval.py` | 번인 후 자체검사 — 팝/정지/무음/자막 커버리지 → `{품번}_검사.json` |
 | `regen.py` | 내레이션 재생성 / 구간 재선정 (GUI ③ 버튼 + tools 래퍼) |
+| `narreview.py` | 다 쓴 내레이션을 **다른 호출로** 다시 읽어 결함 검수 → `{품번}_내레이션검수.json` |
+| `humanize_kr.py` | 검수의 'AI문체' 판정 근거 — im-not-ai(humanize-korean) 룰북 어댑터 |
 | `assets.py` / `sfx.py` | 상황별 짤 오버레이(`_assets/`), ffmpeg lavfi 합성 효과음 |
 
 ### tools/ — 배치 CLI (서버 없이, ja12 모음집 11편 검증)
 
 `batch_clean`(3중 필터) → `batch_review`(전사+AI) → `batch_produce`(TTS+번인, voicebox 자가복구) 순.
-보조: `batch_rework`(재컷+BGM제거+무음제거 재작업), `batch_regen_nar`/`regen_narration`(내레이션 재생성, 모음집 서수 인트로), `dump_keep_transcript`(keep 정밀 전사 → 대사 전량 자막화), `trim_final_flags`(최종본 노출 재컷), `batch_final_check`(전수검사), `burn_only`, `replan`, `run_single`, `transcribe_hq`.
+보조: `batch_rework`(재컷+BGM제거+무음제거 재작업), `batch_regen_nar`/`regen_narration`(내레이션 재생성, 모음집 서수 인트로), `batch_narreview`(내레이션 검수 — 결함 리포트, `--fix`면 재작성)/`_apply_narfix`(대안 문장을 그 줄만 반영), `dump_keep_transcript`(keep 정밀 전사 → 대사 전량 자막화), `trim_final_flags`(최종본 노출 재컷), `batch_final_check`(전수검사), `burn_only`, `replan`, `run_single`, `transcribe_hq`.
 
 ## 세 가지 사용법
 
@@ -66,6 +68,39 @@ setup_gpu.bat               :: (최초 1회) cuBLAS/cuDNN — 없으면 faster-w
 
 전제: ffmpeg PATH, voicebox(로컬 17493), meta_api(우분투 8770 또는 로컬), codex/claude CLI 로그인.
 반드시 venv로 기동할 것 — 시스템 파이썬이면 cublas DLL을 못 찾는다.
+
+## 내레이션 검수 (AI 티 제거)
+
+내레이션을 쓴 호출과 **다른 호출**로 다시 읽어 결함을 잡는다. 'AI문체' 판정은 손으로
+적은 상투어 목록 대신 GitHub [`epoko77-ai/im-not-ai`](https://github.com/epoko77-ai/im-not-ai)
+(humanize-korean) 룰북을 근거로 쓴다 — 낭독 자막에 나올 수 없는 서식 규칙(불릿·이모지·
+콜론 헤딩·따옴표 장식 등)만 빼고 52개 규칙이 검수 프롬프트에 실린다.
+
+```bat
+:: 룰북 설치(1회) — Claude Code 세션에서
+/plugin marketplace add epoko77-ai/im-not-ai
+/plugin install humanize-korean@im-not-ai
+
+:: 검수 → {out_dir}/_내레이션검수.md + {품번}_내레이션검수.json (결함 있으면 exit 1)
+.venv\Scripts\python.exe tools\batch_narreview.py --out <out_dir> [품번...]
+
+:: 대안 문장을 지적된 줄만 반영(시각은 그대로 → 재컷·재타이밍 불필요)
+.venv\Scripts\python.exe tools\_apply_narfix.py --out <out_dir> [품번...] [--dry]
+.venv\Scripts\python.exe tools\_regen_tts.py <영상폴더> --out <out_dir> --keep-nar   :: ★--keep-nar 필수
+
+:: 룰북이 갱신되면 저장소 스냅샷을 맞춘다
+.venv\Scripts\python.exe tools\sync_humanize_rules.py [--check]
+```
+
+- 설치본이 없으면 저장소 스냅샷 `server/core/refs/quick-rules.md` 로 떨어진다(렌더 서버용).
+- 지적한 줄에는 걸린 규칙 ID(`D-8`, `E-2` …)가 `rule` 로 남는다. **규칙 ID가 없는
+  'AI문체' 지적은 버린다** — 근거 없는 취향 판정이 `_apply_narfix`로 자동 반영되면
+  멀쩡한 줄이 바뀐다.
+- 대안 문장은 구어체 다큐 나레이션 말투·원문 길이·고유명사를 유지하도록 프롬프트에
+  가드를 건다(룰북 예문이 칼럼·리포트 기준이라 그냥 두면 기사체로 올라간다).
+- **`_apply_narfix` 뒤에 `batch_nar_tts`/`_regen_tts`를 그냥 돌리지 말 것** — 둘 다
+  `regen_narration`으로 대본을 **다시 써서** 방금 반영한 줄이 날아간다. TTS만 다시
+  뽑으려면 `_regen_tts.py --keep-nar`.
 
 ## 함정 모음 (실전에서 얻은 것)
 
