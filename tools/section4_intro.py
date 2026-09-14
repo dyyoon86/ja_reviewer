@@ -223,12 +223,24 @@ def cmd_render(args, cfg):
         print("[X] index.html 이 없습니다 — 먼저 build")
         return 1
     dst = out_intro(out) / "인트로.mp4"
+    if dst.is_file():
+        try:
+            dst.unlink()        # 낡은 결과가 남아 '성공'으로 착각하지 않게 먼저 치운다
+        except OSError:
+            print(f"[X] {dst.name} 이 다른 프로그램에 열려 있습니다 — 닫고 다시 실행하세요")
+            return 1
     cmd = ["npx", "--yes", "hyperframes@0.8.31", "render", "--output", str(dst)]
     print("$ " + " ".join(cmd) + f"   (cwd={proj})", flush=True)
     r = subprocess.run(cmd, cwd=str(proj), shell=True)
+    # ★렌더러는 'artifact validated' 까지 찍고도 0이 아닌 코드(4294967295 등)로 끝난다(ja22 실측).
+    #   아웃트로와 같이 **파일이 실제로 나왔는지**로 판정한다 — 종료 코드만 믿으면 멀쩡한 렌더를 버린다.
+    idx = proj / "index.html"
+    if (not dst.is_file() or dst.stat().st_size < 100_000
+            or dst.stat().st_mtime < idx.stat().st_mtime):
+        print("[X] 렌더 실패 — 결과물이 없거나 index.html 보다 낡았습니다(위 로그 확인)")
+        return r.returncode or 1
     if r.returncode:
-        print("[X] 렌더 실패")
-        return r.returncode
+        print(f"  [!] 렌더러 종료 코드 {r.returncode} — 파일은 정상 생성됨")
     print(f"[OK] {dst}")
     return 0
 
