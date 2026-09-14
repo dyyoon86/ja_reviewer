@@ -171,7 +171,12 @@ def tidy(out, src, log=print):
             continue
         os.link(srcf, dst / f"{seq:02d}_{rank}위_{code}.mp4")
         n += 1
-    log(f"  ★최종_업로드용 {n}편" + (" + 인트로" if intro.is_file() else ""))
+    # ★아웃트로도 마지막 순번으로 넣는다 — 예전엔 인트로만 챙겨 업로드 폴더에서 빠졌다(ja22)
+    outro = out / "_아웃트로" / "아웃트로.mp4"
+    if outro.is_file():
+        os.link(outro, dst / f"{n + 1:02d}_아웃트로.mp4")
+    log(f"  ★최종_업로드용 {n}편" + (" + 인트로" if intro.is_file() else "")
+        + (" + 아웃트로" if outro.is_file() else ""))
     for junk in ("_시안",):
         d = out / junk
         if d.is_dir():
