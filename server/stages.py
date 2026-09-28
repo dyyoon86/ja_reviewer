@@ -880,7 +880,16 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
         if use_visual:
             try:
                 from server.core import visual as _visual
-                vis_text = _visual.build_visual_brief(video, c, em.log)
+                # ★재실행(--redo, target 변경) 때 같은 클린본을 다시 캡션하면 claude -p(sonnet)
+                #   호출만 60프레임씩 또 나간다 — 브리핑이 클린본보다 새것이면 그대로 쓴다.
+                cached = outdir / f"{code}_시각브리핑.txt"
+                if (cached.is_file() and cached.stat().st_size > 0
+                        and Path(video).is_file()
+                        and cached.stat().st_mtime >= Path(video).stat().st_mtime):
+                    vis_text = cached.read_text(encoding="utf-8", errors="replace")
+                    em.log(f"화면 시각정보 재사용: {cached.name} ({len(vis_text.splitlines())}줄)")
+                else:
+                    vis_text = _visual.build_visual_brief(video, c, em.log)
                 if vis_text:
                     # 섹션3 regen_narration이 최종 내레이션에도 화면 근거를 쓰도록 파일로 남긴다
                     try:
