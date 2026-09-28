@@ -37,9 +37,9 @@ TPL_DIR = ROOT / "section4"
 GAP = 0.35          # 문장 사이 여백(초)
 LEAD = 0.4          # 첫 문장 앞 여백
 CPS = 6.2           # 실측 발화 속도(자/초) — wav가 없을 때만 쓰는 추정치
-BGM_SRC = "bgm/sneaky_snitch.mp3"   # section4/ 기준. 교체 시 출처.md 도 같이 고칠 것
-BGM_OFFSET = 40.0   # 곡에서 잘라 쓸 시작 지점(초) — 실측 최고 에너지 구간
-BGM_LUFS = -24      # 내레이션이 위에 앉도록 낮게 깐다(가벼운 곡이라 조금 올림)
+BGM_SRC = "bgm/house02.mp3"   # section4/ 기준. Mixkit(크레딧 불필요). 교체 시 출처.md 도 같이 고칠 것
+BGM_OFFSET = 15.0   # 곡에서 잘라 쓸 시작 지점(초) — 실측 최고 에너지 구간
+BGM_LUFS = -22      # 2026-09-15 "인트로는 신나게" — -24 는 묻혔고, -19 는 말하는 구간 여유 +2dB 라 내레이션을 덮었다
 
 
 def out_intro(out):
@@ -149,6 +149,10 @@ def cmd_build(args, cfg):
         lines, total = build_lines(out, texts)
         print(f"lines.json 없음 — 자수 추정 타이밍 (총 {total:.1f}초). TTS 후 다시 build 할 것")
 
+    # ★몽타주 장면 수동 지정 — `_인트로/몽타주.json` {"품번": 초}. 30% 지점이 야한 장면에
+    #   걸리는 편이 있어(ja23 사용자 지적) 사람이 고른 얌전한 순간으로 덮어쓴다.
+    mj = out_intro(out) / "몽타주.json"
+    mpick = json.loads(mj.read_text(encoding="utf-8")) if mj.is_file() else {}
     have = []
     for r in rows:
         c = r["code"]
@@ -168,6 +172,11 @@ def cmd_build(args, cfg):
         if clip:
             shutil.copy2(clip, assets / f"{c}_clip.mp4")
             mstart = round(max(0.5, wav_dur(clip) * 0.3), 2)   # 앞머리(배너 구간)를 피해 30% 지점
+            if c in mpick:
+                if mpick[c] is None:      # null = 몽타주에서 뺀다(카드 그리드는 유지)
+                    clip = None
+                else:
+                    mstart = float(mpick[c])
         else:
             print(f"  [!] {c}: 납품본이 아직 없어 몽타주에서 제외(배치 완주 후 build 다시)")
         have.append({**r, "anim": f"assets/{c}_clip.mp4" if clip else None,

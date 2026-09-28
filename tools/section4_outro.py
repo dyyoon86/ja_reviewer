@@ -50,8 +50,8 @@ GAP = 0.35          # 문장 사이 여백(초)
 LEAD = 0.4          # 첫 문장 앞 여백
 CPS = 6.2           # 실측 발화 속도(자/초) — wav가 없을 때만 쓰는 추정치
 TAIL = 5.0          # ★마지막 말 뒤 엔드카드 유지(초). 유튜브 엔드스크린 최소 노출이 5초다
-BGM_SRC = "bgm/life_of_riley.mp3"   # section4/ 기준. 인트로(sneaky_snitch)와 다른 곡 — 끝은 풀어 준다
-BGM_OFFSET = 12.0   # 곡에서 잘라 쓸 시작 지점(초)
+BGM_SRC = "bgm/gummies.mp3"   # section4/ 기준. Mixkit(크레딧 불필요). 인트로(house02)와 다른 곡 — 끝은 풀어 준다
+BGM_OFFSET = 45.0   # 곡에서 잘라 쓸 시작 지점(초)
 BGM_LUFS = -24
 
 

@@ -51,6 +51,10 @@ def build(rows, lines, total, has_audio=False, cap_style="punch", has_bgm=False,
     desc = sorted(rows, key=lambda r: -r["rank"])          # 12위 → 1위 (본편 재생 순서)
     top1 = rows[0] if rows else None
     dur_total = round(total + tail, 2)
+    # ★편수는 배치마다 다르다(ja23 14편) — '열두 편' 하드코딩이 화면에 거짓말을 했다
+    _KN = {10: "열", 11: "열한", 12: "열두", 13: "열세", 14: "열네", 15: "열다섯",
+           16: "열여섯", 17: "열일곱", 18: "열여덟", 19: "열아홉", 20: "스무"}
+    nk = f"{_KN.get(len(rows), len(rows))} 편"
 
     def win(i):
         """i번째 줄(1-base)의 화면 구간 — 말보다 0.3초 먼저 들어오고 다음 줄에 붙여 끝낸다."""
@@ -154,7 +158,7 @@ def build(rows, lines, total, has_audio=False, cap_style="punch", has_bgm=False,
 
     prev_panel = (f'<img src="{prev_thumb}" alt="">' if prev_thumb else
                   '<div class="ph">'
-                  '<div class="ph-run"><i></i><span>지난주 · JAV 신작 랭킹</span></div>'
+                  '<div class="ph-run"><i></i><span>지난주 · 신작 랭킹</span></div>'
                   '<div class="ph-big">TOP<em>12</em></div>'
                   '<div class="ph-row"><u></u><u></u><u></u><u></u><u></u><u></u></div>'
                   '</div>')
@@ -176,7 +180,7 @@ def build(rows, lines, total, has_audio=False, cap_style="punch", has_bgm=False,
     recap_html = blk("recap", "board", 1,
         '        <div class="side lead">\n'
         '          <div class="kicker">이번 주 랭킹</div>\n'
-        '          <div class="big">열두 편 <em>완주</em></div>\n'
+        f'          <div class="big">{nk} <em>완주</em></div>\n'
         f'          <div class="note">1위 <u>{top1["actress"] if top1 else ""}</u></div>\n'
         '        </div>\n'
         f'        <div class="wrap">{grid}</div>\n')
@@ -209,9 +213,9 @@ def build(rows, lines, total, has_audio=False, cap_style="punch", has_bgm=False,
     sub_html = blk("sub", "cta2", 5,
         '        <div class="side lead">\n'
         '          <div class="kicker">이번 주 수집</div>\n'
-        + (f'          <div class="big"><em id="poolN">0</em>편에서<br>열두 편</div>\n'
+        + (f'          <div class="big"><em id="poolN">0</em>편에서<br>{nk}</div>\n'
            if pool else
-           '          <div class="big">이번 주 신작에서<br><em>열두 편</em></div>\n')
+           f'          <div class="big">이번 주 신작에서<br><em>{nk}</em></div>\n')
         + (f'          <div class="note">{span_label} 수집분</div>\n' if span_label else '')
         + '        </div>\n'
         '        <div class="btnwrap">\n'
@@ -453,7 +457,7 @@ def build(rows, lines, total, has_audio=False, cap_style="punch", has_bgm=False,
       <div id="runhead" class="clip runhead" data-start="{frame_from}"
            data-duration="{round(dur_total - frame_from, 2)}" data-track-index="9">
         <div class="bar"></div>
-        <div class="t">{week} <em>· JAV 신작 랭킹</em></div>
+        <div class="t">{week} <em>· 신작 랭킹</em></div>
       </div>
 
       <div id="ticker" class="clip ticker" data-start="{frame_from}"

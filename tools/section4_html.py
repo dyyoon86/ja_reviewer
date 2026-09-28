@@ -386,7 +386,7 @@ def build(rows, lines, total, pool=500, has_audio=False, cap_style="punch",
            data-track-index="3">
         <div class="side lead">
           <div class="kicker">여러분이 뽑은</div>
-          <div class="big">최고의 <em>12편</em></div>
+          <div class="big">최고의 <em>{len(rows)}편</em></div>
           <div class="stat">
             <div><i>좋아요</i><b id="stLike">0</b></div>
             <div><i>싫어요</i><b id="stDis">0</b></div>
@@ -423,7 +423,7 @@ def build(rows, lines, total, pool=500, has_audio=False, cap_style="punch",
       <div id="runhead" class="clip runhead" data-start="{frame_from}"
            data-duration="{round(dur_total - frame_from, 2)}" data-track-index="9">
         <div class="bar"></div>
-        <div class="t">{week} <em>· JAV 신작 랭킹</em></div>
+        <div class="t">{week} <em>· 신작 랭킹</em></div>
       </div>
 
       <div id="ticker" class="clip ticker" data-start="{frame_from}"
