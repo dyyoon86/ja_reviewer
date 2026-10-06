@@ -149,11 +149,12 @@ def cmd_build(args, cfg):
         lines, total = build_lines(out, texts)
         print(f"lines.json 없음 — 자수 추정 타이밍 (총 {total:.1f}초). TTS 후 다시 build 할 것")
 
-    # ★몽타주 장면 수동 지정 — `_인트로/몽타주.json` {"품번": 초}. 30% 지점이 야한 장면에
-    #   걸리는 편이 있어(ja23 사용자 지적) 사람이 고른 얌전한 순간으로 덮어쓴다.
-    mj = out_intro(out) / "몽타주.json"
-    mpick = json.loads(mj.read_text(encoding="utf-8")) if mj.is_file() else {}
+    # ★2026-10-07 영상 위 텍스트 — 씬마다 바탕이 납품 클린 컷이다. 소재(풀프레임 컷·1위
+    #   모자이크·정지프레임·얼굴)는 section4_cuts 가 `assets/cuts/` 에 짧게 잘라 둔다.
+    #   납품본 통째 복사(편당 수십~백MB)는 더 이상 하지 않는다. 몽타주.json 규약은 그대로.
+    import section4_cuts
     have = []
+    rows_ok = []
     for r in rows:
         c = r["code"]
         png = out / f"_infocard_{c}" / f"{c}_인포카드.png"
@@ -161,26 +162,12 @@ def cmd_build(args, cfg):
             print(f"  [!] {c}: 인포카드 없음 — 건너뜀")
             continue
         shutil.copy2(png, assets / f"{c}_card.png")
-        # ★몽타주 소스는 **납품본**이다. `_미리보기_애니.mp4` 는 배너 오버레이 애니라
-        #   화면에 인포카드가 그대로 뜬다(초안1 실측) — 영상이 아니라 카드가 지나간다.
-        #   노출 게이트를 통과한 것만 쓴다: _완성 → _final_subbed 순, 둘 다 없으면 몽타주 제외.
-        clip, mstart = None, 0.0
-        for cand in (out / "_완성" / f"{c}.mp4", out / c / f"{c}_final_subbed.mp4"):
-            if cand.is_file():
-                clip = cand
-                break
-        if clip:
-            shutil.copy2(clip, assets / f"{c}_clip.mp4")
-            mstart = round(max(0.5, wav_dur(clip) * 0.3), 2)   # 앞머리(배너 구간)를 피해 30% 지점
-            if c in mpick:
-                if mpick[c] is None:      # null = 몽타주에서 뺀다(카드 그리드는 유지)
-                    clip = None
-                else:
-                    mstart = float(mpick[c])
-        else:
-            print(f"  [!] {c}: 납품본이 아직 없어 몽타주에서 제외(배치 완주 후 build 다시)")
-        have.append({**r, "anim": f"assets/{c}_clip.mp4" if clip else None,
-                     "mstart": mstart, "card": f"assets/{c}_card.png"})
+        rows_ok.append({**r, "card": f"assets/{c}_card.png"})
+    print("소재 컷:")
+    have = section4_cuts.prep(out, rows_ok, assets, log=print)
+    # 낡은 통째 복사본이 남아 있으면 지운다(용량·혼동)
+    for old in assets.glob("*_clip.mp4"):
+        old.unlink()
     wav = out_intro(out) / "인트로.wav"
     if wav.is_file():
         shutil.copy2(wav, assets / "narration.wav")

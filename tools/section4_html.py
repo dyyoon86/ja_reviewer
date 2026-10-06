@@ -10,12 +10,15 @@ TTS 실측 길이(lines.json)에서 온다 — 화면이 말을 따라간다.
   · 그레인 + 비네트 질감, 강조색은 핑크 하나
   · 하드컷 우선, 숫자는 오버슛으로 꽂힌다
 
-  1 신작 500편 …            몽타주(가운데 띠만) + 0→500 카운터 + 수집 기간 달력(우측)
-  2 여러분들의 추천 수 …     좌측 카피 + 인포카드 그리드 + 집계
-  3 1위는 46대 1 …           1위 카드 블러 + 스코어보드
-  4 12위부터 1위까지 …       숫자 12→1 한 장씩 교체(티커가 같이 움직인다)
-  5 끝까지 시청해 주세요     CTA
-  6 먼저 12위입니다          꼴찌 카드 → 본편
+★2026-10-07 "인트로가 지루하다" → 텍스트 위 영상이 아니라 **영상 위 텍스트**. 씬마다 바탕이
+  납품 클린 컷(section4_cuts 가 assets/cuts/ 에 잘라 둔 것)이고 그래픽은 그 위에 얹힌다.
+
+  1 신작 500편 …            풀프레임 몽타주 12컷 하드컷(줌 교대) + 0→500 카운터 + 달력(우측)
+  2 여러분들의 추천 수 …     어두운 영상 위 좌측 카피 + 얼굴 타일 6×2(순위 숫자) + 집계
+  3 1위는 46대 1 …           1위 영상 모자이크 3단(거침→고움) 위 '?' + 스코어보드
+  4 12위부터 1위까지 …       숫자 12→1 플립 — 뒤 영상도 같이 넘어간다(티커 동기)
+  5 끝까지 시청해 주세요     1위 정지프레임 느린 줌 + CTA, 끝 화이트 플래시 → 본편
+  6 먼저 12위입니다          꼴찌 카드 → 본편(대본 6줄일 때만)
 
 HyperFrames 규칙: 등장 애니메이션만(마지막 씬 제외), 씬마다 track-index 분리,
 난수·시계 금지, repeat:-1 금지, 타임라인 동기 생성 후 __timelines 등록.
@@ -169,43 +172,15 @@ def build(rows, lines, total, pool=500, has_audio=False, cap_style="punch",
 
     s = [win(i) for i in range(1, len(lines) + 1)]
 
-    def sc(i, what):
-        """i번째 씬의 start/dur. 대본에 그 줄이 없으면 None — 씬을 통째로 뺀다."""
-        if i >= len(s):
-            return None
-        return s[i][0] if what == 0 else s[i][1]
-
-    # 1씬 몽타주 — 납품본 가운데 띠만(구워진 배너·자막이 잘려 나간다)
-    mont = [r for r in rows if r.get("anim")]
-    seg = round(s[0][1] / max(1, len(mont)), 3) if mont else s[0][1]
-    mont_html = "\n".join(
-        f'    <video id="m{k}" class="clip mont" data-start="{round(s[0][0] + k * seg, 3)}" '
-        f'data-duration="{seg}" data-media-start="{r.get("mstart", 0.5)}" data-track-index="0" '
-        f'src="{r["anim"]}" muted playsinline></video>'
-        for k, r in enumerate(mont))
-
-    grid = "".join(
-        f'<figure class="card"><img src="{r["card"]}" alt="">'
-        f'<figcaption><b>{r["rank"]}</b><span>{r["actress"]}</span></figcaption></figure>'
-        for r in desc)
-
-    cds = "".join(
-        f'<div class="cdi{" top" if r["rank"] == 1 else ""}" id="cdi{r["rank"]}">'
-        f'<img src="{r["card"]}" alt="">'
-        f'<div class="num">{r["rank"]}<i>위</i></div></div>'
-        for r in desc)
-
-    ticks = "".join(f'<span class="tk" id="tk{r["rank"]}">{r["rank"]}</span>' for r in desc)
-
     # 한 문장을 통째로 띄우면 두 줄로 흘러 읽기 전에 지나간다(초안5 피드백) —
     # 조각으로 끊어 순차 표시하고, 조각별 노출 시간은 글자 수에 비례해 나눈다.
     cap_items, caps = [], ""
     for ln in lines:
         pieces = chunk(ln["text"])
-        span = sum(len(x) for x in pieces) or 1
+        span_ = sum(len(x) for x in pieces) or 1
         at = ln["start"]
         for j, piece in enumerate(pieces):
-            d = round(ln["dur"] * len(piece) / span, 2)
+            d = round(ln["dur"] * len(piece) / span_, 2)
             if j == len(pieces) - 1:
                 d = round(ln["start"] + ln["dur"] - at, 2)
             cid = f'{ln["i"]}_{j}'
@@ -221,14 +196,6 @@ def build(rows, lines, total, pool=500, has_audio=False, cap_style="punch",
                         hl(piece)))
             at += d
 
-    audio = (f'    <audio id="nar" class="clip" data-start="0" data-duration="{dur_total}" '
-             f'data-track-index="13" src="assets/narration.wav" data-volume="1"></audio>\n'
-             if has_audio else "")
-    # BGM 은 빌드에서 -26 LUFS 로 깔았고, 내레이션과 겹치는 구간을 위해 한 번 더 낮춘다
-    audio += (f'    <audio id="bgm" class="clip" data-start="0" data-duration="{dur_total}" '
-              f'data-track-index="14" src="assets/bgm.mp3" data-volume="0.55"></audio>\n'
-              if has_bgm else "")
-
     # ★펀치라인 슬램이 화면을 통째로 덮는 동안 뒤 씬을 살려 두면 유령처럼 비친다.
     #   슬램이 시작되는 순간 그 줄의 씬을 끝낸다(화면을 넘겨준다).
     for idx, ln in enumerate(lines):
@@ -237,19 +204,98 @@ def build(rows, lines, total, pool=500, has_audio=False, cap_style="punch",
         if first_slam is not None and idx < len(s):
             st = s[idx][0]
             s[idx] = (st, round(max(0.5, first_slam - st), 2))
+    # ★마지막 씬은 컴포지션 끝까지 붙든다 — 창이 0.35초 먼저 끝나 화이트 플래시 뒤에 검은
+    #   화면이 0.4초 남았다(첫 렌더 실측). 본편으로는 흰 화면에서 바로 하드컷돼야 한다.
+    if len(s) == 5:
+        s[4] = (s[4][0], round(dur_total - s[4][0], 2))
+
+    def vid(eid, src, start, dur, track, cls, mstart=0.0):
+        return (f'    <video id="{eid}" class="clip cutv {cls}" data-start="{round(start, 3)}" '
+                f'data-duration="{round(dur, 3)}" data-media-start="{round(mstart, 3)}" '
+                f'data-track-index="{track}" src="{src}" muted playsinline></video>\n')
+
+    # ── 1씬: 풀프레임 몽타주 — 12편이 0.3~0.4초씩 하드컷(영상 위에 카운터·달력)
+    cuts_a = [r for r in desc if r.get("cut_a")]
+    seg_a = round(s[0][1] / max(1, len(cuts_a)), 3) if cuts_a else s[0][1]
+    bg1 = "".join(vid(f"ca{k}", r["cut_a"], s[0][0] + k * seg_a,
+                      seg_a if k < len(cuts_a) - 1 else s[0][1] - k * seg_a, 0, "bg1")
+                  for k, r in enumerate(cuts_a))
+
+    # ── 2씬 배경: 꼴찌 쪽 B 컷 몇 개를 어둡게(얼굴 타일·카피가 주인공)
+    cuts_b = [r for r in desc if r.get("cut_b")]
+    nb = max(1, min(len(cuts_b), -(-int(s[1][1] * 100) // 120)))   # ceil(dur/1.2)
+    seg_b2 = round(s[1][1] / nb, 3)
+    bg2 = "".join(vid(f"cb2_{k}", cuts_b[k]["cut_b"], s[1][0] + k * seg_b2,
+                      seg_b2 if k < nb - 1 else s[1][1] - k * seg_b2, 16, "bg2 dim")
+                  for k in range(nb)) if cuts_b else ""
+
+    # 얼굴 타일 12장 — 꼴찌→1위 순, 1위는 핑크 테두리. 얼굴이 없으면 품번 타일
+    faces = ""
+    for r in desc:
+        top = ' top' if r["rank"] == 1 else ''
+        if r.get("face"):
+            inner = f'<img src="{r["face"]}" alt="">'
+        else:
+            inner = f'<span class="nf">{r["code"]}</span>'
+        faces += f'<figure class="face{top}" id="f{r["rank"]}">{inner}<b>{r["rank"]}</b></figure>'
+
+    # ── 3씬 배경: 1위 영상 모자이크 3단(거침 → 고움). 같은 구간이라 media-start 로 이어진다
+    mos = (top1 or {}).get("mos") or []
+    seg_m = round(s[2][1] / max(1, len(mos)), 3) if mos else s[2][1]
+    bg3 = "".join(vid(f"cm{k}", src, s[2][0] + k * seg_m,
+                      seg_m if k < len(mos) - 1 else s[2][1] - k * seg_m, 17, "bg3", k * seg_m)
+                  for k, src in enumerate(mos))
+
+    # ── 4씬 배경: 12위→1위 플립 — 숫자와 영상이 같이 넘어간다(티커 동기)
+    flips = []
+    t0 = s[3][0] + 0.15
+    step = max(0.11, (s[3][1] - 0.55) / max(1, len(desc)))
+    bg4 = ""
+    for k, r in enumerate(desc):
+        at = round(t0 + k * step, 3)
+        is_last = (k == len(desc) - 1)
+        d = (s[3][0] + s[3][1] - at) if is_last else step
+        flips.append((r["rank"], at, round(d, 3), is_last))
+        if r.get("cut_b"):
+            bg4 += vid(f"cb4_{r['rank']}", r["cut_b"], at, d, 18, "bg4")
+    cds = "".join(
+        f'<div class="cdi{" top" if r["rank"] == 1 else ""}" id="cdi{r["rank"]}">'
+        f'<div class="num">{r["rank"]}<i>위</i></div></div>'
+        for r in desc)
+
+    # ── 5씬 배경: 1위 정지프레임(느린 줌) + 끝 화이트 플래시로 본편 진입
+    still = (top1 or {}).get("still")
+    bg5 = ""
+    if len(s) > 4 and still:
+        bg5 = (f'    <img id="still" class="clip cutv bg5" data-start="{s[4][0]}" '
+               f'data-duration="{s[4][1]}" data-track-index="19" src="{still}" alt="">\n')
+    flash2 = (f'    <div id="flash2" class="clip" data-start="{s[4][0]}" '
+              f'data-duration="{s[4][1]}" data-track-index="20"></div>\n' if len(s) == 5 else "")
+
+    ticks = "".join(f'<span class="tk" id="tk{r["rank"]}">{r["rank"]}</span>' for r in desc)
+
+    audio = (f'    <audio id="nar" class="clip" data-start="0" data-duration="{dur_total}" '
+             f'data-track-index="13" src="assets/narration.wav" data-volume="1"></audio>\n'
+             if has_audio else "")
+    # BGM 은 빌드에서 -22 LUFS 로 깔았고, 내레이션과 겹치는 구간을 위해 한 번 더 낮춘다
+    audio += (f'    <audio id="bgm" class="clip" data-start="0" data-duration="{dur_total}" '
+              f'data-track-index="14" src="assets/bgm.mp3" data-volume="0.55"></audio>\n'
+              if has_bgm else "")
 
     open_html = ""
     if len(s) > 5:
         open_html = (
             f'      <div id="open" class="clip sheet" data-start="{s[5][0]}" '
             f'data-duration="{s[5][1]}" data-track-index="7">\n'
-            f'        <div class="badge">{last['rank'] if last else 12}<i>위</i></div>\n'
-            f'        <img src="{last['card'] if last else ''}" alt="">\n'
+            f'        <div class="badge">{last["rank"] if last else 12}<i>위</i></div>\n'
+            f'        <img src="{last["card"] if last else ""}" alt="">\n'
             f'      </div>\n')
 
     frame_from = round(max(0.0, s[1][0] - 0.3), 2)   # 러닝헤드·티커는 2씬부터
     tl = _timeline(s, rows, desc, lines, pool, dur_total, frame_from, cap_items,
-                   likes, dis, views, cap_style, cal_n)
+                   likes, dis, views, cap_style, cal_n,
+                   dict(na=len(cuts_a), seg_a=seg_a, nm=len(mos), seg_m=seg_m,
+                        flips=flips, still=bool(bg5), nfaces=len(desc)))
 
     return f"""<!doctype html>
 <html lang="ko">
@@ -282,20 +328,31 @@ def build(rows, lines, total, pool=500, has_audio=False, cap_style="punch",
         opacity:.15; mix-blend-mode:overlay;
         background-image:{GRAIN}; background-size:180px 180px; }}
 
+      /* ── 영상 바탕(2026-10-07): 씬마다 풀프레임. 뒤 씬이 앞 씬 위에 오도록 z 를 올린다 */
+      .cutv {{ width:1920px; height:1080px; object-fit:cover; transform-origin:center center;
+        filter:brightness(.74) saturate(1.05) contrast(1.06); }}
+      .bg1 {{ z-index:5; }}  .bg2 {{ z-index:6; }}  .bg3 {{ z-index:7; }}
+      .bg4 {{ z-index:8; }}  .bg5 {{ z-index:9; }}
+      .cutv.dim {{ filter:brightness(.38) saturate(.8) contrast(1.05); }}
+      .bg3 {{ filter:brightness(.62) saturate(1.1) contrast(1.1); }}
+      .bg5 {{ filter:brightness(.55) saturate(.95) contrast(1.08); }}
+
       /* ── 방송 프레임 */
       .runhead {{ position:absolute; left:74px; top:52px; right:auto; bottom:auto;
         width:max-content; height:max-content; display:flex; align-items:center; gap:18px;
         z-index:70; }}
       .runhead .bar {{ width:6px; height:34px; background:{C1}; border-radius:3px; }}
-      .runhead .t {{ font-size:30px; font-weight:700; letter-spacing:.14em; color:{FG}; }}
-      .runhead .t em {{ font-style:normal; color:{SUB}; font-weight:500; }}
+      .runhead .t {{ font-size:30px; font-weight:700; letter-spacing:.14em; color:{FG};
+        text-shadow:0 2px 12px rgba(0,0,0,.9); }}
+      .runhead .t em {{ font-style:normal; color:#d8d0d6; font-weight:500; }}
 
       .ticker {{ position:absolute; left:74px; right:74px; bottom:48px; top:auto;
         height:max-content; display:flex; align-items:center; z-index:70; }}
       .ticker .rail {{ display:flex; gap:12px; align-items:flex-end; }}
-      .tk {{ font-family:{DISP}; font-size:28px; font-weight:700; color:{SUB}; opacity:.45;
+      .tk {{ font-family:{DISP}; font-size:28px; font-weight:700; color:#e4dde2; opacity:.55;
         letter-spacing:-.02em; min-width:44px; text-align:center;
-        border-bottom:4px solid rgba(155,146,154,.22); padding-bottom:8px; }}
+        text-shadow:0 2px 10px rgba(0,0,0,.9);
+        border-bottom:4px solid rgba(255,255,255,.22); padding-bottom:8px; }}
       .tk.on {{ color:{FG}; opacity:1; border-bottom-color:{C1}; }}
 
       /* ── 씬 공통: 좌측 정렬 편집 레이아웃 */
@@ -305,21 +362,16 @@ def build(rows, lines, total, pool=500, has_audio=False, cap_style="punch",
       .lead {{ position:relative; padding-left:34px; }}
       .lead::before {{ content:''; position:absolute; left:0; top:8px; bottom:8px;
         width:8px; background:{C1}; border-radius:4px; }}
-      .kicker {{ font-size:34px; font-weight:700; letter-spacing:.16em; color:{SUB};
-        margin-bottom:16px; }}
+      .kicker {{ font-size:34px; font-weight:700; letter-spacing:.16em; color:{FG};
+        margin-bottom:16px; text-shadow:0 3px 14px rgba(0,0,0,.95); }}
 
       /* ── 1씬 */
-      /* 납품본에는 배너가 구워져 있다 — 위 26% / 아래 22% 를 잘라 필름 스트립처럼 쓴다 */
-      .mont {{ z-index:5; width:1920px; height:1080px; object-fit:cover;
-        clip-path: inset(26% 0 22% 0);
-        filter:brightness(.6) saturate(.9) contrast(1.05); }}
       /* 자막대(하단 128px)와 겹치지 않게 카운터 블록은 화면 중앙에 둔다(check 실측) */
       #s1 {{ justify-content:center; z-index:22; }}
-      #s1 .kicker {{ color:{FG}; opacity:.9; }}
       #counter {{ font-family:{DISP}; font-size:330px; font-weight:900; line-height:.86;
-        letter-spacing:-.05em; color:{FG}; text-shadow:0 14px 60px rgba(0,0,0,.9); }}
+        letter-spacing:-.05em; color:{FG}; text-shadow:0 14px 60px rgba(0,0,0,.95), 0 0 8px rgba(0,0,0,.9); }}
       #counter i {{ font-style:normal; font-size:120px; color:{C1T}; margin-left:14px; }}
-      #flash {{ position:absolute; inset:0; background:#fff; opacity:0; z-index:59; }}
+      #flash, #flash2 {{ position:absolute; inset:0; background:#fff; opacity:0; z-index:59; }}
 
       /* ── 1씬 달력: 수집 기간. 카운터(좌)와 같은 세로 중심, 자막대 위에서 끝난다 */
       .calwrap {{ position:absolute; right:110px; top:150px; bottom:200px;
@@ -357,65 +409,62 @@ def build(rows, lines, total, pool=500, has_audio=False, cap_style="punch",
       #cal .nd {{ margin-left:auto; font-size:28px; font-weight:700; color:{C1T};
         letter-spacing:.06em; }}
 
-      /* ── 2씬 */
+      /* ── 2씬: 좌측 카피 + 얼굴 타일 6×2 (카드 그리드는 글자가 안 읽혀 폐기, 2026-10-07) */
       #grid {{ flex-direction:row; align-items:center; gap:58px; }}
       #grid .side {{ flex:0 0 380px; }}
       #grid .big {{ font-family:{DISP}; font-size:132px; font-weight:900; line-height:.92;
-        letter-spacing:-.05em; }}
-      #grid .big em {{ font-style:normal; color:{C1}; }}
+        letter-spacing:-.05em; text-shadow:0 8px 30px rgba(0,0,0,.95); }}
+      #grid .big em {{ font-style:normal; color:{C1T}; }}
       #grid .stat {{ margin-top:30px; display:flex; flex-direction:column; gap:12px; }}
       #grid .stat div {{ font-size:34px; font-weight:700; color:{FG};
         text-shadow:0 3px 14px rgba(0,0,0,.95); }}
       #grid .stat b {{ font-family:{DISP}; font-weight:800; }}
       #grid .stat i {{ font-style:normal; color:#d3ccd1; font-weight:500; margin-right:14px;
         letter-spacing:.06em; }}
-      #grid .wrap {{ flex:1; display:grid; grid-template-columns:repeat(4, 1fr); gap:13px; }}
-      .card {{ position:relative; border-radius:10px; overflow:hidden;
-        box-shadow:0 12px 34px rgba(0,0,0,.6); }}
-      .card img {{ width:100%; display:block; }}
-      .card figcaption {{ position:absolute; left:0; right:0; bottom:0; padding:26px 12px 9px;
-        display:flex; align-items:baseline; gap:9px;
-        background:linear-gradient(transparent, rgba(0,0,0,.92)); }}
-      .card b {{ font-family:{DISP}; font-size:29px; font-weight:900; color:{C1}; }}
-      .card span {{ font-size:20px; font-weight:600; color:{FG}; }}
+      #grid .faces {{ flex:1; display:grid; grid-template-columns:repeat(6, 190px); gap:14px;
+        justify-content:end; }}
+      .face {{ position:relative; width:190px; height:190px; border-radius:18px; overflow:hidden;
+        background:#1a1216; box-shadow:0 14px 40px rgba(0,0,0,.7), inset 0 0 0 1px rgba(255,255,255,.12); }}
+      .face img {{ width:100%; height:100%; object-fit:cover; object-position:center 18%; display:block; }}
+      .face .nf {{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+        font-family:{DISP}; font-size:30px; font-weight:800; color:{SUB}; letter-spacing:-.02em; }}
+      .face b {{ position:absolute; left:12px; bottom:4px; font-family:{DISP}; font-size:62px;
+        font-weight:900; line-height:1; color:{FG}; letter-spacing:-.05em;
+        text-shadow:0 3px 12px rgba(0,0,0,.95), 0 0 6px rgba(0,0,0,.9); }}
+      .face.top {{ box-shadow:0 0 0 6px {C1}, 0 14px 40px rgba(0,0,0,.7); }}
+      .face.top b {{ color:{C1T}; }}
 
-      /* ── 3씬 */
+      /* ── 3씬: 1위 영상 모자이크 위에 '?' + 스코어보드 */
       #top1 {{ flex-direction:row; align-items:center; gap:76px; }}
-      #top1 .shot {{ position:relative; flex:0 0 800px; border-radius:14px; overflow:hidden;
-        box-shadow:0 22px 70px rgba(0,0,0,.75); }}
-      /* 너무 어두우면 카드인 줄도 모른다(초안4) — 형태는 보이되 얼굴은 안 보이는 선 */
-      #top1 .shot img {{ width:100%; display:block;
-        filter:blur(11px) brightness(.68); transform:scale(1.06); }}
-      #top1 .qm {{ position:absolute; inset:0; display:flex; align-items:center;
-        justify-content:center; font-family:{DISP}; font-size:290px; font-weight:900;
-        color:{FG}; text-shadow:0 10px 46px rgba(0,0,0,.9); }}
+      #top1 .shade {{ position:absolute; inset:0; z-index:0;
+        background:linear-gradient(90deg, rgba(8,4,6,0) 38%, rgba(8,4,6,.72) 58%, rgba(8,4,6,.88) 100%); }}
+      #top1 .qwrap {{ position:relative; flex:0 0 760px; height:600px; display:flex;
+        align-items:center; justify-content:center; }}
+      #top1 .qm {{ font-family:{DISP}; font-size:520px; font-weight:900; line-height:1;
+        color:{FG}; text-shadow:0 20px 70px rgba(0,0,0,.95), 0 0 30px rgba(255,45,85,.45); }}
+      #top1 .lead {{ position:relative; z-index:1; }}
       #top1 .score {{ font-family:{DISP}; font-size:220px; font-weight:900; line-height:.88;
-        letter-spacing:-.05em; }}
-      #top1 .score em {{ font-style:normal; color:{C1}; }}
-      #top1 .score span {{ color:{SUB}; font-size:120px; margin:0 18px; }}
-      #top1 .who {{ margin-top:20px; font-size:50px; font-weight:800; color:{FG}; }}
-      #top1 .who u {{ text-decoration:none; color:{C1}; }}
+        letter-spacing:-.05em; text-shadow:0 10px 40px rgba(0,0,0,.9); }}
+      #top1 .score em {{ font-style:normal; color:{C1T}; }}
+      #top1 .score span {{ color:#d8d0d6; font-size:120px; margin:0 18px; }}
+      #top1 .who {{ margin-top:20px; font-size:50px; font-weight:800; color:{FG};
+        text-shadow:0 3px 14px rgba(0,0,0,.95); }}
+      #top1 .who u {{ text-decoration:none; color:{C1T}; }}
 
-      /* ── 4씬: 한 장씩 교체(나열 금지 — 초안1 실패) */
+      /* ── 4씬: 숫자 12→1 플립 — 뒤 영상도 같이 넘어간다 */
       #rush {{ padding:0; }}
       .cdi {{ position:absolute; inset:0; display:flex; align-items:center;
         justify-content:flex-end; padding-right:90px; opacity:0; }}
-      /* 인포카드 좌상단에 채널 워터마크 알약이 박혀 있다 — 전체화면으로 깔면 러닝헤드와
-         겹친다(초안4 실측). 위 15% 를 잘라 낸다 */
-      .cdi img {{ position:absolute; left:0; top:0; width:1920px; height:1080px;
-        object-fit:cover; clip-path:inset(15% 0 0 0); filter:brightness(.4) saturate(.85); }}
       .cdi .num {{ position:relative; font-family:{DISP}; font-size:400px; font-weight:900;
         line-height:.82; letter-spacing:-.06em; color:{FG};
-        text-shadow:0 16px 70px rgba(0,0,0,.9); }}
+        text-shadow:0 16px 70px rgba(0,0,0,.95), 0 0 10px rgba(0,0,0,.9); }}
       .cdi .num i {{ font-style:normal; font-size:145px; color:{C1T}; margin-left:6px; }}
       .cdi.top .num {{ color:{C1T}; }}
 
       /* ── 5씬 */
       #cta .big {{ font-family:{DISP}; font-size:165px; font-weight:900; line-height:.96;
-        letter-spacing:-.05em; }}
-      #cta .big em {{ font-style:normal; color:{C1}; }}
-      #cta .sub {{ margin-top:26px; font-size:44px; color:{SUB}; font-weight:600;
-        letter-spacing:.04em; }}
+        letter-spacing:-.05em; text-shadow:0 10px 40px rgba(0,0,0,.95); }}
+      #cta .big em {{ font-style:normal; color:{C1T}; }}
 
       /* ── 6씬 */
       #open {{ flex-direction:row; align-items:center; gap:64px; }}
@@ -457,8 +506,7 @@ def build(rows, lines, total, pool=500, has_audio=False, cap_style="punch",
 
       <div id="bg"></div>
 
-{mont_html}
-
+{bg1}{bg2}{bg3}{bg4}{bg5}
       <div id="s1" class="clip sheet" data-start="{s[0][0]}" data-duration="{s[0][1]}"
            data-track-index="1">
         <div class="lead">
@@ -481,17 +529,16 @@ def build(rows, lines, total, pool=500, has_audio=False, cap_style="punch",
             <div><i>조회수</i><b id="stView">0</b></div>
           </div>
         </div>
-        <div class="wrap">{grid}</div>
+        <div class="faces">{faces}</div>
       </div>
 
       <div id="top1" class="clip sheet" data-start="{s[2][0]}" data-duration="{s[2][1]}"
            data-track-index="4">
-        <div class="shot" data-layout-allow-overflow>
-          <img src="{top1['card'] if top1 else ''}" alt=""><div class="qm">?</div>
-        </div>
+        <div class="shade" data-layout-ignore></div>
+        <div class="qwrap"><div class="qm">?</div></div>
         <div class="lead">
           <div class="kicker">이번 주 1위</div>
-          <div class="score"><em>{top1['likes'] if top1 else 0}</em><span>:</span>{top1['dislikes'] if top1 else 0}</div>
+          <div class="score"><em>{top1["likes"] if top1 else 0}</em><span>:</span>{top1["dislikes"] if top1 else 0}</div>
           <div class="who" id="who">{who_html}</div>
         </div>
       </div>
@@ -505,7 +552,7 @@ def build(rows, lines, total, pool=500, has_audio=False, cap_style="punch",
           <div class="big"><em>끝까지</em> 시청해 주세요</div>
         </div>
       </div>
-
+{flash2}
 {open_html}
 
       <div id="runhead" class="clip runhead" data-start="{frame_from}"
@@ -533,13 +580,23 @@ def build(rows, lines, total, pool=500, has_audio=False, cap_style="punch",
 
 
 def _timeline(s, rows, desc, lines, pool, dur_total, frame_from, cap_items,
-              likes, dis, views, cap_style="punch", cal_n=0):
+              likes, dis, views, cap_style="punch", cal_n=0, v=None):
+    v = v or {}
     js = []
     a = js.append
     a("      window.__timelines = window.__timelines || {};")
     a("      const tl = gsap.timeline({ paused: true });")
     a("")
-    a("      // ── 1씬: 카운터 0 → %d (몽타주는 가운데 띠만)" % pool)
+    a("      // ── 1씬: 풀프레임 몽타주 하드컷 + 카운터 0 → %d" % pool)
+    # 컷마다 줌 방향을 번갈아(들어가기/나오기) — 정지컷 나열처럼 보이지 않게
+    for k in range(v.get("na", 0)):
+        at = s[0][0] + k * v["seg_a"]
+        if k % 2 == 0:
+            a("      tl.fromTo('#ca%d', { scale: 1.12 }, { scale: 1.0, duration: %.3f, ease: 'power1.out' }, %.3f);"
+              % (k, v["seg_a"], at))
+        else:
+            a("      tl.fromTo('#ca%d', { scale: 1.0 }, { scale: 1.1, duration: %.3f, ease: 'power1.in' }, %.3f);"
+              % (k, v["seg_a"], at))
     cnt_dur = max(0.9, s[0][1] * 0.58)
     a("      const cnt = { v: 0 }, cntEl = document.getElementById('counter');")
     a("      tl.to('#s1', { opacity: 1, duration: 0.12, ease: 'none' }, %.2f);" % s[0][0])
@@ -574,6 +631,8 @@ def _timeline(s, rows, desc, lines, pool, dur_total, frame_from, cap_items,
           " ease: 'back.out(2.4)' }, %.2f);" % (sw0 + cal_n * sw_step - 0.05))
         a("      tl.from('#cal .nd', { x: 20, opacity: 0, duration: 0.3, ease: 'power3.out' }, %.2f);"
           % (sw0 + cal_n * sw_step + 0.12))
+    # ★씬 창이 0.3초씩 겹친다 — 다음 씬이 시작되는 순간 앞 씬 시트를 끈다(영상 바탕 위에 유령 방지)
+    a("      tl.set('#s1', { opacity: 0 }, %.2f);" % s[1][0])
     a("")
     a("      // ── 방송 프레임(2씬부터 끝까지 유지)")
     a("      tl.from('#runhead', { x: -40, opacity: 0, duration: 0.45, ease: 'expo.out' }, %.2f);"
@@ -581,78 +640,75 @@ def _timeline(s, rows, desc, lines, pool, dur_total, frame_from, cap_items,
     a("      tl.from('#ticker .tk', { y: 18, opacity: 0, duration: 0.3, ease: 'power2.out',"
       " stagger: 0.03 }, %.2f);" % (frame_from + 0.12))
     a("")
-    a("      // ── 2씬: 좌측 카피 + 카드 그리드")
+    a("      // ── 2씬: 좌측 카피 + 얼굴 타일 12장이 튀어 들어온다")
     a("      tl.to('#grid', { opacity: 1, duration: 0.12, ease: 'none' }, %.2f);" % s[1][0])
     a("      tl.from('#grid .kicker', { x: -26, opacity: 0, duration: 0.4, ease: 'power3.out' }, %.2f);"
       % (s[1][0] + 0.12))
     a("      tl.from('#grid .big', { x: -40, opacity: 0, duration: 0.5, ease: 'expo.out' }, %.2f);"
       % (s[1][0] + 0.2))
-    a("      tl.from('#grid .card', { y: 46, opacity: 0, duration: 0.42,"
-      " ease: 'back.out(1.5)', stagger: 0.042 }, %.2f);" % (s[1][0] + 0.3))
+    nf = max(1, v.get("nfaces", 12))
+    stag = min(0.06, max(0.03, (s[1][1] - 1.4) / nf))
+    a("      tl.from('#grid .face', { y: 70, opacity: 0, scale: 0.6, duration: 0.38,"
+      " ease: 'back.out(1.9)', stagger: %.3f }, %.2f);" % (stag, s[1][0] + 0.22))
     a("      tl.from('#grid .stat div', { x: -22, opacity: 0, duration: 0.36,"
-      " ease: 'power3.out', stagger: 0.1 }, %.2f);" % (s[1][0] + 0.95))
-    # ★카드가 착지한 뒤 그대로 6초를 버티면 정지 화면이 된다(초안5 피드백).
-    #   ① 집계 숫자 카운트업 ② 12위→1위 하이라이트 스윕 ③ 그리드 전체 서서히 밀어넣기
+      " ease: 'power3.out', stagger: 0.1 }, %.2f);" % (s[1][0] + 0.5))
     a("      const st = { a: 0, b: 0, c: 0 };")
     a("      const stL = document.getElementById('stLike'),"
       " stD = document.getElementById('stDis'), stV = document.getElementById('stView');")
     a("      tl.to(st, { a: %d, b: %d, c: %d, duration: %.2f, ease: 'power2.out',"
-      % (likes, dis, views, max(1.0, s[1][1] * 0.45)))
+      % (likes, dis, views, max(0.8, s[1][1] * 0.45)))
     a("        onUpdate: () => { stL.textContent = Math.round(st.a);"
       " stD.textContent = Math.round(st.b);"
       " stV.textContent = Math.round(st.c).toLocaleString('en-US'); } }, %.2f);"
-      % (s[1][0] + 1.0))
-    a("      tl.to('#grid .wrap', { scale: 1.045, transformOrigin: 'center center',"
-      " duration: %.2f, ease: 'none' }, %.2f);" % (s[1][1], s[1][0]))
-    sweep0 = s[1][0] + 1.45
-    sweep_step = max(0.12, (s[1][1] - 2.0) / max(1, len(desc)))
-    for k in range(len(desc)):
-        at = sweep0 + k * sweep_step
-        a("      tl.to('#grid .card:nth-child(%d)', { scale: 1.075, zIndex: 5,"
-          " boxShadow: '0 0 0 4px %s, 0 18px 44px rgba(0,0,0,.75)',"
-          " duration: 0.16, ease: 'power2.out' }, %.2f);" % (k + 1, C1, at))
-        a("      tl.to('#grid .card:nth-child(%d)', { scale: 1, zIndex: 1,"
-          " boxShadow: '0 12px 34px rgba(0,0,0,.6)',"
-          " duration: 0.26, ease: 'power2.in' }, %.2f);" % (k + 1, at + 0.16))
+      % (s[1][0] + 0.6))
+    # 타일이 다 착지한 뒤: 1위 타일이 한 번 튀고, 전체가 천천히 밀려 들어온다(정지 방지)
+    land = s[1][0] + 0.22 + stag * nf + 0.38
+    a("      tl.fromTo('#grid .face.top', { scale: 1 }, { scale: 1.14, duration: 0.22,"
+      " ease: 'back.out(2.4)' }, %.2f);" % land)
+    a("      tl.to('#grid .faces', { scale: 1.035, transformOrigin: 'right center',"
+      " duration: %.2f, ease: 'none' }, %.2f);" % (max(0.3, s[1][0] + s[1][1] - land), land))
+    a("      tl.set('#grid', { opacity: 0 }, %.2f);" % s[2][0])
     a("")
-    a("      // ── 3씬: 1위 단독 + 스코어보드")
+    a("      // ── 3씬: 1위 모자이크 위 '?' — 모자이크가 고와질 때마다 '?' 가 한 번씩 튄다")
     a("      tl.to('#top1', { opacity: 1, duration: 0.12, ease: 'none' }, %.2f);" % s[2][0])
-    a("      tl.from('#top1 .shot', { x: -80, opacity: 0, duration: 0.55, ease: 'expo.out' }, %.2f);"
-      % (s[2][0] + 0.15))
-    a("      tl.from('#top1 .qm', { scale: 0.55, opacity: 0, duration: 0.45,"
-      " ease: 'back.out(2.2)' }, %.2f);" % (s[2][0] + 0.42))
+    a("      tl.from('#top1 .qm', { scale: 0.35, opacity: 0, duration: 0.45,"
+      " ease: 'back.out(2.2)' }, %.2f);" % (s[2][0] + 0.12))
+    for k in range(1, v.get("nm", 0)):
+        a("      tl.fromTo('#top1 .qm', { scale: 1.22 }, { scale: 1, duration: 0.32,"
+          " ease: 'back.out(2)' }, %.3f);" % (s[2][0] + k * v["seg_m"]))
     a("      tl.from('#top1 .kicker', { x: -24, opacity: 0, duration: 0.38, ease: 'power3.out' }, %.2f);"
       % (s[2][0] + 0.3))
     a("      tl.from('#top1 .score', { scale: 0.68, opacity: 0, transformOrigin: 'left center',"
       " duration: 0.5, ease: 'back.out(2.4)' }, %.2f);" % (s[2][0] + 0.5))
     a("      tl.from('#who', { y: 22, opacity: 0, duration: 0.4, ease: 'power3.out' }, %.2f);"
       % (s[2][0] + max(1.1, s[2][1] * 0.5)))
+    a("      tl.set('#top1', { opacity: 0 }, %.2f);" % s[3][0])
     a("")
-    a("      // ── 4씬: 카운트다운 — 한 장씩 교체 + 티커 동기")
+    a("      // ── 4씬: 카운트다운 — 숫자와 뒤 영상이 같이 넘어간다 + 티커 동기")
     a("      tl.to('#rush', { opacity: 1, duration: 0.12, ease: 'none' }, %.2f);" % s[3][0])
-    t0 = s[3][0] + 0.25
-    step = max(0.16, (s[3][1] - 0.9) / max(1, len(desc)))
-    for k, r in enumerate(desc):
-        at = t0 + k * step
-        is_last = (k == len(desc) - 1)
-        a("      tl.set('#cdi%d', { opacity: 1 }, %.2f);" % (r["rank"], at))
-        a("      tl.set('#tk%d', { attr: { class: 'tk on' } }, %.2f);" % (r["rank"], at))
+    for rank, at, d, is_last in v.get("flips", []):
+        a("      tl.set('#cdi%d', { opacity: 1 }, %.3f);" % (rank, at))
+        a("      tl.set('#tk%d', { attr: { class: 'tk on' } }, %.3f);" % (rank, at))
         a("      tl.fromTo('#cdi%d .num', { scale: 0.62, opacity: 0 },"
-          " { scale: 1, opacity: 1, duration: %.2f, ease: 'back.out(2.4)' }, %.2f);"
-          % (r["rank"], min(0.3, step * 0.7), at))
+          " { scale: 1, opacity: 1, duration: %.3f, ease: 'back.out(2.4)' }, %.3f);"
+          % (rank, min(0.3, d * 0.7), at))
         if not is_last:
-            a("      tl.set('#cdi%d', { opacity: 0 }, %.2f);" % (r["rank"], at + step))
-            a("      tl.set('#tk%d', { attr: { class: 'tk' } }, %.2f);" % (r["rank"], at + step))
+            a("      tl.set('#cdi%d', { opacity: 0 }, %.3f);" % (rank, at + d))
+            a("      tl.set('#tk%d', { attr: { class: 'tk' } }, %.3f);" % (rank, at + d))
         else:
-            a("      tl.to('#cdi%d img', { scale: 1.05, duration: %.2f, ease: 'power1.out' }, %.2f);"
-              % (r["rank"], max(0.4, s[3][1] - (at - s[3][0])), at))
+            a("      tl.fromTo('#cb4_%d', { scale: 1 }, { scale: 1.08, duration: %.3f, ease: 'power1.out' }, %.3f);"
+              % (rank, max(0.3, d), at))
+    if len(s) > 4:
+        a("      tl.set('#rush', { opacity: 0 }, %.2f);" % s[4][0])
     a("")
-    a("      // ── 5씬: CTA")
+    a("      // ── 5씬: 1위 정지프레임 느린 줌 + CTA, 끝에서 화이트 플래시로 본편 진입")
     if len(s) > 4:
         a("      tl.to('#cta', { opacity: 1, duration: 0.12, ease: 'none' }, %.2f);" % s[4][0])
         a("      tl.from('#cta .big', { x: -50, opacity: 0, duration: 0.5, ease: 'expo.out' }, %.2f);"
           % (s[4][0] + 0.14))
-        pass
+        if v.get("still"):
+            a("      tl.fromTo('#still', { scale: 1.0 }, { scale: 1.1, duration: %.2f, ease: 'none' }, %.2f);"
+              % (s[4][1], s[4][0]))
     a("")
     a("      // ── 6씬: 꼴찌 카드 → 본편 (있을 때만. 마지막 씬이라 퇴장 허용)")
     if len(s) > 5:
@@ -665,8 +721,9 @@ def _timeline(s, rows, desc, lines, pool, dur_total, frame_from, cap_items,
           % (s[5][0] + s[5][1] - 0.3))
     a("")
     if len(s) == 5:
-        a("      tl.to('#cta', { opacity: 0, duration: 0.3, ease: 'power2.in' }, %.2f);"
-          % (s[4][0] + s[4][1] - 0.3))
+        # 마지막 씬 — 화이트 플래시로 치고 본편(12위 첫 컷)으로 하드컷
+        a("      tl.to('#flash2', { opacity: 1, duration: 0.2, ease: 'power2.in' }, %.2f);"
+          % (s[4][0] + s[4][1] - 0.2))
     a("      // ── 자막 — 조각 단위로 끊어 띄우고, 조각마다 %s 연출" % CAP_LABEL[cap_style])
     for cid, at, dur, slam in cap_items:
         if slam:
