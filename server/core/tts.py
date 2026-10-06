@@ -314,7 +314,9 @@ def mux_narration(video, narration_wav, out_video, narration_gain=1.0,
                   f"[oa][na]amix=inputs=2:duration=first:normalize=0[a]")
         else:
             # 구간을 모르면 내레이션을 사이드체인으로 써서 눌러준다(근사)
-            fc = (f"[1:a]volume={narration_gain},asplit=2[na][sc];"
+            # ★apad 필수: sidechaincompress 는 짧은 입력에서 끝난다 → 해설 wav 가 끝나는 순간
+            #   현장음까지 잘렸다(ja24·ja25 납품본 오디오가 영상보다 6~13초 짧았던 원인).
+            fc = (f"[1:a]volume={narration_gain},apad,asplit=2[na][sc];"
                   f"[0:a]volume=1.0[oa];"
                   f"[oa][sc]sidechaincompress=threshold=0.02:ratio=12:attack=15:release=350[ducked];"
                   f"[ducked][na]amix=inputs=2:duration=first:normalize=0[a]")

@@ -10,7 +10,7 @@ TTS 실측 길이(lines.json)에서 온다 — 화면이 말을 따라간다.
   · 그레인 + 비네트 질감, 강조색은 핑크 하나
   · 하드컷 우선, 숫자는 오버슛으로 꽂힌다
 
-  1 신작 500편 …            몽타주(가운데 띠만) + 0→500 카운터
+  1 신작 500편 …            몽타주(가운데 띠만) + 0→500 카운터 + 수집 기간 달력(우측)
   2 여러분들의 추천 수 …     좌측 카피 + 인포카드 그리드 + 집계
   3 1위는 46대 1 …           1위 카드 블러 + 스코어보드
   4 12위부터 1위까지 …       숫자 12→1 한 장씩 교체(티커가 같이 움직인다)
@@ -20,6 +20,8 @@ TTS 실측 길이(lines.json)에서 온다 — 화면이 말을 따라간다.
 HyperFrames 규칙: 등장 애니메이션만(마지막 씬 제외), 씬마다 track-index 분리,
 난수·시계 금지, repeat:-1 금지, 타임라인 동기 생성 후 __timelines 등록.
 """
+import calendar as _cal
+import datetime as _dt
 import re
 
 BG0, BG1 = "#1c1116", "#0d0a0c"      # 라디얼 안쪽 / 바깥
@@ -91,9 +93,58 @@ def chunk(text, max_chars=20):
     return out or [text]
 
 
+WD = "월화수목금토일"
+
+
+def calendar_html(span):
+    """1씬 달력 카드 — 수집 기간(span = (시작일, 끝일))을 월 달력 위에 칠한다.
+
+    "신작 257편"이 **며칠부터 며칠까지** 모은 숫자인지 화면이 말해 준다(2026-10-02 사용자 요청).
+    기간이 달을 넘기면(9/29~10/5) 시작 달 달력에 다음 달 주를 한 줄 덧붙인다.
+    반환: (html, 칠할 칸 수). 칸 id 는 cd0.. — 타임라인이 순서대로 쓸어 칠한다.
+    """
+    a, b = span
+    cal = _cal.Calendar(firstweekday=6)                    # 일요일 시작(한국 달력)
+    weeks = cal.monthdatescalendar(a.year, a.month)
+    while weeks[-1][-1] < b:                               # 끝일이 다음 달 주로 넘어간 경우
+        nxt = weeks[-1][-1] + _dt.timedelta(days=1)
+        weeks.append([nxt + _dt.timedelta(days=k) for k in range(7)])
+    k, body = 0, ""
+    for w in weeks:
+        cells = ""
+        for col, d in enumerate(w):
+            cls = ["d"]
+            if d.month != a.month:
+                cls.append("out")
+            fill, cid = "", ""
+            if a <= d <= b:
+                cls.append("in")
+                if d == a or col == 0:
+                    cls.append("cl")
+                if d == b or col == 6:
+                    cls.append("cr")
+                fill, cid = '<i class="f"></i>', f' id="cd{k}"'
+                k += 1
+            cells += f'<div class="{" ".join(cls)}"{cid}>{fill}<b>{d.day}</b></div>'
+        body += f'<div class="wk">{cells}</div>'
+    head = f"{a.month}월" if a.month == b.month else f"{a.month}–{b.month}월"
+    days = (b - a).days + 1
+    html = (
+        f'<div class="calwrap"><div id="cal" class="r{len(weeks)}">'
+        f'<div class="hd"><div class="m">{head}</div><div class="y">{a.year} · 수집 기간</div></div>'
+        f'<div class="wd">{"".join(f"<span>{x}</span>" for x in "일월화수목금토")}</div>'
+        f'{body}'
+        f'<div class="ft"><div class="rg">{a.month}.{a.day}<small>{WD[a.weekday()]}</small>'
+        f'<i>→</i>{b.month}.{b.day}<small>{WD[b.weekday()]}</small></div>'
+        f'<div class="nd">{days}일간</div></div>'
+        f'</div></div>')
+    return html, k
+
+
 def build(rows, lines, total, pool=500, has_audio=False, cap_style="punch",
-          has_bgm=False, week="이번 주"):
+          has_bgm=False, week="이번 주", span=None):
     rows = sorted(rows, key=lambda r: r["rank"])
+    cal_html, cal_n = calendar_html(span) if span else ("", 0)
     desc = sorted(rows, key=lambda r: -r["rank"])          # 12위 → 1위 (재생 순서)
     top1 = rows[0] if rows else None
     # ★1위 스코어보드 한 줄 — 예전엔 '싫어요 한 분, 누구죠?' 가 박혀 있었다(ja21 1위 46:1 용).
@@ -198,7 +249,7 @@ def build(rows, lines, total, pool=500, has_audio=False, cap_style="punch",
 
     frame_from = round(max(0.0, s[1][0] - 0.3), 2)   # 러닝헤드·티커는 2씬부터
     tl = _timeline(s, rows, desc, lines, pool, dur_total, frame_from, cap_items,
-                   likes, dis, views, cap_style)
+                   likes, dis, views, cap_style, cal_n)
 
     return f"""<!doctype html>
 <html lang="ko">
@@ -269,6 +320,42 @@ def build(rows, lines, total, pool=500, has_audio=False, cap_style="punch",
         letter-spacing:-.05em; color:{FG}; text-shadow:0 14px 60px rgba(0,0,0,.9); }}
       #counter i {{ font-style:normal; font-size:120px; color:{C1T}; margin-left:14px; }}
       #flash {{ position:absolute; inset:0; background:#fff; opacity:0; z-index:59; }}
+
+      /* ── 1씬 달력: 수집 기간. 카운터(좌)와 같은 세로 중심, 자막대 위에서 끝난다 */
+      .calwrap {{ position:absolute; right:110px; top:150px; bottom:200px;
+        display:flex; align-items:center; }}
+      #cal {{ width:640px; border-radius:22px; overflow:hidden; background:rgba(16,11,14,.92);
+        box-shadow:0 26px 80px rgba(0,0,0,.8), inset 0 0 0 1px rgba(255,255,255,.1); }}
+      #cal .hd {{ display:flex; align-items:flex-end; justify-content:space-between;
+        padding:22px 34px 18px; background:{C1}; }}
+      #cal .hd .m {{ font-family:{DISP}; font-size:76px; font-weight:900; line-height:.9;
+        letter-spacing:-.04em; color:{FG}; }}
+      #cal .hd .y {{ font-size:26px; font-weight:700; letter-spacing:.12em; color:{FG}; }}
+      #cal .wd, #cal .wk {{ display:grid; grid-template-columns:repeat(7, 1fr); padding:0 34px; }}
+      #cal .wd {{ padding-top:18px; padding-bottom:6px; }}
+      #cal .wd span {{ text-align:center; font-size:22px; font-weight:700; color:{SUB};
+        letter-spacing:.08em; }}
+      #cal .wk {{ height:66px; }}
+      #cal.r6 .wk {{ height:58px; }}
+      #cal.r7 .wk {{ height:52px; }}
+      #cal .d {{ position:relative; display:flex; align-items:center; justify-content:center; }}
+      #cal .d b {{ position:relative; z-index:2; font-family:{DISP}; font-size:32px;
+        font-weight:700; color:{FG}; opacity:.5; }}
+      #cal .d.out b {{ opacity:.2; }}
+      /* 기간 칸 — 왼쪽에서 오른쪽으로 형광펜처럼 칠해진다(scaleX). 줄 끝·기간 끝만 둥글다 */
+      #cal .d .f {{ position:absolute; left:0; right:0; top:9px; bottom:9px; background:{C1};
+        transform-origin:left center; z-index:1; }}   /* scaleX 0→1 은 GSAP fromTo 가 쥔다(lint) */
+      #cal .d.cl .f {{ left:6px; border-top-left-radius:24px; border-bottom-left-radius:24px; }}
+      #cal .d.cr .f {{ right:6px; border-top-right-radius:24px; border-bottom-right-radius:24px; }}
+      #cal .ft {{ display:flex; align-items:baseline; margin-top:10px; padding:16px 34px 24px;
+        border-top:1px solid rgba(255,255,255,.1); }}
+      #cal .rg {{ font-family:{DISP}; font-size:46px; font-weight:800; letter-spacing:-.02em;
+        color:{FG}; transform-origin:left center; }}
+      #cal .rg small {{ font-family:{FONT}; font-size:24px; font-weight:600; color:{SUB};
+        margin-left:6px; letter-spacing:0; }}
+      #cal .rg i {{ font-style:normal; color:{C1T}; margin:0 14px; }}
+      #cal .nd {{ margin-left:auto; font-size:28px; font-weight:700; color:{C1T};
+        letter-spacing:.06em; }}
 
       /* ── 2씬 */
       #grid {{ flex-direction:row; align-items:center; gap:58px; }}
@@ -378,6 +465,7 @@ def build(rows, lines, total, pool=500, has_audio=False, cap_style="punch",
           <div class="kicker">{week} 신작</div>
           <div id="counter">0<i>편</i></div>
         </div>
+        {cal_html}
       </div>
       <div id="flash" class="clip" data-start="{s[0][0]}" data-duration="{s[0][1]}"
            data-track-index="2"></div>
@@ -445,7 +533,7 @@ def build(rows, lines, total, pool=500, has_audio=False, cap_style="punch",
 
 
 def _timeline(s, rows, desc, lines, pool, dur_total, frame_from, cap_items,
-              likes, dis, views, cap_style="punch"):
+              likes, dis, views, cap_style="punch", cal_n=0):
     js = []
     a = js.append
     a("      window.__timelines = window.__timelines || {};")
@@ -468,6 +556,24 @@ def _timeline(s, rows, desc, lines, pool, dur_total, frame_from, cap_items,
       % (s[0][0] + 0.3 + cnt_dur))
     # 플래시 퇴장이 클립 경계에서 끝나면 되감기 때 흰 화면이 남는다(lint) — 하드 킬
     a("      tl.set('#flash', { opacity: 0 }, %.2f);" % (s[0][0] + 0.6 + cnt_dur))
+    if cal_n:
+        # 달력 — 카드가 오른쪽에서 들어오고, 수집 기간을 하루씩 칠한다. 마지막 칸이
+        # 카운터가 멈추는 순간에 맞춰 닫히고, 그때 '9.22 → 9.28' 이 꽂힌다(숫자와 날짜가 같이 착지).
+        c0 = s[0][0] + 0.25
+        sw0 = c0 + 0.45
+        sw_step = max(0.08, (s[0][0] + 0.2 + cnt_dur - sw0) / cal_n)
+        a("      // 달력: 수집 기간 %d일을 순서대로 칠한다" % cal_n)
+        a("      tl.from('#cal', { x: 90, opacity: 0, duration: 0.5, ease: 'expo.out' }, %.2f);" % c0)
+        for k in range(cal_n):
+            at = sw0 + k * sw_step
+            a("      tl.fromTo('#cd%d .f', { scaleX: 0 }, { scaleX: 1, duration: %.2f, ease: 'none' }, %.2f);"
+              % (k, sw_step, at))
+            a("      tl.to('#cd%d b', { opacity: 1, duration: 0.08, ease: 'none' }, %.2f);"
+              % (k, at + sw_step * 0.4))
+        a("      tl.from('#cal .rg', { scale: 0.7, opacity: 0, duration: 0.4,"
+          " ease: 'back.out(2.4)' }, %.2f);" % (sw0 + cal_n * sw_step - 0.05))
+        a("      tl.from('#cal .nd', { x: 20, opacity: 0, duration: 0.3, ease: 'power3.out' }, %.2f);"
+          % (sw0 + cal_n * sw_step + 0.12))
     a("")
     a("      // ── 방송 프레임(2씬부터 끝까지 유지)")
     a("      tl.from('#runhead', { x: -40, opacity: 0, duration: 0.45, ease: 'expo.out' }, %.2f);"

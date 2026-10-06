@@ -37,8 +37,8 @@ TPL_DIR = ROOT / "section4"
 GAP = 0.35          # 문장 사이 여백(초)
 LEAD = 0.4          # 첫 문장 앞 여백
 CPS = 6.2           # 실측 발화 속도(자/초) — wav가 없을 때만 쓰는 추정치
-BGM_SRC = "bgm/house02.mp3"   # section4/ 기준. Mixkit(크레딧 불필요). 교체 시 출처.md 도 같이 고칠 것
-BGM_OFFSET = 15.0   # 곡에서 잘라 쓸 시작 지점(초) — 실측 최고 에너지 구간
+BGM_SRC = "bgm/games_music.mp3"   # section4/ 기준. Mixkit(크레딧 불필요). 교체 시 출처.md 도 같이 고칠 것. 09-30 "신나는 걸로" house02→games_music
+BGM_OFFSET = 65.0   # 곡에서 잘라 쓸 시작 지점(초) — 실측 최고 에너지 구간(65~85s)
 BGM_LUFS = -22      # 2026-09-15 "인트로는 신나게" — -24 는 묻혔고, -19 는 말하는 구간 여유 +2dB 라 내레이션을 덮었다
 
 
@@ -215,7 +215,7 @@ def cmd_build(args, cfg):
                       has_audio=(assets / "narration.wav").is_file(),
                       cap_style=args.cap_style,
                       has_bgm=(assets / "bgm.mp3").is_file(),
-                      week=args.week)
+                      week=args.week, span=args.span)
     (proj / "index.html").write_text(html, encoding="utf-8")
     print(f"\n[OK] {proj / 'index.html'}  ({len(have)}편, {total + 0.8:.1f}초)")
     print(f"   확인:  cd {proj} && npx hyperframes check")
@@ -360,6 +360,9 @@ def main():
     ap.add_argument("--pool", type=int, default=None,
                     help="이번 주 신작 총량(첫 씬 카운터). 생략 시 수집 DB 실측(jav_week_count)")
     ap.add_argument("--week", default=None, help="러닝헤드 회차 이름. 생략 시 오늘 기준 'N월 둘째 주'")
+    ap.add_argument("--date", default=None,
+                    help="기준일 YYYY-MM-DD — 1씬 달력의 수집 기간(지난주 화~이번주 월)과 신작 수 "
+                         "실측의 기준. 생략 시 오늘. 회차가 지난 뒤 다시 build 할 때 쓴다")
     ap.add_argument("--force", action="store_true", help="tts: 기존 wav 무시하고 재생성")
     ap.add_argument("--transition", default="0.6",
                     help="merge: 편 사이 크로스페이드 초. 0 이면 하드컷(기본 0.6)")
@@ -368,12 +371,16 @@ def main():
     args = ap.parse_args()
     cfg = _common.load_cfg()
     # ★회차 이름·신작 수를 코드에 박아 두지 않는다 — 지난주 '9월 첫 주 / 500편' 이 그대로 나갈 뻔했다
-    from jav_week_count import week_label, measure
+    from jav_week_count import week_label, week_span, measure
     import datetime as _dt
-    args.week = args.week or week_label()
+    ref = _dt.date.fromisoformat(args.date) if args.date else _dt.date.today()
+    args.week = args.week or week_label(ref)
+    args.span = week_span(ref)      # 1씬 달력 — 신작 수(pool)를 센 바로 그 7일
+    if args.cmd == "build":
+        print(f"수집 기간(달력): {args.span[0]} ~ {args.span[1]}")
     if args.pool is None and args.cmd == "build":
         try:
-            args.pool = measure(_dt.date.today())["pool"]
+            args.pool = measure(ref)["pool"]
             print(f"신작 수 실측: {args.pool}편 / 회차: {args.week}")
         except Exception as e:
             args.pool = 500
