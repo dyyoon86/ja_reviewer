@@ -338,7 +338,10 @@ def retime(entries, keep, snap=False, default_dur=4.0, log=None):
     for s, e, *rest in entries:
         placed = False
         for (a, b), off in zip(keep, offs):
-            if s >= a - 0.05 and s < b + 0.05:
+            # ★2026-10-07: "시작이 keep 안"만 보면 keep 시작보다 조금 먼저 입을 뗀 대사가
+            #   통째로 사라진다(ja25 12편 중 6편 8줄, 최대 6.8초 — 말은 들리는데 자막이 없었다).
+            #   keep 과 0.3초 이상 겹치면 겹치는 부분만 잘라 넣는다. 끝을 넘는 쪽은 원래 잘라 넣었다.
+            if (s >= a - 0.05 and s < b + 0.05) or (min(e, b) - max(s, a) >= 0.3):
                 ns = off + max(0.0, s - a); ne = off + min(b - a, e - a)
                 if ne <= ns:
                     ne = ns + 0.5
