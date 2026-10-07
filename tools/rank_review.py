@@ -51,7 +51,12 @@ def main():
                     help="편별 목표 길이(여러 번 지정 가능)")
     ap.add_argument("--meta", help="meta_api 주소 오버라이드")
     ap.add_argument("--llm", help="LLM 오버라이드(codex|claude). 생략 시 config llm")
-    ap.add_argument("--style", default="3min", help="문체(3min|cinema|gootabari)")
+    ap.add_argument("--style", default="3min", help="문체(3min|cinema|gootabari|story)")
+    # ★2026-10-07 사용자: "영상 자체도 너무 길어 루즈해" — 1위 158초. 순위별로 길이를 깎는다.
+    ap.add_argument("--target-top", type=int, default=0,
+                    help="1~3위 목표 길이 상한(초). 0=끄기. story 문체 기본 100")
+    ap.add_argument("--target-rest", type=int, default=0,
+                    help="4위 이하 목표 길이 상한(초). 0=끄기. story 문체 기본 80")
     args = ap.parse_args()
 
     skip = {c.strip().upper() for c in args.skip.split(",") if c.strip()}
@@ -122,6 +127,10 @@ def main():
             results.append((rank, code, msg, None))
             continue
         target = tov.get(code, base_target)
+        if code not in tov:
+            cap = args.target_top if rank <= 3 else args.target_rest
+            if cap:
+                target = min(target, cap)
         eff = min(target, int(dur))
         print(f"[{code}] 클린본 {dur / 60:.1f}분 / target {target}s"
               + (f" → {eff}s(클린본에 맞춤)" if eff != target else ""), flush=True)

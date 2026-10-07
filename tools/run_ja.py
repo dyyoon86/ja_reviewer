@@ -218,7 +218,8 @@ def main():
             return 1
     if "review" in todo:
         if run("2 리뷰 생성 (섹션2)",
-               [PY, T / "rank_review.py", "--src", src, "--out", out, "--style", args.style]):
+               [PY, T / "rank_review.py", "--src", src, "--out", out, "--style", args.style]
+               + (["--target-top", "100", "--target-rest", "80"] if args.style == "story" else [])):
             return 1
         # 대사 없는 빈 구간을 잘라 템포를 올린다 — keep 이 바뀌므로 내레이션보다 먼저.
         if run("2a 빈 구간 제거 (섹션2 마무리)", [PY, T / "rank_tighten.py", "--out", out]):
