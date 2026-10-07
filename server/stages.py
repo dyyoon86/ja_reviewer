@@ -513,6 +513,51 @@ def fit_target(target, video, log=print):
     return target
 
 
+def fit_keep_length(keep, picks, target, log=print, slack=1.15, min_segs=3):
+    """LLM이 고른 keep 합계가 목표를 크게 넘으면 **hook 낮은 구간부터** 버려 목표 안으로 맞춘다.
+
+    ★2026-10-07 — 사용자: "영상 자체도 너무 길어 루즈해". 프롬프트는 '목표 ±20%'를 요구하지만
+      codex 는 100초 목표에 162초를 골랐다(START-640). 프롬프트로는 안 지켜지니 코드로 깎는다.
+      picks 의 hook 점수로 우선순위를 정하고(같으면 긴 구간부터), 최소 min_segs 구간은 남긴다.
+    """
+    try:
+        target = float(target or 0)
+    except (TypeError, ValueError):
+        return keep
+    if not keep or target <= 0:
+        return keep
+    limit = target * slack
+    total = sum(b - a for a, b in keep)
+    if total <= limit:
+        return keep
+
+    def _hook(seg):
+        a, b = seg
+        best = 0
+        for p in picks:
+            try:
+                ps, pe, h = float(p.get("start", 0)), float(p.get("end", 0)), int(p.get("hook", 0) or 0)
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if min(b, pe) - max(a, ps) > 0.5:
+                best = max(best, h)
+        return best
+    order = sorted(keep, key=lambda s: (_hook(s), -(s[1] - s[0])))   # hook 낮고 긴 것부터
+    dropped = []
+    cur = list(keep)
+    for seg in order:
+        if total <= limit or len(cur) <= min_segs:
+            break
+        cur.remove(seg)
+        total -= seg[1] - seg[0]
+        dropped.append(seg)
+    if dropped:
+        log(f"목표 길이 맞춤: {sum(b - a for a, b in keep):.0f}s → {total:.0f}s "
+            f"(목표 {target:.0f}s, hook 낮은 {len(dropped)}구간 제외: "
+            + ", ".join(f"{a:.0f}~{b:.0f}s" for a, b in dropped) + ")")
+    return sorted(cur)
+
+
 def _translate_all(meta, fine, llm, em, min_ratio=0.85, rounds=2, tol=0.6):
     """정밀 전사의 **모든 줄**을 번역한다 — 빠진 줄은 그 줄만 모아 다시 태운다.
 
@@ -927,6 +972,7 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
     if not keep:
         raise RuntimeError("LLM이 keep 구간을 못 골랐습니다(빈 응답 — 헤드리스 거부 가능. 아래 수동 모드 사용).")
     keep = _guard_keep(keep, segs, em.log)
+    keep = fit_keep_length(keep, res.get("picks") or [], target, em.log)
     # ★ 컷 경계를 대사 줄 경계로 스냅 + 앞뒤 패딩 — 말 중간에서 끊기는 것("…했습ㄴ") 방지.
     #   순서가 중요하다: ① 정밀 재전사보다 **앞** (그래야 정밀 전사·대사가 최종 keep과 일치)
     #                  ② 노출 가드보다 **앞** (패딩이 방금 도려낸 노출을 되살리면 안 되므로
@@ -1050,6 +1096,14 @@ def stage_ai(c, code, video, target, llm, mode, hint, em, gpu=None, pos="mid", s
 
     # 새 컷이 만들어졌다 = 이전 컨셉의 음성본/굽기본/TTS 조각은 전부 구버전 → 삭제
     P.invalidate_derived(outdir, code, em.log)
+    # ★2026-10-07 — rank_tighten --redo 는 `.bak_tighten`(조이기 전 keep)을 기준으로 다시 조인다.
+    #   새 plan 을 만들었는데 옛 백업이 남아 있으면 방금 고른 keep 이 통째로 옛것으로 되돌아간다
+    #   (START-640: 105초로 맞춘 keep 이 162초로 복귀). 새 plan 과 함께 백업·조임 표시를 지운다.
+    _bt = outdir / f"{code}_plan.json.bak_tighten"
+    if _bt.is_file():
+        _bt.unlink()
+        em.log("이전 조임 백업(.bak_tighten) 삭제 — 새 keep 기준으로 다시 조인다")
+    save_state(outdir, code, tightened=False, renarrate_needed=True)
     # 왜 그 구간을 골랐는지 — LLM이 준 근거를 로그에 남긴다(재작업 추적)
     km = res.get("keep_meta") or res.get("picks") or []
     worklog(outdir, code,
