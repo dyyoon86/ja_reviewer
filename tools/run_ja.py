@@ -195,7 +195,8 @@ def main():
     ap.add_argument("--from", dest="start", default="clean", choices=STEPS)
     ap.add_argument("--to", dest="stop", default="tidy", choices=STEPS)
     ap.add_argument("--skip-intro", action="store_true", help="섹션4 없이 편별 납품본까지만")
-    ap.add_argument("--style", default="3min", help="문체(기본 3min)")
+    ap.add_argument("--style", default="story",
+                    help="문체(기본 story — 2026-10-07 사용자 확정. 3min|cinema|gootabari 도 가능)")
     args = ap.parse_args()
 
     cfg = _common.load_cfg()

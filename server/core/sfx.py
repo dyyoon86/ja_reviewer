@@ -35,10 +35,14 @@ def sfx_path(out_dir, name, log=print):
     """효과음 파일 경로. 사용자가 넣어둔 게 있으면 그걸, 없으면 합성해 캐시한다."""
     d = Path(out_dir) / "_sfx"
     d.mkdir(parents=True, exist_ok=True)
-    for ext in (".wav", ".mp3", ".m4a"):
-        p = d / f"{name}{ext}"
-        if p.is_file():
-            return str(p)
+    # ★2026-10-07 — 배치 폴더(_sfx/)가 1순위, 저장소 공용 라이브러리(assets/sfx/)가 2순위.
+    #   공용 파일은 사용자 효과음 모음(저작권 표시 불필요)에서 역할별로 골라 음량을 맞춘 것.
+    repo = Path(__file__).resolve().parents[2] / "assets" / "sfx"
+    for base in (d, repo):
+        for ext in (".wav", ".mp3", ".m4a"):
+            p = base / f"{name}{ext}"
+            if p.is_file():
+                return str(p)
     if name not in _SYNTH:
         return None
     flt, _dur = _SYNTH[name]

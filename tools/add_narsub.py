@@ -28,6 +28,7 @@ r"""납품본에 **내레이션 자막만** 얹는다 — 다시 굽지 않는�
   ... --code ABF-382      # 한 편만
 """
 import argparse
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -168,6 +169,64 @@ def retimed(out, code, banner_end, max_chars, tail=0.7, kara=None, log=print):
     return evs
 
 
+# ─── 짤·효과음 (2026-10-07 사용자 확정 규칙) ────────────────────────────────
+# · 효과음: 해설 **줄마다** 그 줄의 역할(sfx 태그)에 맞는 소리를 발화 직전(-0.05s)에 깐다.
+#   소리는 assets/sfx/ (사용자 효과음 모음에서 역할별로 골라 음량을 맞춘 것). 같은 역할이
+#   반복되면 돌려 쓴다. 음량은 해설 아래(피크 기준 원본 ±1dB) — 시안 v2에서 확인한 값.
+# · 짤: cutin 태그가 붙은 줄에만, 발화 0.2초 뒤 **2.5초**, 좌하단(해설 자막판 위) 폭 22%,
+#   0.15초 페이드 + 0.25초 슬라이드업. 첫 5.6초(인포카드)·마지막 3초엔 안 띄운다.
+#   편당 최대 2개(1~3위는 3개). 짤은 assets/gifs/{태그}/ 공용 라이브러리.
+ROLE_FILES = {"호명": ["call_rank"], "정보": ["info", "info2"], "반전": ["twist", "shock"],
+              "긴장": ["sweat", "sweat2"], "드립": ["pop", "pop2", "pop3", "boing"],
+              "마무리": ["finale"]}
+CUTIN_POS, CUTIN_SCALE, CUTIN_DUR, CUTIN_DELAY, CUTIN_TAIL_GUARD = "bl", 0.22, 2.5, 0.2, 3.0
+
+
+def fx_plan(out, code, banner_end, vid_dur, want_cutins=True, want_sfx=True, log=print):
+    """내레이션 json 의 sfx/cutin 태그 + srt 실측 시각 → (cutins[(s,e,path)], sfx_events[(t,name)])."""
+    import json as _json
+    from server.core import assets as A
+    jf = out / code / f"{code}_내레이션.json"
+    sf = out / code / f"{code}_내레이션.srt"
+    if not (jf.is_file() and sf.is_file()):
+        return [], []
+    try:
+        nar = _json.loads(jf.read_text(encoding="utf-8"))
+    except Exception:
+        return [], []
+    body = [n for n in nar if n.get("style") != "드립"]
+    rows = P.srt_parse(str(sf))
+    if not body or not any(n.get("sfx") or n.get("cutin") for n in body):
+        return [], []                                   # 옛 대본(태그 없음) — 아무것도 안 한다
+    if len(body) != len(rows):
+        log(f"   ※ 내레이션 json {len(body)}줄 ≠ srt {len(rows)}줄 — 짤·효과음 생략")
+        return [], []
+    head = str(body[0].get("text", ""))
+    max_cut = 3 if re.match(r"^\s*[123]\s*위", head) else 2
+    cuts, events, used, cnt = [], [], {}, {}
+    last = len(body) - 1
+    for i, (n, (s, _e, _t)) in enumerate(zip(body, rows)):
+        role = str(n.get("sfx") or "").strip()
+        if want_sfx and role in ROLE_FILES:
+            k = cnt.get(role, 0); cnt[role] = k + 1
+            names = ROLE_FILES[role]
+            events.append((round(max(0.0, s - 0.05), 3), names[k % len(names)]))
+        tag = str(n.get("cutin") or "").strip()
+        if (want_cutins and tag in A.TAGS and 0 < i < last and len(cuts) < max_cut
+                and s >= banner_end + 0.5 and s + CUTIN_DELAY + CUTIN_DUR <= vid_dur - CUTIN_TAIL_GUARD):
+            j = used.get(tag, 0)
+            p = A.pick_gif(out, tag, j)
+            if p:
+                used[tag] = j + 1
+                cuts.append((round(s + CUTIN_DELAY, 3), round(s + CUTIN_DELAY + CUTIN_DUR, 3), p))
+            else:
+                log(f"   ※ 짤 없음({tag}) — assets/gifs/{tag}/ 에 넣으면 들어간다")
+    if cuts or events:
+        log(f"   짤 {len(cuts)}개 · 효과음 {len(events)}개 "
+            f"({', '.join(f'{k}×{v}' for k, v in cnt.items())})")
+    return cuts, events
+
+
 def write_srt(evs, path):
     out = []
     for n, (s, e, t) in enumerate(evs, 1):
@@ -180,6 +239,10 @@ def main():
     ap = argparse.ArgumentParser(description="납품본에 내레이션 자막만 얹기")
     ap.add_argument("--out", help="out_dir. 생략 시 config out_dir")
     ap.add_argument("--code", action="append", default=[], help="특정 품번만(여러 번 가능)")
+    # ★2026-10-07 짤·효과음 — story 대본의 줄별 sfx/cutin 태그를 여기서 화면·소리로 바꾼다.
+    #   (태그가 없는 옛 대본이면 아무것도 안 한다)
+    ap.add_argument("--no-cutins", action="store_true", help="반응 짤 오버레이 끄기")
+    ap.add_argument("--no-sfx", action="store_true", help="해설 효과음 끄기")
     ap.add_argument("--src-dir", default="_납품", help="입력 폴더(기본 _납품)")
     ap.add_argument("--dst-dir", default="_납품_자막", help="출력 폴더(기본 _납품_자막)")
     ap.add_argument("--alpha", default="0x80",
@@ -250,9 +313,17 @@ def main():
             skip += 1
             continue
         tmp = write_srt(evs, out / code / f"{code}_내레이션_화면.srt")
+        cuts, sfx_events = fx_plan(out, code, banner_end, P.video_duration(str(src)) or 0.0,
+                                   want_cutins=not args.no_cutins, want_sfx=not args.no_sfx)
         try:
             P.burn_subs(str(src), None, str(tmp), str(dst), styles,
-                        log=lambda m: None)
+                        log=lambda m: None,
+                        cutins=cuts or None, cutin_pos=CUTIN_POS, cutin_scale=CUTIN_SCALE)
+            if sfx_events:
+                from server.core import sfx as SFX
+                mixed = dst.with_name(f"{dst.stem}_sfx.mp4")
+                if SFX.mix_events(str(dst), sfx_events, str(mixed), str(out), log=print, gain=1.0):
+                    mixed.replace(dst)
             print(f"  [OK] {dst.name}")
             ok += 1
         except Exception as e:

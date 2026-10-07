@@ -52,12 +52,17 @@ def ensure_layout(out_dir, log=print):
 
 
 def gifs_for(out_dir, tag):
-    """태그 폴더의 미디어 파일 목록(정렬)."""
-    d = assets_dir(out_dir) / "gifs" / str(tag)
-    if not d.is_dir():
-        return []
-    return sorted(p for p in d.iterdir()
-                  if p.is_file() and p.suffix.lower() in MEDIA_EXT)
+    """태그 폴더의 미디어 파일 목록(정렬).
+    ★2026-10-07 — 배치 폴더(_assets/gifs/)에 없으면 저장소 공용(assets/gifs/)을 쓴다.
+      짤은 회차마다 새로 모을 게 아니라 채널 공용 자산이다."""
+    repo = Path(__file__).resolve().parents[2] / "assets" / "gifs" / str(tag)
+    for d in (assets_dir(out_dir) / "gifs" / str(tag), repo):
+        if d.is_dir():
+            fs = sorted(p for p in d.iterdir()
+                        if p.is_file() and p.suffix.lower() in MEDIA_EXT)
+            if fs:
+                return fs
+    return []
 
 
 def pick_gif(out_dir, tag, index=0):

@@ -717,19 +717,24 @@ def burn_subs(video, dialogue_srt, narration_srt, out_video, styles=None,
         cur = "fx"
         for part in cut_parts:
             chain += part + ";"
-        for k in range(len(cuts)):
-            s, e, _p = cuts[k]
-            nxt = f"cv{k}"
-            chain += (f"[{cur}][g{k}]overlay=x={{X}}:y={{Y}}:"
-                      f"enable='between(t,{s:.3f},{e:.3f})'[{nxt}];")
-            cur = nxt
-        # overlay 좌표는 _cutin_filter와 같은 규칙 — 여기서 치환
+        # overlay 좌표. ★'bl'(2026-10-07 짤 규칙)은 해설 자막판(바닥 207px + 판 높이) **위**에
+        #   앉고, 등장 0.25초 동안 60px 아래에서 제자리로 올라온다(페이드는 _cutin_filter 가 건다).
         POS = {"tr": (f"W-w-{int(w * 0.03)}", f"{int(h * 0.06)}"),
                "tl": (f"{int(w * 0.03)}", f"{int(h * 0.06)}"),
                "br": (f"W-w-{int(w * 0.03)}", f"H-h-{int(h * 0.22)}"),
-               "bl": (f"{int(w * 0.03)}", f"H-h-{int(h * 0.22)}")}
+               "bl": (f"{int(w * 0.031)}", f"H-h-{int(h * 0.287)}")}
         px, py = POS.get(cutin_pos, POS["tr"])
-        chain = chain.replace("{X}", px).replace("{Y}", py)
+        for k in range(len(cuts)):
+            s, e, _p = cuts[k]
+            nxt = f"cv{k}"
+            if cutin_pos == "bl":
+                yk = f"({py})+60*max(0\\,(0.25-(t-{s:.3f}))/0.25)"
+                chain += (f"[{cur}][g{k}]overlay=x={px}:y='{yk}':eval=frame:"
+                          f"enable='between(t,{s:.3f},{e:.3f})'[{nxt}];")
+            else:
+                chain += (f"[{cur}][g{k}]overlay=x={px}:y={py}:"
+                          f"enable='between(t,{s:.3f},{e:.3f})'[{nxt}];")
+            cur = nxt
         fc = fc + chain + (f"[{cur}]ass={ass_path.name}[out]" if subs
                            else f"[{cur}]null[out]")
         inputs = inputs + cut_inputs
