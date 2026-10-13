@@ -168,16 +168,13 @@ def review(folder, code=None, model="sonnet", log=print):
   "why": "왜 결함인지 한 줄", "fix": "대신 쓸 문장"}}], "note": "총평 한 줄"}}"""
 
     try:
-        exe = _cli_path("claude")
-        env = dict(os.environ, DISABLE_OMC="1")
-        r = subprocess.run([exe, "-p", "--model", model], input=prompt,
-                           capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", env=env, timeout=600)
+        from server.core.llm import run_claude   # 격리 호출(설정·MCP 미주입, effort 적용)
+        raw, _ = run_claude(prompt, model=model, timeout=600, log=log, tag="narreview")
     except Exception as e:
         log(f"※ 검수 호출 실패({type(e).__name__}: {e}) — 검수 없이 진행")
         return {"ok": None, "issues": [], "note": f"호출 실패: {e}"}
 
-    raw = (r.stdout or "").strip().replace("```json", "").replace("```", "").strip()
+    raw = raw.strip().replace("```json", "").replace("```", "").strip()
     s, e = raw.find("{"), raw.rfind("}") + 1
     if s < 0 or e <= s:
         log("※ 검수: JSON 응답 아님 — 건너뜀")

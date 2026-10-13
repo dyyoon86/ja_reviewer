@@ -1289,13 +1289,14 @@ S{n_total}: "자료 핑계로 불러 세워서 '가지 마'. 상사가 아니라
     log(f"프롬프트 {len(prompt)}자 — Claude 호출 중...")
 
     # 프롬프트는 stdin으로 (argv로 넘기면 긴 다중행이 잘림 — call_llm과 동일 원칙)
-    exe = _cli_path("claude")
-    r = subprocess.run([exe, "-p", "--output-format", "text"],
-                       input=prompt, timeout=600, text=True,
-                       encoding="utf-8", errors="replace", capture_output=True)
-
-    raw = (r.stdout or "").strip()
-    raw = raw.replace("```json","").replace("```","").strip()
+    # ★격리 호출(run_claude). 2026-10-12 실측: 격리 없이 부르면 호출당 57K 토큰이 설정·MCP 주입이었다.
+    from server.core.llm import run_claude
+    try:
+        raw, _ = run_claude(prompt, timeout=600, log=log, tag="narration")
+    except RuntimeError as ex:
+        log(f"  claude 호출 실패: {ex}")
+        raw = ""
+    raw = raw.strip().replace("```json","").replace("```","").strip()
     s = raw.find("["); e = raw.rfind("]") + 1
     if not raw or s < 0 or e <= s:
         # claude가 작품 소재(배경 요약)를 이유로 거부하면 JSON 없이 사과문만 온다.

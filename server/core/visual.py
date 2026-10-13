@@ -13,7 +13,7 @@ import tempfile
 from pathlib import Path
 
 from server import pipeline as P
-from server.core.llm import _cli_path
+from server.core.llm import run_claude
 
 
 def _frame_times(dur, step, cap):
@@ -30,50 +30,55 @@ def _frame_times(dur, step, cap):
 
 
 def _extract(video, times, outdir, wh=640):
+    """프레임을 JPEG 로 뽑는다(비전 토큰은 픽셀 수로 정해지므로 PNG→JPEG 는 전송량만 1/5)."""
     frames = []
     for i, t in enumerate(times):
-        dst = outdir / f"f_{i:03d}_{t:07.1f}s.png"
+        dst = outdir / f"f_{i:03d}_{t:07.1f}s.jpg"
         subprocess.run(
             ["ffmpeg", "-y", "-ss", f"{t:.2f}", "-i", str(video), "-frames:v", "1",
-             "-vf", f"scale={wh}:-1", str(dst), "-loglevel", "error"],
+             "-vf", f"scale={wh}:-1", "-q:v", "4", str(dst), "-loglevel", "error"],
             capture_output=True)
         if dst.is_file():
             frames.append((t, dst))
     return frames
 
 
-def _caption(frames, frame_dir, model, log):
-    """claude -p (비전) 한 콜로 프레임 전부 캡션. 프롬프트는 stdin 전달."""
-    lines = [
-        "아래 프레임들은 '정사장면을 이미 제거한' 리뷰용 영상에서 시간순으로 뽑은 것이다.",
-        "각 프레임을 정확히 `[초s] 장면설명 / 화면글자` 형식으로 한 줄씩만 답하라(설명·머리말 금지).",
+def _caption(frames, frame_dir, model, log, effort="low"):
+    """claude -p (비전) 한 콜·한 턴으로 프레임 전부 캡션 — 이미지를 stream-json 으로 인라인 전달.
+
+    ★2026-10-12 토큰 실측(ja26 15편): 옛 방식(`--allowedTools Read` + 경로 나열)은 모델이 프레임을
+      Read 도구로 한 장씩 읽어 편당 60~100턴이 되고, 턴마다 앞선 이미지 전부를 다시 읽는다 →
+      편당 캐시쓰기 170K·캐시읽기 500K·출력 13K, 15편에 파이프라인 LLM 비용의 47%.
+      인라인은 한 턴(프레임당 ~350토큰, 60장 ≈ 22K 입력)으로 끝난다. 격리 플래그도 함께 적용."""
+    import base64
+    head = (
+        "아래 이미지들은 '정사장면을 이미 제거한' 리뷰용 영상에서 시간순으로 뽑은 프레임이다. "
+        "각 이미지 바로 앞에 `[초s]` 시각 표기가 있다.\n"
+        "각 프레임을 정확히 `[초s] 장면설명 / 화면글자` 형식으로 한 줄씩만, 주어진 순서대로 전부 답하라"
+        "(설명·머리말 금지, 건너뛰기 금지).\n"
         "장면설명: **맨 앞에 화면 속 인물 구성**을 `여성1`·`여성1남성1`·`남성1`·`인물없음` 처럼 적고, "
-        "이어서 자세·행동·감정·장소를 사실 그대로 짧게. 화면글자(OCR) 없으면 '없음'.",
-        "(컷 선정이 여배우 화면 위주로 이뤄지므로 남성만 보이는 프레임을 정확히 구분하는 것이 중요하다.)", "",
-    ]
+        "이어서 자세·행동·감정·장소를 사실 그대로 짧게. 화면글자(OCR) 없으면 '없음'.\n"
+        "(컷 선정이 여배우 화면 위주로 이뤄지므로 남성만 보이는 프레임을 정확히 구분하는 것이 중요하다.)"
+    )
+    content = [{"type": "text", "text": head}]
     for t, path in frames:
-        lines.append(f"{t:.0f}s: {path}")
-    prompt = "\n".join(lines)
-    exe = _cli_path("claude")
-    env = dict(os.environ, DISABLE_OMC="1")   # bkit 등 플러그인 푸터 오염 방지
+        content.append({"type": "text", "text": f"[{t:.0f}s]"})
+        content.append({"type": "image", "source": {
+            "type": "base64", "media_type": "image/jpeg",
+            "data": base64.b64encode(path.read_bytes()).decode("ascii")}})
     try:
-        r = subprocess.run(
-            [exe, "-p", "--model", model, "--add-dir", str(frame_dir),
-             "--allowedTools", "Read"],
-            input=prompt, capture_output=True, text=True, encoding="utf-8",
-            env=env, timeout=900)
+        out, _ = run_claude(content=content, model=model, effort=effort, log=log,
+                            tag="visual_caption", timeout=900)
     except Exception as e:
         log(f"※ 시각 캡션 호출 실패({type(e).__name__}: {e}) — 시각정보 없이 진행")
         return ""
-    out = (r.stdout or "").strip()
-    # 혹시 남는 플러그인 푸터(구분선 이후) 잘라내기
-    out = re.split(r"\n[─-]{5,}", out)[0].strip()
+    out = out.strip()
     # 캡션 줄만 남긴다([..s] 로 시작하는 줄)
     keep = [ln for ln in out.splitlines() if re.match(r"\s*\[?\d+\s*s", ln)]
     return "\n".join(keep) if keep else out
 
 
-def _overview(caps, model, log):
+def _overview(caps, model, log, effort="low"):
     """프레임 캡션 전체 → '작품이 무엇인지' 3줄 판정.
 
     ★2026-08-12 추가. 캡션은 6초마다 프레임을 **하나씩 독립적으로** 설명하기 때문에
@@ -94,16 +99,13 @@ def _overview(caps, model, log):
         "장르: (예: 오피스 드라마 / 스릴러 / 학원물 / 인터뷰)",
         "", caps,
     ])
-    exe = _cli_path("claude")
-    env = dict(os.environ, DISABLE_OMC="1")
     try:
-        r = subprocess.run([exe, "-p", "--model", model], input=prompt,
-                           capture_output=True, text=True, encoding="utf-8",
-                           env=env, timeout=300)
+        out, _ = run_claude(prompt, model=model, effort=effort, log=log,
+                            tag="visual_overview", timeout=300)
     except Exception as e:
         log(f"※ 시각 요약 실패({type(e).__name__}: {e}) — 캡션만 사용")
         return ""
-    out = re.split(r"\n[─-]{5,}", (r.stdout or "").strip())[0].strip()
+    out = out.strip()
     keep = [ln.strip() for ln in out.splitlines()
             if re.match(r"\s*(설정|패러디|장르)\s*:", ln)]
     return "\n".join(keep)
@@ -118,6 +120,7 @@ def build_visual_brief(video, cfg, log=print):
     step = float(cfg.get("visual_step", 6.0))
     cap = int(cfg.get("visual_cap", 60))
     model = cfg.get("visual_model", "sonnet")
+    effort = cfg.get("visual_effort", "low")   # 캡션은 묘사 작업 — 사고 토큰이 필요 없다
     try:
         dur = P.video_duration(video)
     except Exception as e:
@@ -133,9 +136,9 @@ def build_visual_brief(video, cfg, log=print):
         if not frames:
             log("※ 시각정보: 프레임 추출 0 — 생략")
             return ""
-        brief = _caption(frames, tmp, model, log)
+        brief = _caption(frames, tmp, model, log, effort)
         if brief and cfg.get("visual_overview", True):
-            ov = _overview(brief, model, log)
+            ov = _overview(brief, model, log, effort)
             if ov:
                 log("작품 판정: " + " / ".join(ov.splitlines()))
                 brief = ov + "\n\n" + brief     # 전체 판정을 맨 앞에

@@ -22,3 +22,6 @@ studio_config.json.bak*
 # 섹션4 BGM 원곡 — 38MB 바이너리라 저장소에 넣지 않는다.
 # 받는 법은 section4/bgm/출처.md 참고(incompetech 직링크).
 section4/bgm/*.mp3
+
+# claude -p 사용량 로그(런타임 산출물)
+_로그/

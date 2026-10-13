@@ -37,7 +37,134 @@ def _cli_path(name):
     return p
 
 
-def call_llm(prompt, which="claude", log=print):
+ROOT = Path(__file__).resolve().parents[2]
+USAGE_LOG = ROOT / "_로그" / "llm_usage.jsonl"
+# 기본 시스템 프롬프트(Claude Code 본체 ~9K + CLAUDE.md/MCP 도구목록 수십K)를 통째로 이걸로 바꾼다.
+SYS_PROMPT = ("너는 지시대로만 답하는 영상 리뷰 작문 도우미다. "
+              "설명·머리말·코드펜스 없이 요구한 형식으로만 출력한다.")
+_cfg_cache = {"mtime": None, "data": {}}
+
+
+def _cfg():
+    """studio_config.json 의 llm_* 키만 쓴다(mtime 캐시). 호출자들이 cfg 를 안 넘기므로 직접 읽는다."""
+    f = ROOT / "studio_config.json"
+    try:
+        mt = f.stat().st_mtime
+        if _cfg_cache["mtime"] != mt:
+            _cfg_cache["data"] = json.loads(f.read_text(encoding="utf-8"))
+            _cfg_cache["mtime"] = mt
+    except Exception:
+        pass
+    return _cfg_cache["data"]
+
+
+def claude_args(model=None, effort=None, system=None, stream=False):
+    """★격리 `claude -p` 인자. 2026-10-12 토큰 실측(ja26): 격리 없는 호출은 매번 22~57K 토큰
+    (CLAUDE.md·훅·MCP 도구목록)이 시스템 프롬프트로 들어갔고, `--system-prompt` 로 교체하면 761 토큰.
+      --setting-sources ""      사용자/프로젝트 설정·CLAUDE.md·훅 전부 미로드
+      --strict-mcp-config       ~/.claude.json 의 MCP 서버(coplay·figma… 수십K 도구 스키마) 미로드
+      --disable-slash-commands  스킬 목록 미주입
+      --tools ""                내장 도구 없음(이미지는 stream-json 으로 인라인 전달)
+      --system-prompt           기본 대형 프롬프트를 한 줄로 교체(append 아님)
+      --effort                  사고(thinking) 토큰 상한 — 출력 토큰의 90%가 사고였다(config llm_effort)
+    `--bare` 는 OAuth 를 막으므로 못 쓴다."""
+    c = _cfg()
+    a = [_cli_path("claude"), "-p",
+         "--output-format", "stream-json" if stream else "json",
+         "--setting-sources", "", "--strict-mcp-config", "--disable-slash-commands",
+         "--tools", "", "--system-prompt", system or SYS_PROMPT]
+    if stream:
+        a += ["--input-format", "stream-json", "--verbose"]
+    model = model or c.get("llm_model")
+    if model:
+        a += ["--model", str(model)]
+    effort = effort or c.get("llm_effort")
+    if effort:
+        a += ["--effort", str(effort)]
+    return a
+
+
+def _log_usage(tag, usage, model, effort, secs, prompt_chars):
+    try:
+        USAGE_LOG.parent.mkdir(parents=True, exist_ok=True)
+        rec = {"ts": __import__("datetime").datetime.now().isoformat(timespec="seconds"),
+               "tag": tag, "model": model or "", "effort": effort or "", "secs": round(secs, 1),
+               "prompt_chars": prompt_chars,
+               "in": usage.get("input_tokens", 0), "cw": usage.get("cache_creation_input_tokens", 0),
+               "cr": usage.get("cache_read_input_tokens", 0), "out": usage.get("output_tokens", 0)}
+        with open(USAGE_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def run_claude(prompt=None, *, content=None, model=None, effort=None, system=None,
+               timeout=900, log=print, tag=""):
+    """격리된 claude -p 한 번. `prompt`(문자열, stdin) 또는 `content`(텍스트/이미지 블록 리스트 —
+    stream-json 으로 한 턴에 인라인 전달; 도구 Read 로 한 장씩 읽히던 방식은 60장이면 100턴·
+    프레임당 컨텍스트 재독이라 호출당 170K 캐시쓰기+500K 캐시읽기였다).
+    반환 (text, usage). 빈 응답·is_error 는 RuntimeError."""
+    import time
+    stream = content is not None
+    c = _cfg()
+    model = model or c.get("llm_model")
+    effort = effort or c.get("llm_effort")
+    args = claude_args(model=model, effort=effort, system=system, stream=stream)
+    if stream:
+        inp = json.dumps({"type": "user", "message": {"role": "user", "content": content}},
+                         ensure_ascii=False) + "\n"
+        pchars = sum(len(b.get("text", "")) for b in content if b.get("type") == "text")
+    else:
+        inp = prompt
+        pchars = len(prompt or "")
+    env = dict(os.environ, DISABLE_OMC="1")
+    t0 = time.time()
+    p = subprocess.run(args, input=inp, timeout=timeout, text=True, env=env,
+                       encoding="utf-8", errors="replace", capture_output=True)
+    secs = time.time() - t0
+    out = (p.stdout or "").strip()
+    res = None
+    for line in out.splitlines()[::-1]:          # stream-json 이면 마지막 result 이벤트
+        try:
+            o = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(o, dict) and o.get("type") == "result":
+            res = o
+            break
+    if res is None:
+        try:
+            res = json.loads(out)
+        except Exception:
+            res = {}
+    text = str(res.get("result") or "")
+    usage = res.get("usage") or {}
+    _log_usage(tag, usage, model, effort, secs, pchars)
+    if usage:
+        log(f"  LLM 토큰: 출력 {usage.get('output_tokens', 0):,} / 입력 "
+            f"{usage.get('input_tokens', 0) + usage.get('cache_creation_input_tokens', 0) + usage.get('cache_read_input_tokens', 0):,}"
+            f" ({secs:.0f}s)")
+    if res.get("is_error") or not text.strip():
+        err = (p.stderr or text or out[:300]).strip()
+        raise RuntimeError(f"claude 응답 없음(로그인/한도 확인): {err[-240:]}")
+    return text, usage
+
+
+def call_llm(prompt, which="claude", log=print, _retry=1):
+    """JSON 파싱 실패(문자열 안 따옴표 미이스케이프 등 — claude 가 15편 중 2편꼴, 2026-10-12)면
+    이스케이프 지시를 덧붙여 한 번 더 부른다. 재시도 성공률이 높아(SNOS-378) 폴백보다 싸다."""
+    try:
+        return _call_llm_once(prompt, which, log)
+    except RuntimeError as e:
+        if _retry > 0 and "JSON" in str(e):
+            log(f"  LLM 응답 JSON 깨짐({str(e)[:80]}) → 1회 재시도")
+            hint = ('\n\n★출력은 유효한 JSON 객체 하나만. 문자열 값 안의 큰따옴표(")는 반드시 \\" 로 '
+                    '이스케이프하고, 줄바꿈은 \\n 으로. 코드펜스·설명문 금지.')
+            return call_llm(prompt + hint, which, log, _retry=_retry - 1)
+        raise
+
+
+def _call_llm_once(prompt, which="claude", log=print):
     log(f"LLM({which}) 호출...")
     # ★ 프롬프트는 반드시 STDIN으로 전달한다. 인자(argv)로 넘기면 긴 다중행(자막 본문)이
     #   잘려 모델이 본문을 못 받고 "자막을 보내달라"는 헛응답을 한다(거부처럼 보임). stdin이면 정상.
@@ -62,10 +189,7 @@ def call_llm(prompt, which="claude", log=print):
                 if err:
                     raise RuntimeError(f"codex 응답 없음: {err[-240:]}")
     else:
-        exe = _cli_path("claude")
-        p = subprocess.run([exe, "-p"], input=prompt, timeout=900, text=True,
-                           encoding="utf-8", errors="replace", capture_output=True)
-        txt = p.stdout or ""
+        txt, _ = run_claude(prompt, log=log, tag="call_llm")
     s = txt.strip(); i = s.find("{")
     if i < 0:
         # 거부 문구가 텍스트로 온 경우 그 내용을 그대로 보여준다(원인 파악 가능하게)
@@ -78,7 +202,10 @@ def call_llm(prompt, which="claude", log=print):
         j = s.rfind("}")
         if j <= i:
             raise RuntimeError("LLM JSON 응답 없음 (빈 응답/로그인 확인 — 헤드리스 거부 시 수동 모드 사용)")
-        return json.loads(s[i:j + 1])
+        try:
+            return json.loads(s[i:j + 1])
+        except json.JSONDecodeError as e2:
+            raise RuntimeError(f"LLM JSON 파싱 실패({e2})") from e2
 
 
 def llm_ping(which):
