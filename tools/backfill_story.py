@@ -82,6 +82,8 @@ def main():
 
     results = []
     for i, code in enumerate(codes, 1):
+        if _common.breaker_stop(code):
+            break
         d = stages.work_dir(cfg, code)
         em = CliEmitter(code)
         print(f"\n{'=' * 70}\n({i}/{len(codes)}) {code}", flush=True)
@@ -120,6 +122,8 @@ def main():
         except Exception as e:
             results.append((code, f"✘ 실패: {e}", time.time() - t0))
             traceback.print_exc()
+            if _common.breaker_stop(code):
+                break
 
     print(f"\n{'=' * 70}\n요약")
     for code, note, el in results:

@@ -98,6 +98,8 @@ def main():
 
     results = []
     for i, v in enumerate(videos, 1):
+        if _common.breaker_stop(v.name):
+            break
         code = guess_code(v.name)
         print(f"\n{'=' * 70}\n({i}/{len(videos)}) {v.name} → 품번 {code or '??'}", flush=True)
         if not code:
@@ -134,6 +136,8 @@ def main():
             el = time.time() - t0
             results.append((v.name, f"✘ 실패: {e}", el))
             traceback.print_exc()
+            if _common.breaker_stop(code):
+                break
 
     print(f"\n{'=' * 70}\n요약")
     for name, note, el in results:

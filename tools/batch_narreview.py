@@ -49,6 +49,8 @@ def main():
     cfg["out_dir"] = str(out)
     rows, bad = [], []
     for i, code in enumerate(codes, 1):
+        if _common.breaker_stop(code):
+            break
         folder = out / code
         print(f"\n{'=' * 70}\n({i}/{len(codes)}) {code}", flush=True)
         t0 = time.time()
@@ -56,7 +58,10 @@ def main():
             r = narreview.review(folder, code, model=args.model, log=print)
         except Exception as e:
             traceback.print_exc()
-            rows.append((code, f"✘ {e}")); continue
+            rows.append((code, f"✘ {e}"))
+            if _common.breaker_stop(code):
+                break
+            continue
         n = len(r.get("issues") or [])
         if r.get("ok") is None:
             rows.append((code, f"– 검수 못함({r.get('note')})"))
@@ -108,6 +113,8 @@ def main():
                 print(f"  {code}: ✔ 재작성 (TTS는 batch_nar_tts로 따로)")
             except Exception as e:
                 print(f"  {code}: ✘ {e}")
+                if _common.breaker_stop(code):
+                    break
 
     sys.exit(1 if bad else 0)
 

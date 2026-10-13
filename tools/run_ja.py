@@ -34,6 +34,7 @@ r"""ja 배치 원커맨드 — 섹션1 → 섹션4를 한 번에 돌린다.
 ★voicebox 는 미리 띄워 둘 것(3·4·6단계가 쓴다). 안 떠 있으면 4단계에서 멈춘다.
 """
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -52,11 +53,52 @@ STEPS = ["clean", "review", "check", "precheck", "produce", "eyecheck", "cover",
 
 
 def run(title, cmd, allow_fail=False):
-    print(f"\n{'=' * 72}\n▌{title}\n{'=' * 72}\n$ " + " ".join(str(c) for c in cmd), flush=True)
-    r = subprocess.run([str(c) for c in cmd], cwd=str(ROOT))
-    if r.returncode and not allow_fail:
-        print(f"\n[X] {title} 실패(exit {r.returncode}) — 여기서 멈춥니다")
-    return r.returncode
+    while True:
+        print(f"\n{'=' * 72}\n▌{title}\n{'=' * 72}\n$ " + " ".join(str(c) for c in cmd), flush=True)
+        r = subprocess.run([str(c) for c in cmd], cwd=str(ROOT))
+        from server.core import llm
+        if llm.breaker_status():    # 종료코드와 무관 — 조용히 넘어간(soft-fail) 단계도 사람에게 묻는다
+            if breaker_confirm(title):
+                continue        # 사람이 해제 → 같은 단계를 다시 돈다(끝난 편은 각 스크립트가 건너뜀)
+            return r.returncode or 3
+        if r.returncode and not allow_fail:
+            print(f"\n[X] {title} 실패(exit {r.returncode}) — 여기서 멈춥니다")
+        return r.returncode
+
+
+def breaker_confirm(title):
+    """LLM 차단기가 내려가 멈췄으면 사람에게 묻는다. True = 해제(필요시 상한 2배)하고 재개."""
+    from server.core import llm
+    b = llm.breaker_status()
+    if not b:
+        return False
+    key = b.get("key")
+    cur = llm._guard(key) if key else None
+    print(f"\n{'★' * 36}\n★ LLM 차단기 내려감 — {title} 멈춤")
+    print(f"★ 이유: {b.get('reason')}\n★ 상세: {b.get('detail')}\n★ 시각: {b.get('ts', '')}")
+    print(f"★ 오늘 누적 ≈ ${llm.today_usd():,.2f} / 상한 ${llm._guard('llm_guard_daily_usd'):,.0f}")
+    print(f"{'★' * 36}")
+    print("  [y] 상한 그대로 두고 해제 → 이 단계 재개 (진짜 폭주였고 원인을 고쳤을 때)")
+    if key:
+        print(f"  [2] {key} 를 {cur:,.0f} → {cur * 2:,.0f} 으로 올리고 재개 (상한이 너무 빡빡했을 때)")
+    print("  [n] 종료 (나중에 tools\\llm_usage.py --reset 후 --from <단계> 로 재개)")
+    try:
+        ans = input("선택 > ").strip().lower()
+    except EOFError:
+        print("(비대화형 실행 — 종료합니다)")
+        return False
+    if ans == "2" and key:
+        f = ROOT / "studio_config.json"
+        c = json.loads(f.read_text(encoding="utf-8"))
+        c[key] = int(cur * 2)
+        f.write_text(json.dumps(c, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print(f"  config {key} = {c[key]:,}")
+        ans = "y"
+    if ans == "y":
+        llm.reset_breaker()
+        print("  차단기 해제 — 재개합니다")
+        return True
+    return False
 
 
 def voicebox_alive(base):

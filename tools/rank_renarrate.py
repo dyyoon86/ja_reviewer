@@ -114,6 +114,8 @@ def main():
     txt.parent.mkdir(parents=True, exist_ok=True)
     lines, results = [], []
     for i, (orig, code) in enumerate(order, 1):
+        if _common.breaker_stop(code):
+            break
         if only and code not in only:
             continue
         d = details.get(code.upper()) or {}
@@ -158,6 +160,9 @@ def main():
         except Exception as e:
             traceback.print_exc()
             results.append(f"{rk}위 {code} — ✘ {e}")
+            if _common.breaker_stop(code):
+                txt.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                break
         txt.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     print(f"\n{'=' * 70}\n요약")

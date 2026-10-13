@@ -30,3 +30,17 @@ def load_cfg():
     except Exception:
         pass
     return c
+
+
+def breaker_stop(code=""):
+    """편별 루프의 except 에서 호출: LLM 차단기가 내려가 있으면 True(→ break). 남은 편을
+    하나하나 실패시키며 지나가지 말고 바로 멈춰서 run_ja 가 사람에게 묻게 한다."""
+    try:
+        from server.core import llm
+        b = llm.breaker_status()
+    except Exception:
+        return False
+    if not b:
+        return False
+    print(f"\n★LLM 차단기 내려감 → 배치 중단({code}): {b.get('reason')} — {b.get('detail')}", flush=True)
+    return True

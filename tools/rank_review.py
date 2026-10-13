@@ -96,6 +96,8 @@ def main():
 
     results = []
     for i, (rank, code) in enumerate(order, 1):
+        if _common.breaker_stop(code):
+            break
         print(f"\n{'=' * 70}\n({i}/{len(order)}) [{rank}위] {code}", flush=True)
         if code in skip or (only and code not in only):
             print(f"[{code}] 대상 아님 — 건너뜀")
@@ -168,6 +170,8 @@ def main():
             el = time.time() - t0
             results.append((rank, code, f"✘ 실패: {e}", el))
             traceback.print_exc()
+            if _common.breaker_stop(code):
+                break
 
     print(f"\n{'=' * 70}\n요약 (랭킹순)")
     for rank, code, note, el in sorted(results):

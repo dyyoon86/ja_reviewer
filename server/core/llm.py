@@ -105,18 +105,24 @@ def today_usd():
     return tot
 
 
-def _trip(reason, detail, log=print):
-    """차단기 내림 — 이후 모든 run_claude 가 CLI 를 부르기 전에 즉시 실패한다."""
+def _trip(reason, detail, log=print, key=None):
+    """차단기 내림 — 이후 모든 run_claude 가 CLI 를 부르기 전에 즉시 실패한다.
+    key = 걸린 config 키(run_ja 가 '2배로 올리고 계속' 할 때 쓴다). 사람 호출(비프·토스트·카톡)까지."""
     try:
         BREAKER.parent.mkdir(parents=True, exist_ok=True)
         BREAKER.write_text(json.dumps({
             "ts": __import__("datetime").datetime.now().isoformat(timespec="seconds"),
-            "reason": reason, "detail": detail}, ensure_ascii=False, indent=1), encoding="utf-8")
+            "reason": reason, "detail": detail, "key": key}, ensure_ascii=False, indent=1), encoding="utf-8")
     except Exception:
         pass
     msg = (f"★LLM 차단기 내림: {reason} — {detail}\n"
            f"   원인 확인 후 해제: .venv\\Scripts\\python.exe tools\\llm_usage.py --reset")
     log(msg)
+    try:
+        from server.core.notify import notify
+        notify("ja_reviewer LLM 차단기", f"{reason} — {detail}\n배치 멈춤. 콘솔에서 확인 필요", log=log)
+    except Exception:
+        pass
     raise LLMGuardError(msg)
 
 
@@ -151,7 +157,8 @@ def _precheck(est_in, log):
     if cap:
         spent = today_usd()
         if spent >= cap:
-            _trip("오늘 누적 한도 초과", f"환산 ${spent:,.0f} ≥ 상한 ${cap:,.0f} (config llm_guard_daily_usd)", log)
+            _trip("오늘 누적 한도 초과", f"환산 ${spent:,.0f} ≥ 상한 ${cap:,.0f} (config llm_guard_daily_usd)",
+                  log, key="llm_guard_daily_usd")
 
 
 def _postcheck(usage, tag, log):
@@ -159,10 +166,12 @@ def _postcheck(usage, tag, log):
     out = int(usage.get("output_tokens", 0))
     cap = _guard("llm_guard_call_in")
     if cap and tin > cap:
-        _trip("호출 1회 입력 폭주", f"[{tag}] 입력 {tin:,} > 상한 {cap:,.0f} (config llm_guard_call_in)", log)
+        _trip("호출 1회 입력 폭주", f"[{tag}] 입력 {tin:,} > 상한 {cap:,.0f} (config llm_guard_call_in)",
+              log, key="llm_guard_call_in")
     cap = _guard("llm_guard_call_out")
     if cap and out > cap:
-        _trip("호출 1회 출력 폭주", f"[{tag}] 출력 {out:,} > 상한 {cap:,.0f} (config llm_guard_call_out)", log)
+        _trip("호출 1회 출력 폭주", f"[{tag}] 출력 {out:,} > 상한 {cap:,.0f} (config llm_guard_call_out)",
+              log, key="llm_guard_call_out")
 
 
 def claude_args(model=None, effort=None, system=None, stream=False):
