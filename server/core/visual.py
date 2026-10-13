@@ -68,7 +68,7 @@ def _caption(frames, frame_dir, model, log, effort="low"):
             "data": base64.b64encode(path.read_bytes()).decode("ascii")}})
     try:
         out, _ = run_claude(content=content, model=model, effort=effort, log=log,
-                            tag="visual_caption", timeout=900)
+                            tag="visual_caption", timeout=300)   # 60장 실측 23초
     except Exception as e:
         log(f"※ 시각 캡션 호출 실패({type(e).__name__}: {e}) — 시각정보 없이 진행")
         return ""

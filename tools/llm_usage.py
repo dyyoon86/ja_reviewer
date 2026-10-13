@@ -6,6 +6,11 @@
   .venv\\Scripts\\python.exe tools\\llm_usage.py            # 오늘
   .venv\\Scripts\\python.exe tools\\llm_usage.py --days 7   # 최근 7일
   .venv\\Scripts\\python.exe tools\\llm_usage.py --all
+  .venv\\Scripts\\python.exe tools\\llm_usage.py --reset    # 차단기 해제(원인 확인 후)
+
+안전장치(server/core/llm.py): 오늘 누적 $·호출 1회 입력/출력·사전 추정 크기 상한을 넘으면
+`_로그/llm_breaker.json` 을 만들고 이후 호출을 전부 거부한다. 상한은 studio_config.json 의
+llm_guard_* 키로 조정(0 = 끄기).
 
 환산 $ 는 Opus급 공개 단가(입력 15 / 캐시쓰기 18.75 / 캐시읽기 1.5 / 출력 75 $/M) 기준 참고치.
 """
@@ -21,11 +26,30 @@ LOG = Path(__file__).resolve().parent.parent / "_로그" / "llm_usage.jsonl"
 PRICE = {"in": 15, "cw": 18.75, "cr": 1.5, "out": 75}
 
 
+def _guard_report(reset=False):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from server.core import llm
+    if reset:
+        print("차단기 해제됨" if llm.reset_breaker() else "차단기 안 내려가 있음")
+    b = llm.breaker_status()
+    cap = llm._guard("llm_guard_daily_usd")
+    spent = llm.today_usd()
+    print(f"안전장치: 오늘 ≈${spent:,.2f} / 상한 ${cap:,.0f}"
+          f" · 호출 1회 입력≤{llm._guard('llm_guard_call_in'):,.0f} 출력≤{llm._guard('llm_guard_call_out'):,.0f}"
+          f" · 사전추정≤{llm._guard('llm_guard_est_in'):,.0f}")
+    if b:
+        print(f"★차단기 내려가 있음({b.get('ts', '')}): {b.get('reason')} — {b.get('detail')}")
+        print("   해제: tools\\llm_usage.py --reset")
+    print()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=1)
     ap.add_argument("--all", action="store_true")
+    ap.add_argument("--reset", action="store_true", help="차단기(_로그/llm_breaker.json) 해제")
     a = ap.parse_args()
+    _guard_report(reset=a.reset)
     if not LOG.is_file():
         print(f"기록 없음: {LOG}")
         return

@@ -58,6 +58,113 @@ def _cfg():
     return _cfg_cache["data"]
 
 
+# ─── 안전장치(차단기) ─────────────────────────────────────────────────────────
+# 2026-10-12 ja26 섹션2 시각캡션 1편이 450턴 폭주(이미지 떨굼→재독 8회)로 하루 한도의 1/4을 먹었다.
+# 같은 일이 다시 나도 "한 편 손해"에서 끝나도록 호출 레이어에서 막는다. 값 0 = 해당 검사 끄기.
+BREAKER = ROOT / "_로그" / "llm_breaker.json"
+GUARD_DEFAULTS = {
+    "llm_guard_daily_usd": 150,      # 오늘 누적 환산 $ 상한(어제 파이프라인 ≈ $1,100, 수정 후 15편 예상 ≈ $75)
+    "llm_guard_call_in": 200_000,    # 호출 1회 입력(입력+캐시쓰기+캐시읽기) 상한 — 캡션 60장 실측 24K
+    "llm_guard_call_out": 30_000,    # 호출 1회 출력 상한 — 내레이션 실측 3.7K
+    "llm_guard_est_in": 150_000,     # 보내기 전 추정 입력 상한(글자/2 + 이미지×400) — 초과면 보내지도 않음
+    "llm_guard_max_turns": 2,        # claude -p --max-turns (도구 없으면 1턴이지만 이중 안전)
+}
+PRICE = {"in": 15, "cw": 18.75, "cr": 1.5, "out": 75}   # Opus 공개 단가 $/M — 환산 참고치
+
+
+class LLMGuardError(RuntimeError):
+    """안전장치가 호출을 막았다. 토큰은 쓰지 않았거나(사전) 더 이상 쓰지 않는다(차단기)."""
+
+
+def _guard(key):
+    v = _cfg().get(key, GUARD_DEFAULTS[key])
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return float(GUARD_DEFAULTS[key])
+
+
+def _usd(u):
+    return sum(int(u.get(k, 0)) * PRICE[k] / 1e6 for k in PRICE)
+
+
+def today_usd():
+    """_로그/llm_usage.jsonl 에서 오늘 누적 환산 $."""
+    if not USAGE_LOG.is_file():
+        return 0.0
+    today = __import__("datetime").date.today().isoformat()
+    tot = 0.0
+    with open(USAGE_LOG, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            if not line.startswith('{"ts": "' + today):
+                continue
+            try:
+                tot += _usd(json.loads(line))
+            except Exception:
+                pass
+    return tot
+
+
+def _trip(reason, detail, log=print):
+    """차단기 내림 — 이후 모든 run_claude 가 CLI 를 부르기 전에 즉시 실패한다."""
+    try:
+        BREAKER.parent.mkdir(parents=True, exist_ok=True)
+        BREAKER.write_text(json.dumps({
+            "ts": __import__("datetime").datetime.now().isoformat(timespec="seconds"),
+            "reason": reason, "detail": detail}, ensure_ascii=False, indent=1), encoding="utf-8")
+    except Exception:
+        pass
+    msg = (f"★LLM 차단기 내림: {reason} — {detail}\n"
+           f"   원인 확인 후 해제: .venv\\Scripts\\python.exe tools\\llm_usage.py --reset")
+    log(msg)
+    raise LLMGuardError(msg)
+
+
+def breaker_status():
+    """None(정상) 또는 차단 기록 dict."""
+    if not BREAKER.is_file():
+        return None
+    try:
+        return json.loads(BREAKER.read_text(encoding="utf-8"))
+    except Exception:
+        return {"reason": "파일 깨짐", "detail": str(BREAKER)}
+
+
+def reset_breaker():
+    try:
+        BREAKER.unlink()
+        return True
+    except FileNotFoundError:
+        return False
+
+
+def _precheck(est_in, log):
+    b = breaker_status()
+    if b:
+        raise LLMGuardError(f"★LLM 차단기 내려가 있음({b.get('ts', '')}): {b.get('reason')} — {b.get('detail')}\n"
+                            f"   해제: .venv\\Scripts\\python.exe tools\\llm_usage.py --reset")
+    cap = _guard("llm_guard_est_in")
+    if cap and est_in > cap:
+        raise LLMGuardError(f"★LLM 호출 거부(보내기 전): 추정 입력 {est_in:,} 토큰 > 상한 {cap:,.0f} "
+                            f"(config llm_guard_est_in) — 프롬프트/프레임 수를 줄여라")
+    cap = _guard("llm_guard_daily_usd")
+    if cap:
+        spent = today_usd()
+        if spent >= cap:
+            _trip("오늘 누적 한도 초과", f"환산 ${spent:,.0f} ≥ 상한 ${cap:,.0f} (config llm_guard_daily_usd)", log)
+
+
+def _postcheck(usage, tag, log):
+    tin = sum(int(usage.get(k, 0)) for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
+    out = int(usage.get("output_tokens", 0))
+    cap = _guard("llm_guard_call_in")
+    if cap and tin > cap:
+        _trip("호출 1회 입력 폭주", f"[{tag}] 입력 {tin:,} > 상한 {cap:,.0f} (config llm_guard_call_in)", log)
+    cap = _guard("llm_guard_call_out")
+    if cap and out > cap:
+        _trip("호출 1회 출력 폭주", f"[{tag}] 출력 {out:,} > 상한 {cap:,.0f} (config llm_guard_call_out)", log)
+
+
 def claude_args(model=None, effort=None, system=None, stream=False):
     """★격리 `claude -p` 인자. 2026-10-12 토큰 실측(ja26): 격리 없는 호출은 매번 22~57K 토큰
     (CLAUDE.md·훅·MCP 도구목록)이 시스템 프롬프트로 들어갔고, `--system-prompt` 로 교체하면 761 토큰.
@@ -81,6 +188,9 @@ def claude_args(model=None, effort=None, system=None, stream=False):
     effort = effort or c.get("llm_effort")
     if effort:
         a += ["--effort", str(effort)]
+    mt = int(_guard("llm_guard_max_turns"))
+    if mt > 0:
+        a += ["--max-turns", str(mt)]
     return a
 
 
@@ -114,9 +224,13 @@ def run_claude(prompt=None, *, content=None, model=None, effort=None, system=Non
         inp = json.dumps({"type": "user", "message": {"role": "user", "content": content}},
                          ensure_ascii=False) + "\n"
         pchars = sum(len(b.get("text", "")) for b in content if b.get("type") == "text")
+        n_img = sum(1 for b in content if b.get("type") == "image")
     else:
         inp = prompt
         pchars = len(prompt or "")
+        n_img = 0
+    # ★안전장치: 차단기·사전 추정 크기·오늘 누적 한도. 통과 못 하면 CLI 를 부르지 않는다.
+    _precheck(len(system or SYS_PROMPT) // 2 + pchars // 2 + n_img * 400, log)
     env = dict(os.environ, DISABLE_OMC="1")
     t0 = time.time()
     p = subprocess.run(args, input=inp, timeout=timeout, text=True, env=env,
@@ -144,6 +258,7 @@ def run_claude(prompt=None, *, content=None, model=None, effort=None, system=Non
         log(f"  LLM 토큰: 출력 {usage.get('output_tokens', 0):,} / 입력 "
             f"{usage.get('input_tokens', 0) + usage.get('cache_creation_input_tokens', 0) + usage.get('cache_read_input_tokens', 0):,}"
             f" ({secs:.0f}s)")
+    _postcheck(usage, tag, log)       # ★호출 1회 폭주면 차단기 내림(이번 결과는 버린다)
     if res.get("is_error") or not text.strip():
         err = (p.stderr or text or out[:300]).strip()
         raise RuntimeError(f"claude 응답 없음(로그인/한도 확인): {err[-240:]}")
