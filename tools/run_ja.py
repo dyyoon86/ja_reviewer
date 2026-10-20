@@ -279,6 +279,9 @@ def main():
             print("\n[!] 점검에서 걸린 편이 남아 있습니다. 위 안내대로 고친 뒤")
             print(f"    python tools\\run_ja.py --src {src} --out {out} --from precheck")
             return 1
+        # 편별 줄거리·내레이션·대사를 한 화면에서 보는 검토 페이지
+        run("3a 검토 페이지 (_검토.html)",
+            [PY, T / "review_sheet.py", "--src", src, "--out", out], allow_fail=True)
     if "precheck" in todo:
         print(f"\n{'=' * 72}\n▌3b 사전 눈검사 (번인·TTS 전)\n{'=' * 72}")
         if precheck(out, src, cfg):
