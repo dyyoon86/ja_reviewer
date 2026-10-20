@@ -46,7 +46,7 @@ BOOST = ('<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">'
 
 
 def build(rows, lines, total, has_audio=False, cap_style="punch", has_bgm=False,
-          week="9월 첫 주", prev_thumb=None, tail=5.0, pool=None, span_label=None):
+          week="9월 첫 주", prev_thumb=None, tail=5.0, pool=None, span_label=None, prev_n=None):
     rows = sorted(rows, key=lambda r: r["rank"])
     desc = sorted(rows, key=lambda r: -r["rank"])          # 12위 → 1위 (본편 재생 순서)
     top1 = rows[0] if rows else None
@@ -156,10 +156,13 @@ def build(rows, lines, total, has_audio=False, cap_style="punch", has_bgm=False,
         wash = ('      <div id="washgrid" data-layout-ignore>'
                 + "".join(f'<img src="{r["card"]}" alt="">' for r in desc) + '</div>')
 
+    # 지난주 편수 — 회차마다 다르다(ja26 14편). 모르면 숫자 없이 'TOP'만
+    prev_top = str(prev_n) if prev_n else ""
+    prev_label = f"TOP {prev_n}" if prev_n else "TOP 랭킹"
     prev_panel = (f'<img src="{prev_thumb}" alt="">' if prev_thumb else
                   '<div class="ph">'
                   '<div class="ph-run"><i></i><span>지난주 · 신작 랭킹</span></div>'
-                  '<div class="ph-big">TOP<em>12</em></div>'
+                  f'<div class="ph-big">TOP<em>{prev_top}</em></div>'
                   '<div class="ph-row"><u></u><u></u><u></u><u></u><u></u><u></u></div>'
                   '</div>')
 
@@ -232,7 +235,7 @@ def build(rows, lines, total, has_audio=False, cap_style="punch", has_bgm=False,
     end_html = blk("end", "endcard", 7,
         '        <div class="lead">\n'
         '          <div class="kicker">지난주 랭킹</div>\n'
-        '          <div class="big"><em>TOP 12</em><br>보러 가기</div>\n'
+        f'          <div class="big"><em>{prev_label}</em><br>보러 가기</div>\n'
         '          <div class="arrow" id="arrow"><i></i></div>\n'
         '        </div>\n'
         '        <div class="slot16" id="slot16" data-layout-allow-overlap>\n'

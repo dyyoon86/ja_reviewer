@@ -382,7 +382,7 @@ def cmd_build(args, cfg):
                       has_audio=(assets / "narration.wav").is_file(),
                       cap_style=args.cap_style,
                       has_bgm=(assets / "bgm.mp3").is_file(),
-                      week=args.week or week_label(), prev_thumb=prev, tail=TAIL,
+                      week=args.week or week_label(), prev_thumb=prev, tail=TAIL, prev_n=prev_count(out, args.prev_n),
                       pool=pool, span_label=span_label)
     (proj / "index.html").write_text(html, encoding="utf-8")
     print(f"\n[OK] {proj / 'index.html'}  ({len(have)}편, {dur_total:.1f}초)")
@@ -427,11 +427,28 @@ def cmd_render(args, cfg):
     return 0
 
 
+def prev_count(out, given=None):
+    """지난주 편수 — 형제 배치 폴더 ja{N-1} 의 ★최종_업로드용 순위 파일 수. 못 찾으면 None."""
+    if given:
+        return given
+    m = re.match(r"(.*?)(\d+)$", Path(out).name)
+    if not m:
+        return None
+    for d in sorted(Path(out).parent.glob(f"{m.group(1)}{int(m.group(2)) - 1}*")):
+        n = len([f for f in (d / "★최종_업로드용").glob("*.mp4") if re.match(r"\d+_\d+위_", f.name)])
+        if n:
+            print(f"지난주 편수: {n}편 ({d.name})")
+            return n
+    print("  [!] 지난주 배치 폴더를 못 찾음 — 'TOP' 숫자 없이 진행 (--prev-n 으로 지정 가능)")
+    return None
+
+
 def main():
     ap = argparse.ArgumentParser(description="섹션4 — 통합 영상 아웃트로(마무리 후킹) 제작")
     ap.add_argument("cmd", choices=["tts", "build", "render"])
     ap.add_argument("--out", help="out_dir. 생략 시 config out_dir")
     ap.add_argument("--src", help="원본 폴더(랭킹 txt 위치). 생략 시 _중간산출물/_순위/00_순위.md")
+    ap.add_argument("--prev-n", type=int, help="지난주 편수(생략 시 이전 배치 폴더 ★최종_업로드용에서 셈)")
     ap.add_argument("--prev", help="지난주 랭킹 영상 썸네일 이미지(선택)")
     ap.add_argument("--week", default=None, help="러닝헤드 회차 이름. 생략 시 오늘 기준 'N월 둘째 주'")
     ap.add_argument("--pool", type=int,
